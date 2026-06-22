@@ -1,0 +1,95 @@
+package com.company.daizhang.module.bank.controller;
+
+import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.common.result.Result;
+import com.company.daizhang.module.bank.dto.*;
+import com.company.daizhang.module.bank.service.BankService;
+import com.company.daizhang.module.bank.vo.BankReconciliationVO;
+import com.company.daizhang.module.bank.vo.BankTransactionVO;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+/**
+ * 银行对账控制器
+ */
+@Tag(name = "银行对账管理")
+@RestController
+@RequestMapping("/bank")
+@RequiredArgsConstructor
+public class BankController {
+
+    private final BankService bankService;
+
+    @Operation(summary = "导入银行流水")
+    @PostMapping("/transaction/import")
+    public Result<Integer> importTransactions(@Valid @RequestBody BankTransactionImportRequest request) {
+        Integer count = bankService.importBankTransactions(request);
+        return Result.success("成功导入" + count + "条银行流水", count);
+    }
+
+    @Operation(summary = "分页查询银行流水")
+    @GetMapping("/transaction/page")
+    public Result<PageResult<BankTransactionVO>> pageTransactions(BankTransactionQueryRequest request) {
+        PageResult<BankTransactionVO> page = bankService.pageBankTransactions(request);
+        return Result.success(page);
+    }
+
+    @Operation(summary = "根据ID查询银行流水")
+    @GetMapping("/transaction/{id}")
+    public Result<BankTransactionVO> getTransactionById(@PathVariable Long id) {
+        BankTransactionVO vo = bankService.getTransactionById(id);
+        return Result.success(vo);
+    }
+
+    @Operation(summary = "删除银行流水")
+    @DeleteMapping("/transaction/{id}")
+    public Result<Void> deleteTransaction(@PathVariable Long id) {
+        bankService.removeById(id);
+        return Result.success();
+    }
+
+    @Operation(summary = "自动匹配")
+    @PostMapping("/match/auto")
+    public Result<Integer> autoMatch(@Valid @RequestBody AutoMatchRequest request) {
+        Integer count = bankService.autoMatch(request);
+        return Result.success("自动匹配完成，共匹配" + count + "条", count);
+    }
+
+    @Operation(summary = "手动匹配")
+    @PostMapping("/match/manual")
+    public Result<Void> manualMatch(@Valid @RequestBody ManualMatchRequest request) {
+        bankService.manualMatch(request);
+        return Result.success();
+    }
+
+    @Operation(summary = "取消匹配")
+    @PostMapping("/match/cancel/{id}")
+    public Result<Void> cancelMatch(@PathVariable Long id) {
+        bankService.cancelMatch(id);
+        return Result.success();
+    }
+
+    @Operation(summary = "生成对账单")
+    @PostMapping("/reconciliation/generate")
+    public Result<BankReconciliationVO> generateReconciliation(@Valid @RequestBody ReconciliationGenerateRequest request) {
+        BankReconciliationVO vo = bankService.generateReconciliation(request);
+        return Result.success(vo);
+    }
+
+    @Operation(summary = "查询对账单详情")
+    @GetMapping("/reconciliation/{id}")
+    public Result<BankReconciliationVO> getReconciliation(@PathVariable Long id) {
+        BankReconciliationVO vo = bankService.getReconciliation(id);
+        return Result.success(vo);
+    }
+
+    @Operation(summary = "分页查询对账单")
+    @GetMapping("/reconciliation/page")
+    public Result<PageResult<BankReconciliationVO>> pageReconciliations(BankTransactionQueryRequest request) {
+        PageResult<BankReconciliationVO> page = bankService.pageReconciliations(request);
+        return Result.success(page);
+    }
+}
