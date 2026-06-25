@@ -6,6 +6,7 @@ import com.company.daizhang.module.customer.dto.ContractCreateRequest;
 import com.company.daizhang.module.customer.dto.ContractQueryRequest;
 import com.company.daizhang.module.customer.dto.ContractUpdateRequest;
 import com.company.daizhang.module.customer.entity.ServiceContract;
+import com.company.daizhang.module.customer.vo.ContractRenewalReminderVO;
 import com.company.daizhang.module.customer.vo.ContractVO;
 
 import java.util.List;
@@ -44,4 +45,11 @@ public interface ContractService extends IService<ServiceContract> {
      * 删除合同
      */
     void deleteContract(Long id);
+
+    /**
+     * 获取即将到期的合同（续费提醒）
+     *
+     * @param daysThreshold 天数阈值，查询未来daysThreshold天内到期的合同
+     */
+    List<ContractRenewalReminderVO> getRenewalReminders(Integer daysThreshold);
 }

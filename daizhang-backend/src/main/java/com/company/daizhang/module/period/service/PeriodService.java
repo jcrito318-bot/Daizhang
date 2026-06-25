@@ -28,4 +28,9 @@ public interface PeriodService {
      * 月末结转损益
      */
     void carryForward(Long accountSetId, int year, int month);
+
+    /**
+     * 年度结转
+     */
+    void carryForwardYear(Long accountSetId, Integer fromYear);
 }

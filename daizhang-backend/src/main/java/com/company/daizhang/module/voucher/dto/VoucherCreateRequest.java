@@ -30,6 +30,11 @@ public class VoucherCreateRequest {
 
     private Integer attachmentCount;
 
+    /**
+     * 草稿状态 0-正常 1-草稿
+     */
+    private Integer draftStatus;
+
     @NotEmpty(message = "凭证明细不能为空")
     @Valid
     private List<VoucherDetailRequest> details;

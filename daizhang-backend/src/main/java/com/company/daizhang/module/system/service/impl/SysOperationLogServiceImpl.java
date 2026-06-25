@@ -24,16 +24,19 @@ public class SysOperationLogServiceImpl extends ServiceImpl<SysOperationLogMappe
     @Override
     public PageResult<SysOperationLog> pageLogs(String username, String operation, String startDate, String endDate, int pageNum, int pageSize) {
         Page<SysOperationLog> page = new Page<>(pageNum, pageSize);
-        
+
+        LocalDateTime startTime = StrUtil.isNotBlank(startDate) ? parseStartDate(startDate) : null;
+        LocalDateTime endTime = StrUtil.isNotBlank(endDate) ? parseEndDate(endDate) : null;
+
         LambdaQueryWrapper<SysOperationLog> wrapper = new LambdaQueryWrapper<>();
         wrapper.like(StrUtil.isNotBlank(username), SysOperationLog::getUsername, username)
                .like(StrUtil.isNotBlank(operation), SysOperationLog::getOperation, operation)
-               .ge(StrUtil.isNotBlank(startDate), SysOperationLog::getCreateTime, parseStartDate(startDate))
-               .le(StrUtil.isNotBlank(endDate), SysOperationLog::getCreateTime, parseEndDate(endDate))
+               .ge(startTime != null, SysOperationLog::getCreateTime, startTime)
+               .le(endTime != null, SysOperationLog::getCreateTime, endTime)
                .orderByDesc(SysOperationLog::getCreateTime);
-        
+
         Page<SysOperationLog> result = this.page(page, wrapper);
-        
+
         return new PageResult<>(result.getRecords(), result.getTotal(), pageNum, pageSize);
     }
     

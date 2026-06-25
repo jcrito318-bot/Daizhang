@@ -9,6 +9,7 @@ import com.company.daizhang.module.salary.vo.SalaryItemVO;
 import com.company.daizhang.module.salary.vo.SalarySheetVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -163,5 +164,25 @@ public class SalaryController {
     public Result<Void> generateSalaryVoucher(@Valid @RequestBody SalaryVoucherGenerateRequest request) {
         salaryService.generateSalaryVoucher(request);
         return Result.success();
+    }
+
+    // ==================== 薪资导出 ====================
+
+    @Operation(summary = "导出银行代发工资文件（Excel）")
+    @GetMapping("/export/bank-disbursement")
+    public void exportBankDisbursementFile(@RequestParam Long accountSetId,
+                                           @RequestParam Integer year,
+                                           @RequestParam Integer month,
+                                           HttpServletResponse response) {
+        salaryService.exportBankDisbursementFile(accountSetId, year, month, response);
+    }
+
+    @Operation(summary = "导出工资条（Excel）")
+    @GetMapping("/export/payslip")
+    public void exportPayslips(@RequestParam Long accountSetId,
+                               @RequestParam Integer year,
+                               @RequestParam Integer month,
+                               HttpServletResponse response) {
+        salaryService.exportPayslips(accountSetId, year, month, response);
     }
 }

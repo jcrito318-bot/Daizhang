@@ -9,6 +9,7 @@ import com.company.daizhang.module.salary.entity.SalarySheet;
 import com.company.daizhang.module.salary.vo.EmployeeVO;
 import com.company.daizhang.module.salary.vo.SalaryItemVO;
 import com.company.daizhang.module.salary.vo.SalarySheetVO;
+import jakarta.servlet.http.HttpServletResponse;
 
 /**
  * 薪资服务接口
@@ -117,4 +118,16 @@ public interface SalaryService extends IService<SalarySheet> {
      * 生成薪资凭证
      */
     void generateSalaryVoucher(SalaryVoucherGenerateRequest request);
+
+    // ==================== 薪资导出 ====================
+
+    /**
+     * 导出银行代发工资文件（Excel）
+     */
+    void exportBankDisbursementFile(Long accountSetId, Integer year, Integer month, HttpServletResponse response);
+
+    /**
+     * 导出工资条（Excel）
+     */
+    void exportPayslips(Long accountSetId, Integer year, Integer month, HttpServletResponse response);
 }

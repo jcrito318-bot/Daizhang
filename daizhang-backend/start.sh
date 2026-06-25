@@ -40,27 +40,11 @@ SPRING_OPTS=""
 SPRING_OPTS="${SPRING_OPTS} --spring.profiles.active=${SPRING_PROFILES_ACTIVE:-default}"
 SPRING_OPTS="${SPRING_OPTS} --server.port=${SERVER_PORT:-${APP_PORT}}"
 
-# 如果设置了数据库相关环境变量
-if [ -n "${DB_HOST}" ]; then
-    SPRING_OPTS="${SPRING_OPTS} --spring.datasource.url=jdbc:mysql://${DB_HOST}:${DB_PORT:-3306}/daizhang?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&serverTimezone=GMT%2B8"
-fi
-if [ -n "${DB_USERNAME}" ]; then
-    SPRING_OPTS="${SPRING_OPTS} --spring.datasource.username=${DB_USERNAME}"
-fi
-if [ -n "${DB_PASSWORD}" ]; then
-    SPRING_OPTS="${SPRING_OPTS} --spring.datasource.password=${DB_PASSWORD}"
-fi
+# 数据存储目录（H2嵌入式数据库，本地文件存储，无需外部数据库服务）
+SPRING_OPTS="${SPRING_OPTS} --spring.datasource.url=jdbc:h2:file:${DATA_DIR:-./data}/daizhang;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;AUTO_SERVER=TRUE"
 
-# 如果设置了Redis相关环境变量
-if [ -n "${REDIS_HOST}" ]; then
-    SPRING_OPTS="${SPRING_OPTS} --spring.data.redis.host=${REDIS_HOST}"
-fi
-if [ -n "${REDIS_PORT}" ]; then
-    SPRING_OPTS="${SPRING_OPTS} --spring.data.redis.port=${REDIS_PORT}"
-fi
-if [ -n "${REDIS_PASSWORD}" ]; then
-    SPRING_OPTS="${SPRING_OPTS} --spring.data.redis.password=${REDIS_PASSWORD}"
-fi
+# 创建数据目录
+mkdir -p "${DATA_DIR:-./data}"
 
 # ============================================
 # 函数定义

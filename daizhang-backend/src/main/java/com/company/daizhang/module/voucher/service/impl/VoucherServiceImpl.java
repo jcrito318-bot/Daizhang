@@ -302,6 +302,12 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         if (voucher.getStatus() != 0) {
             throw new BusinessException(ErrorCode.VOUCHER_ALREADY_AUDITED);
         }
+
+        // 业务校验：制单人不能与审核人为同一人
+        Long currentUserId = SecurityUtils.getCurrentUserId();
+        if (voucher.getCreateBy() != null && voucher.getCreateBy().equals(currentUserId)) {
+            throw new BusinessException("制单人与审核人不能为同一人");
+        }
         
         // 业务校验：审核前再次验证借贷平衡
         if (voucher.getTotalDebit().compareTo(voucher.getTotalCredit()) != 0) {
@@ -309,11 +315,11 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         }
 
         voucher.setStatus(1);
-        voucher.setAuditBy(SecurityUtils.getCurrentUserId());
+        voucher.setAuditBy(currentUserId);
         voucher.setAuditTime(LocalDateTime.now());
         this.updateById(voucher);
         
-        log.info("审核凭证成功，凭证ID: {}, 凭证号: {}", id, voucher.getVoucherNo());
+        log.info("审核凭证成功，凭证ID: {}, 凭证号: {}, 审核人: {}", id, voucher.getVoucherNo(), currentUserId);
     }
 
     @Override
@@ -339,6 +345,88 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public int batchAuditVoucher(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "凭证ID列表不能为空");
+        }
+        Long currentUserId = SecurityUtils.getCurrentUserId();
+        LocalDateTime now = LocalDateTime.now();
+        int success = 0;
+        List<String> errors = new java.util.ArrayList<>();
+
+        for (Long id : ids) {
+            Voucher voucher = this.getById(id);
+            if (voucher == null) {
+                errors.add("凭证ID=" + id + " 不存在");
+                continue;
+            }
+            if (voucher.getStatus() != null && voucher.getStatus() != 0) {
+                errors.add("凭证" + voucher.getVoucherNo() + " 非未审核状态，不能审核");
+                continue;
+            }
+            // 制单人与审核人不能为同一人
+            if (voucher.getCreateBy() != null && voucher.getCreateBy().equals(currentUserId)) {
+                errors.add("凭证" + voucher.getVoucherNo() + " 制单人与审核人不能为同一人");
+                continue;
+            }
+            // 借贷平衡校验
+            if (voucher.getTotalDebit() != null && voucher.getTotalCredit() != null
+                    && voucher.getTotalDebit().compareTo(voucher.getTotalCredit()) != 0) {
+                errors.add("凭证" + voucher.getVoucherNo() + " 借贷不平衡");
+                continue;
+            }
+            voucher.setStatus(1);
+            voucher.setAuditBy(currentUserId);
+            voucher.setAuditTime(now);
+            this.updateById(voucher);
+            success++;
+        }
+
+        if (!errors.isEmpty()) {
+            log.warn("批量审核部分失败，成功{}张，失败{}张：{}", success, ids.size() - success, errors);
+        } else {
+            log.info("批量审核完成，成功{}张", success);
+        }
+        return success;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int batchUnauditVoucher(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "凭证ID列表不能为空");
+        }
+        int success = 0;
+        List<String> errors = new java.util.ArrayList<>();
+
+        for (Long id : ids) {
+            Voucher voucher = this.getById(id);
+            if (voucher == null) {
+                errors.add("凭证ID=" + id + " 不存在");
+                continue;
+            }
+            // 只有已审核且未过账的凭证才能反审核
+            if (voucher.getStatus() == null || voucher.getStatus() != 1) {
+                errors.add("凭证" + voucher.getVoucherNo() + " 非已审核状态，不能反审核");
+                continue;
+            }
+            voucher.setStatus(0);
+            voucher.setAuditBy(null);
+            voucher.setAuditTime(null);
+            this.updateById(voucher);
+            success++;
+        }
+
+        if (!errors.isEmpty()) {
+            log.warn("批量反审核部分失败，成功{}张，失败{}张：{}", success, ids.size() - success, errors);
+        } else {
+            log.info("批量反审核完成，成功{}张", success);
+        }
+        return success;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public void postVoucher(Long id) {
         Voucher voucher = this.getById(id);
         if (voucher == null) {
@@ -356,6 +444,290 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         this.updateById(voucher);
         
         log.info("过账凭证成功，凭证ID: {}, 凭证号: {}", id, voucher.getVoucherNo());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void rearrangeVoucherNo(Long accountSetId, Integer year, Integer month) {
+        // 业务校验：年度必须合理
+        if (year == null || year < 1900 || year > 2099) {
+            throw new BusinessException(ErrorCode.VOUCHER_YEAR_INVALID);
+        }
+        // 业务校验：月份必须在1-12之间
+        if (month == null || month < 1 || month > 12) {
+            throw new BusinessException(ErrorCode.VOUCHER_MONTH_INVALID);
+        }
+
+        // 查询该账套该期间所有凭证，按凭证日期和创建时间排序
+        LambdaQueryWrapper<Voucher> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Voucher::getAccountSetId, accountSetId)
+               .eq(Voucher::getYear, year)
+               .eq(Voucher::getMonth, month)
+               .orderByAsc(Voucher::getVoucherDate)
+               .orderByAsc(Voucher::getCreateTime);
+        List<Voucher> vouchers = this.list(wrapper);
+
+        // 重新生成连续的凭证号（格式: year-month-seq，如 2026-01-001）
+        int sequence = 1;
+        for (Voucher voucher : vouchers) {
+            String newVoucherNo = String.format("%d-%02d-%03d", year, month, sequence);
+            if (!newVoucherNo.equals(voucher.getVoucherNo())) {
+                voucher.setVoucherNo(newVoucherNo);
+                this.updateById(voucher);
+            }
+            sequence++;
+        }
+
+        log.info("凭证整理（断号重编）成功，账套ID: {}, 年度: {}, 月份: {}, 凭证数量: {}",
+                accountSetId, year, month, vouchers.size());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Long copyVoucher(Long id) {
+        // 查询原凭证
+        Voucher original = this.getById(id);
+        if (original == null) {
+            throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
+        }
+
+        // 查询原凭证明细
+        LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
+        detailWrapper.eq(VoucherDetail::getVoucherId, id)
+                     .orderByAsc(VoucherDetail::getSortOrder);
+        List<VoucherDetail> originalDetails = voucherDetailMapper.selectList(detailWrapper);
+
+        // 生成新凭证号
+        String newVoucherNo = generateVoucherNo(original.getAccountSetId(), original.getYear(), original.getMonth());
+
+        // 创建新凭证（status=0未审核，source=0手工录入）
+        Voucher newVoucher = new Voucher();
+        newVoucher.setAccountSetId(original.getAccountSetId());
+        newVoucher.setVoucherWordId(original.getVoucherWordId());
+        newVoucher.setVoucherNo(newVoucherNo);
+        newVoucher.setVoucherDate(original.getVoucherDate());
+        newVoucher.setYear(original.getYear());
+        newVoucher.setMonth(original.getMonth());
+        newVoucher.setTotalDebit(original.getTotalDebit());
+        newVoucher.setTotalCredit(original.getTotalCredit());
+        newVoucher.setAttachmentCount(original.getAttachmentCount());
+        newVoucher.setStatus(0);
+        newVoucher.setSource(0);
+        this.save(newVoucher);
+
+        // 复制所有明细行，金额相同
+        for (int i = 0; i < originalDetails.size(); i++) {
+            VoucherDetail originalDetail = originalDetails.get(i);
+            VoucherDetail newDetail = new VoucherDetail();
+            newDetail.setVoucherId(newVoucher.getId());
+            newDetail.setLineNo(originalDetail.getLineNo() != null ? originalDetail.getLineNo() : i + 1);
+            newDetail.setSummary(originalDetail.getSummary());
+            newDetail.setSubjectId(originalDetail.getSubjectId());
+            newDetail.setSubjectCode(originalDetail.getSubjectCode());
+            newDetail.setSubjectName(originalDetail.getSubjectName());
+            newDetail.setAuxiliaryId(originalDetail.getAuxiliaryId());
+            newDetail.setDebit(originalDetail.getDebit() != null ? originalDetail.getDebit() : BigDecimal.ZERO);
+            newDetail.setCredit(originalDetail.getCredit() != null ? originalDetail.getCredit() : BigDecimal.ZERO);
+            newDetail.setQuantity(originalDetail.getQuantity());
+            newDetail.setUnitPrice(originalDetail.getUnitPrice());
+            newDetail.setSortOrder(i + 1);
+            voucherDetailMapper.insert(newDetail);
+        }
+
+        log.info("复制凭证成功，原凭证ID: {}, 原凭证号: {}, 新凭证ID: {}, 新凭证号: {}",
+                id, original.getVoucherNo(), newVoucher.getId(), newVoucherNo);
+
+        return newVoucher.getId();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Long reverseVoucher(Long id) {
+        // 查询原凭证
+        Voucher original = this.getById(id);
+        if (original == null) {
+            throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
+        }
+
+        // 查询原凭证明细
+        LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
+        detailWrapper.eq(VoucherDetail::getVoucherId, id)
+                     .orderByAsc(VoucherDetail::getSortOrder);
+        List<VoucherDetail> originalDetails = voucherDetailMapper.selectList(detailWrapper);
+
+        // 生成新凭证号
+        String newVoucherNo = generateVoucherNo(original.getAccountSetId(), original.getYear(), original.getMonth());
+
+        // 创建新凭证（红冲凭证：借贷方金额互换，相当于取负）
+        // 互换后：新借方合计 = 原贷方合计，新贷方合计 = 原借方合计
+        Voucher newVoucher = new Voucher();
+        newVoucher.setAccountSetId(original.getAccountSetId());
+        newVoucher.setVoucherWordId(original.getVoucherWordId());
+        newVoucher.setVoucherNo(newVoucherNo);
+        newVoucher.setVoucherDate(original.getVoucherDate());
+        newVoucher.setYear(original.getYear());
+        newVoucher.setMonth(original.getMonth());
+        newVoucher.setTotalDebit(original.getTotalCredit() != null ? original.getTotalCredit() : BigDecimal.ZERO);
+        newVoucher.setTotalCredit(original.getTotalDebit() != null ? original.getTotalDebit() : BigDecimal.ZERO);
+        newVoucher.setAttachmentCount(original.getAttachmentCount());
+        newVoucher.setStatus(0);
+        newVoucher.setSource(0);
+        this.save(newVoucher);
+
+        // 复制明细行，借方和贷方金额互换，摘要加"[红冲]原凭证号"
+        String reversePrefix = "[红冲]" + original.getVoucherNo() + " ";
+        for (int i = 0; i < originalDetails.size(); i++) {
+            VoucherDetail originalDetail = originalDetails.get(i);
+            VoucherDetail newDetail = new VoucherDetail();
+            newDetail.setVoucherId(newVoucher.getId());
+            newDetail.setLineNo(originalDetail.getLineNo() != null ? originalDetail.getLineNo() : i + 1);
+            // 摘要加"[红冲]原凭证号"
+            String originalSummary = originalDetail.getSummary() != null ? originalDetail.getSummary() : "";
+            newDetail.setSummary(reversePrefix + originalSummary);
+            newDetail.setSubjectId(originalDetail.getSubjectId());
+            newDetail.setSubjectCode(originalDetail.getSubjectCode());
+            newDetail.setSubjectName(originalDetail.getSubjectName());
+            newDetail.setAuxiliaryId(originalDetail.getAuxiliaryId());
+            // 借贷方金额互换
+            BigDecimal originalDebit = originalDetail.getDebit() != null ? originalDetail.getDebit() : BigDecimal.ZERO;
+            BigDecimal originalCredit = originalDetail.getCredit() != null ? originalDetail.getCredit() : BigDecimal.ZERO;
+            newDetail.setDebit(originalCredit);
+            newDetail.setCredit(originalDebit);
+            newDetail.setQuantity(originalDetail.getQuantity());
+            newDetail.setUnitPrice(originalDetail.getUnitPrice());
+            newDetail.setSortOrder(i + 1);
+            voucherDetailMapper.insert(newDetail);
+        }
+
+        log.info("红冲凭证成功，原凭证ID: {}, 原凭证号: {}, 新凭证ID: {}, 新凭证号: {}",
+                id, original.getVoucherNo(), newVoucher.getId(), newVoucherNo);
+
+        return newVoucher.getId();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Long saveDraft(VoucherCreateRequest request) {
+        // 业务校验：凭证日期不能为空
+        if (request.getVoucherDate() == null) {
+            throw new BusinessException(ErrorCode.VOUCHER_DATE_BLANK);
+        }
+
+        // 业务校验：年度不能为空
+        if (request.getYear() == null) {
+            throw new BusinessException(ErrorCode.VOUCHER_YEAR_BLANK);
+        }
+
+        // 业务校验：月份不能为空
+        if (request.getMonth() == null) {
+            throw new BusinessException(ErrorCode.VOUCHER_MONTH_BLANK);
+        }
+
+        // 业务校验：年度必须合理（1900-2099）
+        if (request.getYear() < 1900 || request.getYear() > 2099) {
+            throw new BusinessException(ErrorCode.VOUCHER_YEAR_INVALID);
+        }
+
+        // 业务校验：月份必须在1-12之间
+        if (request.getMonth() < 1 || request.getMonth() > 12) {
+            throw new BusinessException(ErrorCode.VOUCHER_MONTH_INVALID);
+        }
+
+        // 业务校验：凭证明细不能为空
+        if (request.getDetails() == null || request.getDetails().isEmpty()) {
+            throw new BusinessException(ErrorCode.VOUCHER_DETAIL_EMPTY);
+        }
+
+        // 检查会计期间是否存在
+        AccountPeriod period = checkPeriodExists(request.getAccountSetId(), request.getYear(), request.getMonth());
+
+        // 业务校验：凭证日期必须在会计期间范围内
+        validateVoucherDateInRange(request.getVoucherDate(), period.getStartDate(), period.getEndDate());
+
+        // 检查会计期间是否已结账
+        checkPeriodNotClosed(period);
+
+        // 草稿不校验借贷平衡，仅计算借贷合计
+        BigDecimal totalDebit = BigDecimal.ZERO;
+        BigDecimal totalCredit = BigDecimal.ZERO;
+        for (VoucherDetailRequest detail : request.getDetails()) {
+            // 业务校验：科目ID不能为空
+            if (detail.getSubjectId() == null) {
+                throw new BusinessException(ErrorCode.VOUCHER_SUBJECT_ID_BLANK);
+            }
+            // 业务校验：借方金额不能为空
+            if (detail.getDebit() == null) {
+                throw new BusinessException(ErrorCode.VOUCHER_DEBIT_BLANK);
+            }
+            // 业务校验：贷方金额不能为空
+            if (detail.getCredit() == null) {
+                throw new BusinessException(ErrorCode.VOUCHER_CREDIT_BLANK);
+            }
+            // 业务校验：金额不能为负数
+            if (detail.getDebit().compareTo(BigDecimal.ZERO) < 0
+                    || detail.getCredit().compareTo(BigDecimal.ZERO) < 0) {
+                throw new BusinessException(ErrorCode.VOUCHER_AMOUNT_NEGATIVE);
+            }
+            // 业务校验：科目必须存在且启用
+            Subject subject = subjectMapper.selectById(detail.getSubjectId());
+            if (subject == null || subject.getStatus() != 1) {
+                throw new BusinessException(ErrorCode.VOUCHER_SUBJECT_INVALID);
+            }
+            totalDebit = totalDebit.add(detail.getDebit());
+            totalCredit = totalCredit.add(detail.getCredit());
+        }
+
+        // 生成凭证号
+        String voucherNo = generateVoucherNo(request.getAccountSetId(), request.getYear(), request.getMonth());
+
+        // 保存草稿凭证（status=0未审核，draftStatus=1草稿，source=0手工录入）
+        Voucher voucher = new Voucher();
+        BeanUtil.copyProperties(request, voucher);
+        voucher.setVoucherNo(voucherNo);
+        voucher.setTotalDebit(totalDebit);
+        voucher.setTotalCredit(totalCredit);
+        voucher.setStatus(0);
+        voucher.setSource(0);
+        voucher.setDraftStatus(1);
+        this.save(voucher);
+
+        // 保存凭证明细
+        saveDetails(voucher.getId(), request.getDetails());
+
+        log.info("保存凭证草稿成功，凭证号: {}, 借方合计: {}, 贷方合计: {}", voucherNo, totalDebit, totalCredit);
+
+        return voucher.getId();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void submitDraft(Long id) {
+        Voucher voucher = this.getById(id);
+        if (voucher == null) {
+            throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
+        }
+
+        // 只有草稿凭证才能提交
+        if (voucher.getDraftStatus() == null || voucher.getDraftStatus() != 1) {
+            throw new BusinessException("该凭证不是草稿，无法提交");
+        }
+
+        // 业务校验：提交前验证借贷平衡
+        if (voucher.getTotalDebit() == null || voucher.getTotalCredit() == null
+                || voucher.getTotalDebit().compareTo(voucher.getTotalCredit()) != 0) {
+            throw new BusinessException(ErrorCode.VOUCHER_BALANCE_ERROR);
+        }
+
+        // 业务校验：借贷合计不能为零
+        if (voucher.getTotalDebit().compareTo(BigDecimal.ZERO) == 0) {
+            throw new BusinessException(ErrorCode.VOUCHER_DEBIT_CREDIT_BOTH_ZERO);
+        }
+
+        // 转为正常凭证：draftStatus=0
+        voucher.setDraftStatus(0);
+        this.updateById(voucher);
+
+        log.info("提交凭证草稿成功，凭证ID: {}, 凭证号: {}", id, voucher.getVoucherNo());
     }
 
     /**
@@ -514,6 +886,14 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             detail.setLineNo(request.getLineNo() != null ? request.getLineNo() : i + 1);
             detail.setSummary(request.getSummary());
             detail.setSubjectId(request.getSubjectId());
+
+            // 根据科目ID查询科目编码和名称
+            Subject subject = subjectMapper.selectById(request.getSubjectId());
+            if (subject != null) {
+                detail.setSubjectCode(subject.getCode());
+                detail.setSubjectName(subject.getName());
+            }
+
             detail.setAuxiliaryId(request.getAuxiliaryId());
             detail.setDebit(request.getDebit() != null ? request.getDebit() : BigDecimal.ZERO);
             detail.setCredit(request.getCredit() != null ? request.getCredit() : BigDecimal.ZERO);

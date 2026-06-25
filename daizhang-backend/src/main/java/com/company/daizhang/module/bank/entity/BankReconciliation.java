@@ -1,5 +1,6 @@
 package com.company.daizhang.module.bank.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.company.daizhang.common.BaseEntity;
 import lombok.Data;
@@ -20,8 +21,10 @@ public class BankReconciliation extends BaseEntity {
 
     private String bankAccount;
 
+    @TableField("`year`")
     private Integer year;
 
+    @TableField("`month`")
     private Integer month;
 
     private BigDecimal bankBalance;

@@ -27,6 +27,10 @@ public class EmployeeVO {
 
     private String phone;
 
+    private String bankName;
+
+    private String bankAccount;
+
     private LocalDate entryDate;
 
     private Integer status;

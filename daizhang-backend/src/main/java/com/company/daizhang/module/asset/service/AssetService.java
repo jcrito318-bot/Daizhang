@@ -101,4 +101,12 @@ public interface AssetService extends IService<FixedAsset> {
      * 批量生成折旧凭证
      */
     void batchGenerateDepreciationVoucher(DepreciationRequest request);
+
+    /**
+     * 获取资产报表
+     *
+     * @param accountSetId 账套ID
+     * @param year          年度
+     */
+    AssetReportVO getAssetReport(Long accountSetId, Integer year);
 }

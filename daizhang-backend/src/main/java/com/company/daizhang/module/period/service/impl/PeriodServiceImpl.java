@@ -9,8 +9,10 @@ import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.utils.SecurityUtils;
 import com.company.daizhang.module.accountset.entity.AccountBalance;
 import com.company.daizhang.module.accountset.entity.AccountPeriod;
+import com.company.daizhang.module.accountset.entity.AccountSet;
 import com.company.daizhang.module.accountset.mapper.AccountBalanceMapper;
 import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
+import com.company.daizhang.module.accountset.mapper.AccountSetMapper;
 import com.company.daizhang.module.period.dto.TrialBalanceRequest;
 import com.company.daizhang.module.period.service.PeriodService;
 import com.company.daizhang.module.period.vo.ClosePeriodResultVO;
@@ -28,6 +30,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -47,6 +50,7 @@ public class PeriodServiceImpl implements PeriodService {
     private final SubjectMapper subjectMapper;
     private final VoucherMapper voucherMapper;
     private final VoucherDetailMapper voucherDetailMapper;
+    private final AccountSetMapper accountSetMapper;
 
     @Override
     public TrialBalanceResultVO trialBalance(TrialBalanceRequest request) {
@@ -404,5 +408,122 @@ public class PeriodServiceImpl implements PeriodService {
             throw new BusinessException(ErrorCode.PERIOD_NOT_FOUND);
         }
         return period;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void carryForwardYear(Long accountSetId, Integer fromYear) {
+        log.info("年度结转，账套ID：{}，来源年度：{}", accountSetId, fromYear);
+
+        // 参数校验
+        if (accountSetId == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "账套ID不能为空");
+        }
+        if (fromYear == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "来源年度不能为空");
+        }
+        if (fromYear < 1900 || fromYear > 2099) {
+            throw new BusinessException(ErrorCode.LEDGER_YEAR_INVALID);
+        }
+
+        // 校验账套存在
+        AccountSet accountSet = accountSetMapper.selectById(accountSetId);
+        if (accountSet == null) {
+            throw new BusinessException(ErrorCode.LEDGER_ACCOUNT_SET_NOT_FOUND);
+        }
+
+        int toYear = fromYear + 1;
+
+        // 1. 检查fromYear所有月份是否已结账
+        LambdaQueryWrapper<AccountPeriod> fromYearWrapper = new LambdaQueryWrapper<>();
+        fromYearWrapper.eq(AccountPeriod::getAccountSetId, accountSetId)
+                        .eq(AccountPeriod::getYear, fromYear);
+        List<AccountPeriod> fromYearPeriods = accountPeriodMapper.selectList(fromYearWrapper);
+
+        if (fromYearPeriods.size() < 12) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "来源年度会计期间不完整，无法结转");
+        }
+
+        for (AccountPeriod period : fromYearPeriods) {
+            if (!PeriodStatus.CLOSED.getCode().equals(period.getStatus())) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR,
+                        "来源年度" + period.getMonth() + "月未结账，无法进行年度结转");
+            }
+        }
+
+        // 2. 检查下一年度会计期间是否已存在
+        LambdaQueryWrapper<AccountPeriod> toYearWrapper = new LambdaQueryWrapper<>();
+        toYearWrapper.eq(AccountPeriod::getAccountSetId, accountSetId)
+                     .eq(AccountPeriod::getYear, toYear);
+        Long toYearCount = accountPeriodMapper.selectCount(toYearWrapper);
+        if (toYearCount > 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "下一年度会计期间已存在，无法重复结转");
+        }
+
+        // 3. 创建下一年的12个会计期间
+        for (int month = 1; month <= 12; month++) {
+            AccountPeriod newPeriod = new AccountPeriod();
+            newPeriod.setAccountSetId(accountSetId);
+            newPeriod.setYear(toYear);
+            newPeriod.setMonth(month);
+            newPeriod.setStartDate(LocalDate.of(toYear, month, 1));
+            newPeriod.setEndDate(LocalDate.of(toYear, month, 1)
+                    .plusMonths(1).minusDays(1));
+            newPeriod.setStatus(PeriodStatus.OPEN.getCode());
+            accountPeriodMapper.insert(newPeriod);
+        }
+        log.info("创建{}年度12个会计期间完成", toYear);
+
+        // 4. 复制科目体系到下一年（科目无年度字段，全账套共享，验证科目存在即可）
+        LambdaQueryWrapper<Subject> subjectWrapper = new LambdaQueryWrapper<>();
+        subjectWrapper.eq(Subject::getAccountSetId, accountSetId);
+        List<Subject> subjects = subjectMapper.selectList(subjectWrapper);
+        log.info("科目体系共{}个科目，已共享至{}年度", subjects.size(), toYear);
+
+        // 5. 将fromYear年末余额结转为下一年年初余额
+        // 查询fromYear 12月的科目余额（年末余额）
+        LambdaQueryWrapper<AccountBalance> decBalanceWrapper = new LambdaQueryWrapper<>();
+        decBalanceWrapper.eq(AccountBalance::getAccountSetId, accountSetId)
+                         .eq(AccountBalance::getYear, fromYear)
+                         .eq(AccountBalance::getMonth, 12);
+        List<AccountBalance> decBalances = accountBalanceMapper.selectList(decBalanceWrapper);
+
+        // 为下一年创建各月份的科目余额记录
+        for (Subject subject : subjects) {
+            // 找到该科目fromYear 12月的期末余额
+            AccountBalance decBalance = decBalances.stream()
+                    .filter(b -> subject.getId().equals(b.getSubjectId()))
+                    .findFirst()
+                    .orElse(null);
+
+            BigDecimal beginDebit = BigDecimal.ZERO;
+            BigDecimal beginCredit = BigDecimal.ZERO;
+            if (decBalance != null) {
+                beginDebit = decBalance.getEndDebit() != null ? decBalance.getEndDebit() : BigDecimal.ZERO;
+                beginCredit = decBalance.getEndCredit() != null ? decBalance.getEndCredit() : BigDecimal.ZERO;
+            }
+
+            // 创建下一年1月的科目余额（年初余额 = 上年年末余额）
+            for (int month = 1; month <= 12; month++) {
+                AccountBalance newBalance = new AccountBalance();
+                newBalance.setAccountSetId(accountSetId);
+                newBalance.setSubjectId(subject.getId());
+                newBalance.setYear(toYear);
+                newBalance.setMonth(month);
+                newBalance.setBeginDebit(beginDebit);
+                newBalance.setBeginCredit(beginCredit);
+                newBalance.setPeriodDebit(BigDecimal.ZERO);
+                newBalance.setPeriodCredit(BigDecimal.ZERO);
+                newBalance.setEndDebit(beginDebit);
+                newBalance.setEndCredit(beginCredit);
+                newBalance.setYearDebit(BigDecimal.ZERO);
+                newBalance.setYearCredit(BigDecimal.ZERO);
+                accountBalanceMapper.insert(newBalance);
+            }
+        }
+        log.info("结转{}年度年末余额至{}年度年初余额完成，共{}个科目", fromYear, toYear, subjects.size());
+
+        // 5. 标记年度结转完成
+        log.info("年度结转完成，账套ID：{}，从{}年度结转至{}年度", accountSetId, fromYear, toYear);
     }
 }

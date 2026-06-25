@@ -37,17 +37,12 @@ if "%SPRING_PROFILES_ACTIVE%"=="" (set SPRING_PROFILES_ACTIVE=default)
 set SPRING_OPTS=%SPRING_OPTS% --spring.profiles.active=%SPRING_PROFILES_ACTIVE%
 set SPRING_OPTS=%SPRING_OPTS% --server.port=%APP_PORT%
 
-:: 如果设置了数据库相关环境变量
-if defined DB_HOST (
-    set SPRING_OPTS=%SPRING_OPTS% --spring.datasource.url=jdbc:mysql://%DB_HOST%:%DB_PORT%daizhang?useUnicode=true^&characterEncoding=utf8^&zeroDateTimeBehavior=convertToNull^&useSSL=true^&serverTimezone=GMT%%2B8
-)
-if defined DB_USERNAME set SPRING_OPTS=%SPRING_OPTS% --spring.datasource.username=%DB_USERNAME%
-if defined DB_PASSWORD set SPRING_OPTS=%SPRING_OPTS% --spring.datasource.password=%DB_PASSWORD%
+:: 数据存储目录（H2嵌入式数据库，本地文件存储，无需外部数据库服务）
+if "%DATA_DIR%"=="" set DATA_DIR=.\data
+set SPRING_OPTS=%SPRING_OPTS% --spring.datasource.url=jdbc:h2:file:%DATA_DIR%/daizhang;MODE=MySQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;AUTO_SERVER=TRUE
 
-:: 如果设置了Redis相关环境变量
-if defined REDIS_HOST set SPRING_OPTS=%SPRING_OPTS% --spring.data.redis.host=%REDIS_HOST%
-if defined REDIS_PORT set SPRING_OPTS=%SPRING_OPTS% --spring.data.redis.port=%REDIS_PORT%
-if defined REDIS_PASSWORD set SPRING_OPTS=%SPRING_OPTS% --spring.data.redis.password=%REDIS_PASSWORD%
+:: 创建数据目录
+if not exist "%DATA_DIR%" mkdir "%DATA_DIR%"
 
 :: ============================================
 :: 检查Java环境

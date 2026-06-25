@@ -1,82 +1,37 @@
 package com.company.daizhang.module.tax.service;
 
-import com.baomidou.mybatisplus.extension.service.IService;
-import com.company.daizhang.common.result.PageResult;
-import com.company.daizhang.module.tax.dto.*;
-import com.company.daizhang.module.tax.entity.TaxCalculation;
-import com.company.daizhang.module.tax.entity.TaxDeclaration;
-import com.company.daizhang.module.tax.vo.TaxCalculationVO;
-import com.company.daizhang.module.tax.vo.TaxDeclarationVO;
+import com.company.daizhang.module.tax.vo.TaxDeadlineReminderVO;
+import com.company.daizhang.module.tax.vo.TaxDeclarationFormVO;
 
-import java.math.BigDecimal;
+import java.util.List;
 
 /**
- * 税务服务接口
+ * 申报服务接口
  */
-public interface TaxService extends IService<TaxDeclaration> {
+public interface TaxService {
 
     /**
-     * 分页查询税务申报
+     * 生成申报表
+     *
+     * @param accountSetId 账套ID
+     * @param year         年度
+     * @param month        月份
+     * @param formType     申报表类型: VAT/Surcharge/IncomeTax/PersonalTax
      */
-    PageResult<TaxDeclarationVO> pageDeclarations(TaxDeclarationQueryRequest request);
+    TaxDeclarationFormVO generateDeclarationForm(Long accountSetId, Integer year, Integer month, String formType);
 
     /**
-     * 根据ID查询税务申报
+     * 导出申报表Excel
+     *
+     * @param accountSetId 账套ID
+     * @param year         年度
+     * @param month        月份
+     * @param formType     申报表类型
      */
-    TaxDeclarationVO getDeclarationById(Long id);
+    byte[] exportDeclarationForm(Long accountSetId, Integer year, Integer month, String formType);
 
     /**
-     * 创建税务申报
+     * 获取所有账套的申报到期提醒
      */
-    void createDeclaration(TaxDeclarationCreateRequest request);
-
-    /**
-     * 更新税务申报
-     */
-    void updateDeclaration(Long id, TaxDeclarationUpdateRequest request);
-
-    /**
-     * 删除税务申报
-     */
-    void deleteDeclaration(Long id);
-
-    /**
-     * 申报税务
-     */
-    void declare(Long id);
-
-    /**
-     * 缴纳税款
-     */
-    void pay(Long id);
-
-    /**
-     * 分页查询税务计算
-     */
-    PageResult<TaxCalculationVO> pageCalculations(TaxCalculationQueryRequest request);
-
-    /**
-     * 根据ID查询税务计算
-     */
-    TaxCalculationVO getCalculationById(Long id);
-
-    /**
-     * 创建税务计算
-     */
-    void createCalculation(TaxCalculationCreateRequest request);
-
-    /**
-     * 更新税务计算
-     */
-    void updateCalculation(Long id, TaxCalculationUpdateRequest request);
-
-    /**
-     * 删除税务计算
-     */
-    void deleteCalculation(Long id);
-
-    /**
-     * 计算税额
-     */
-    BigDecimal calculateTax(Long accountSetId, Integer year, Integer month, String taxType);
+    List<TaxDeadlineReminderVO> getDeadlineReminders();
 }

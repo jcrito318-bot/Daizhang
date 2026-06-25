@@ -2,6 +2,8 @@ package com.company.daizhang.module.report.util;
 
 import com.company.daizhang.module.report.vo.BalanceSheetItem;
 import com.company.daizhang.module.report.vo.BalanceSheetVO;
+import com.company.daizhang.module.report.vo.CashFlowItemVO;
+import com.company.daizhang.module.report.vo.CashFlowStatementVO;
 import com.company.daizhang.module.report.vo.IncomeStatementItem;
 import com.company.daizhang.module.report.vo.IncomeStatementVO;
 import com.company.daizhang.module.report.vo.SubjectBalanceRow;
@@ -204,6 +206,127 @@ public class ReportExcelUtil {
             row.createCell(2).setCellValue(item.getBeginningBalance().doubleValue());
             row.createCell(3).setCellValue(item.getEndingBalance().doubleValue());
         }
+        return rowNum;
+    }
+
+    /**
+     * 导出现金流量表
+     */
+    public void exportCashFlowStatement(CashFlowStatementVO data, Integer year, Integer month, HttpServletResponse response) {
+        try (Workbook workbook = new XSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("现金流量表");
+
+            // 创建标题行样式
+            CellStyle headerStyle = workbook.createCellStyle();
+            Font headerFont = workbook.createFont();
+            headerFont.setBold(true);
+            headerStyle.setFont(headerFont);
+            headerStyle.setAlignment(HorizontalAlignment.CENTER);
+
+            // 标题
+            Row titleRow = sheet.createRow(0);
+            Cell titleCell = titleRow.createCell(0);
+            titleCell.setCellValue("现金流量表 " + year + "年" + month + "月");
+            titleCell.setCellStyle(headerStyle);
+
+            // 表头
+            Row headerRow = sheet.createRow(2);
+            headerRow.createCell(0).setCellValue("项目");
+            headerRow.createCell(1).setCellValue("行次");
+            headerRow.createCell(2).setCellValue("金额");
+            for (int i = 0; i < 3; i++) {
+                headerRow.getCell(i).setCellStyle(headerStyle);
+            }
+
+            // 数据行
+            int rowNum = 3;
+            int rowNo = 1;
+
+            // 一、经营活动产生的现金流量
+            rowNum = writeCashFlowSection(sheet, rowNum, "一、经营活动产生的现金流量", headerStyle, true);
+            if (data.getItems() != null) {
+                for (CashFlowItemVO item : data.getItems()) {
+                    if ("经营".equals(item.getCategory()) || "经营活动".equals(item.getCategory())) {
+                        Row row = sheet.createRow(rowNum++);
+                        row.createCell(0).setCellValue("    " + item.getItemName());
+                        row.createCell(1).setCellValue(rowNo++);
+                        row.createCell(2).setCellValue(item.getAmount() != null ? item.getAmount().doubleValue() : 0);
+                    }
+                }
+            }
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流入小计", data.getOperatingInflow(), rowNo++);
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流出小计", data.getOperatingOutflow(), rowNo++);
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    经营活动产生的现金流量净额", data.getOperatingNetFlow(), rowNo++);
+
+            // 二、投资活动产生的现金流量
+            rowNum = writeCashFlowSection(sheet, rowNum, "二、投资活动产生的现金流量", headerStyle, true);
+            if (data.getItems() != null) {
+                for (CashFlowItemVO item : data.getItems()) {
+                    if ("投资".equals(item.getCategory()) || "投资活动".equals(item.getCategory())) {
+                        Row row = sheet.createRow(rowNum++);
+                        row.createCell(0).setCellValue("    " + item.getItemName());
+                        row.createCell(1).setCellValue(rowNo++);
+                        row.createCell(2).setCellValue(item.getAmount() != null ? item.getAmount().doubleValue() : 0);
+                    }
+                }
+            }
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流入小计", data.getInvestingInflow(), rowNo++);
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流出小计", data.getInvestingOutflow(), rowNo++);
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    投资活动产生的现金流量净额", data.getInvestingNetFlow(), rowNo++);
+
+            // 三、筹资活动产生的现金流量
+            rowNum = writeCashFlowSection(sheet, rowNum, "三、筹资活动产生的现金流量", headerStyle, true);
+            if (data.getItems() != null) {
+                for (CashFlowItemVO item : data.getItems()) {
+                    if ("筹资".equals(item.getCategory()) || "筹资活动".equals(item.getCategory())) {
+                        Row row = sheet.createRow(rowNum++);
+                        row.createCell(0).setCellValue("    " + item.getItemName());
+                        row.createCell(1).setCellValue(rowNo++);
+                        row.createCell(2).setCellValue(item.getAmount() != null ? item.getAmount().doubleValue() : 0);
+                    }
+                }
+            }
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流入小计", data.getFinancingInflow(), rowNo++);
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流出小计", data.getFinancingOutflow(), rowNo++);
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    筹资活动产生的现金流量净额", data.getFinancingNetFlow(), rowNo++);
+
+            // 四、现金及现金等价物净增加额
+            rowNum = writeCashFlowSection(sheet, rowNum, "四、现金及现金等价物净增加额", headerStyle, true);
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金及现金等价物净增加额", data.getNetIncrease(), rowNo++);
+
+            // 设置列宽
+            sheet.setColumnWidth(0, 35 * 256);
+            sheet.setColumnWidth(1, 10 * 256);
+            sheet.setColumnWidth(2, 18 * 256);
+
+            // 输出
+            outputExcel(response, workbook, "现金流量表_" + year + "年" + month + "月.xlsx");
+        } catch (IOException e) {
+            log.error("导出现金流量表失败", e);
+            throw new RuntimeException("导出失败", e);
+        }
+    }
+
+    /**
+     * 写入现金流量表分区标题
+     */
+    private int writeCashFlowSection(Sheet sheet, int rowNum, String sectionName, CellStyle style, boolean bold) {
+        Row row = sheet.createRow(rowNum++);
+        row.createCell(0).setCellValue(sectionName);
+        if (bold) {
+            row.getCell(0).setCellStyle(style);
+        }
+        return rowNum;
+    }
+
+    /**
+     * 写入现金流量表小计/净额行
+     */
+    private int writeCashFlowSummary(Sheet sheet, int rowNum, String name, java.math.BigDecimal amount, int rowNo) {
+        Row row = sheet.createRow(rowNum++);
+        row.createCell(0).setCellValue(name);
+        row.createCell(1).setCellValue(rowNo);
+        row.createCell(2).setCellValue(amount != null ? amount.doubleValue() : 0);
         return rowNum;
     }
 

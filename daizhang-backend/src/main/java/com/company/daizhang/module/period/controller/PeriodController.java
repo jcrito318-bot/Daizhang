@@ -59,4 +59,13 @@ public class PeriodController {
         periodService.carryForward(accountSetId, year, month);
         return Result.success();
     }
+
+    @Operation(summary = "年度结转")
+    @PostMapping("/carry-forward-year")
+    @OperationLog("年度结转")
+    public Result<Void> carryForwardYear(@RequestParam Long accountSetId,
+                                         @RequestParam Integer fromYear) {
+        periodService.carryForwardYear(accountSetId, fromYear);
+        return Result.success();
+    }
 }

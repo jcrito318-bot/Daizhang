@@ -1,16 +1,25 @@
 package com.company.daizhang.module.bank.controller;
 
+import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.bank.dto.*;
 import com.company.daizhang.module.bank.service.BankService;
 import com.company.daizhang.module.bank.vo.BankReconciliationVO;
 import com.company.daizhang.module.bank.vo.BankTransactionVO;
+import com.company.daizhang.module.bank.vo.UnmatchedItemVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
 
 /**
  * 银行对账控制器
@@ -91,5 +100,45 @@ public class BankController {
     public Result<PageResult<BankReconciliationVO>> pageReconciliations(BankTransactionQueryRequest request) {
         PageResult<BankReconciliationVO> page = bankService.pageReconciliations(request);
         return Result.success(page);
+    }
+
+    @Operation(summary = "智能匹配")
+    @PostMapping("/match/smart")
+    public Result<List<Map<String, Object>>> smartMatch(@RequestParam Long accountSetId) {
+        List<Map<String, Object>> suggestions = bankService.smartMatch(accountSetId);
+        return Result.success(suggestions);
+    }
+
+    @Operation(summary = "导出余额调节表")
+    @GetMapping("/reconciliation/{id}/export")
+    public void exportReconciliation(@PathVariable Long id, HttpServletResponse response) {
+        byte[] data = bankService.exportReconciliation(id);
+        try {
+            response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            response.setCharacterEncoding("utf-8");
+            String encodedFileName = URLEncoder.encode("余额调节表.xlsx", StandardCharsets.UTF_8).replaceAll("\\+", "%20");
+            response.setHeader("Content-disposition", "attachment;filename*=utf-8''" + encodedFileName);
+            response.getOutputStream().write(data);
+            response.getOutputStream().flush();
+        } catch (IOException e) {
+            throw new BusinessException("导出余额调节表失败");
+        }
+    }
+
+    @Operation(summary = "未达账项列表")
+    @GetMapping("/unmatched-items")
+    public Result<List<UnmatchedItemVO>> listUnmatchedItems(
+            @RequestParam Long accountSetId,
+            @RequestParam(required = false) Integer year,
+            @RequestParam(required = false) Integer month) {
+        List<UnmatchedItemVO> list = bankService.listUnmatchedItems(accountSetId, year, month);
+        return Result.success(list);
+    }
+
+    @Operation(summary = "未达账项生成凭证")
+    @PostMapping("/unmatched-items/{transactionId}/generate-voucher")
+    public Result<Long> generateVoucherFromUnmatched(@PathVariable Long transactionId) {
+        Long voucherId = bankService.generateVoucherFromUnmatched(transactionId);
+        return Result.success(voucherId);
     }
 }

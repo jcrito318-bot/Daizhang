@@ -48,12 +48,12 @@
         
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-data-redis</artifactId>
+            <artifactId>spring-boot-starter-aop</artifactId>
         </dependency>
-        
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-aop</artifactId>
+            <artifactId>spring-boot-starter-cache</artifactId>
         </dependency>
 
         <!-- MyBatis Plus -->
@@ -63,10 +63,10 @@
             <version>${mybatis-plus.version}</version>
         </dependency>
 
-        <!-- MySQL -->
+        <!-- H2 嵌入式数据库（本地文件存储，无需安装数据库服务） -->
         <dependency>
-            <groupId>com.mysql</groupId>
-            <artifactId>mysql-connector-j</artifactId>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
             <scope>runtime</scope>
         </dependency>
 

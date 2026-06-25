@@ -1,5 +1,6 @@
 package com.company.daizhang.module.tax.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.company.daizhang.common.BaseEntity;
 import lombok.Data;
@@ -17,8 +18,10 @@ public class TaxCalculation extends BaseEntity {
 
     private Long accountSetId;
 
+    @TableField("`year`")
     private Integer year;
 
+    @TableField("`month`")
     private Integer month;
 
     /**

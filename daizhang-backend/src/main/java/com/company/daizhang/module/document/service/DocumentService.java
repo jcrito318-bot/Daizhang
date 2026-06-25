@@ -6,6 +6,7 @@ import com.company.daizhang.module.document.dto.DocumentCreateRequest;
 import com.company.daizhang.module.document.dto.DocumentQueryRequest;
 import com.company.daizhang.module.document.dto.DocumentUpdateRequest;
 import com.company.daizhang.module.document.entity.Document;
+import com.company.daizhang.module.document.vo.DocumentLedgerVO;
 import com.company.daizhang.module.document.vo.DocumentVO;
 
 /**
@@ -47,4 +48,21 @@ public interface DocumentService extends IService<Document> {
      * 取消关联凭证
      */
     void unlinkVoucher(Long id);
+
+    /**
+     * 获取票据台账
+     *
+     * @param accountSetId 账套ID
+     * @param year          年度
+     */
+    DocumentLedgerVO getDocumentLedger(Long accountSetId, Integer year);
+
+    /**
+     * 归档票据
+     *
+     * @param accountSetId 账套ID
+     * @param year          年度
+     * @param month         月份
+     */
+    void archiveDocuments(Long accountSetId, Integer year, Integer month);
 }

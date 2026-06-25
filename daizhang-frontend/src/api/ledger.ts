@@ -6,7 +6,7 @@ export const ledgerApi = {
   getDetailLedger(params: LedgerQueryRequest): Promise<Result<PageResult<DetailLedgerVO>>> {
     return request.get('/ledger/detail', { params })
   },
-  getGeneralLedger(params: LedgerQueryRequest): Promise<Result<PageResult<GeneralLedgerVO>>> {
+  getGeneralLedger(params: LedgerQueryRequest): Promise<Result<GeneralLedgerVO[]>> {
     return request.get('/ledger/general', { params })
   },
   getSubjectBalance(params: SubjectBalanceQueryRequest): Promise<Result<SubjectBalanceVO[]>> {

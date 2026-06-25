@@ -16,10 +16,10 @@ export const userApi = {
     return request.delete(`/system/user/${id}`)
   },
   resetPassword(id: number, newPassword: string): Promise<Result<void>> {
-    return request.post(`/system/user/${id}/reset-password`, { newPassword })
+    return request.put(`/system/user/${id}/password`, null, { params: { newPassword } })
   },
   updateStatus(id: number, status: number): Promise<Result<void>> {
-    return request.put(`/system/user/${id}/status`, { status })
+    return request.put(`/system/user/${id}/status`, null, { params: { status } })
   },
   assignRoles(id: number, roleIds: number[]): Promise<Result<void>> {
     return request.post(`/system/user/${id}/roles`, { roleIds })
@@ -43,10 +43,10 @@ export const roleApi = {
     return request.delete(`/system/role/${id}`)
   },
   assignMenus(id: number, menuIds: number[]): Promise<Result<void>> {
-    return request.post(`/system/role/${id}/menus`, { menuIds })
+    return request.put(`/system/role/${id}/menus`, { menuIds })
   },
   getMenuIds(id: number): Promise<Result<number[]>> {
-    return request.get(`/system/role/${id}/menus`)
+    return request.get(`/system/role/${id}/menu-ids`)
   }
 }
 

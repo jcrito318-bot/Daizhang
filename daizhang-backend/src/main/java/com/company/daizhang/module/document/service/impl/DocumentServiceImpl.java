@@ -14,22 +14,32 @@ import com.company.daizhang.module.document.dto.DocumentUpdateRequest;
 import com.company.daizhang.module.document.entity.Document;
 import com.company.daizhang.module.document.mapper.DocumentMapper;
 import com.company.daizhang.module.document.service.DocumentService;
+import com.company.daizhang.module.document.vo.DocumentLedgerVO;
+import com.company.daizhang.module.document.vo.DocumentMonthlyStatVO;
+import com.company.daizhang.module.document.vo.DocumentTypeStatVO;
 import com.company.daizhang.module.document.vo.DocumentVO;
 import com.company.daizhang.module.system.entity.SysUser;
 import com.company.daizhang.module.system.mapper.SysUserMapper;
 import com.company.daizhang.module.voucher.entity.Voucher;
 import com.company.daizhang.module.voucher.mapper.VoucherMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 /**
  * 票据服务实现
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> implements DocumentService {
@@ -152,6 +162,123 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
         document.setVoucherId(null);
         document.setStatus(0);
         this.updateById(document);
+    }
+
+    @Override
+    public DocumentLedgerVO getDocumentLedger(Long accountSetId, Integer year) {
+        // 查询该账套该年度所有票据
+        LocalDate startDate = LocalDate.of(year, 1, 1);
+        LocalDate endDate = LocalDate.of(year, 12, 31);
+
+        LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Document::getAccountSetId, accountSetId)
+                .ge(Document::getDocumentDate, startDate)
+                .le(Document::getDocumentDate, endDate);
+        List<Document> documents = this.list(wrapper);
+
+        DocumentLedgerVO vo = new DocumentLedgerVO();
+        vo.setTotalCount(documents.size());
+
+        // 已关联凭证数（status=1 或 status=2）
+        int linkedCount = (int) documents.stream()
+                .filter(d -> d.getStatus() != null && d.getStatus() >= 1)
+                .count();
+        vo.setLinkedCount(linkedCount);
+        vo.setUnlinkedCount(documents.size() - linkedCount);
+
+        // 金额合计
+        BigDecimal totalAmount = documents.stream()
+                .map(d -> d.getTotalAmount() != null ? d.getTotalAmount() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        vo.setTotalAmount(totalAmount);
+
+        // 按类型统计
+        Map<Integer, List<Document>> typeGroup = documents.stream()
+                .filter(d -> d.getDocumentType() != null)
+                .collect(Collectors.groupingBy(Document::getDocumentType, TreeMap::new, Collectors.toList()));
+        List<DocumentTypeStatVO> typeStats = new ArrayList<>();
+        for (Map.Entry<Integer, List<Document>> entry : typeGroup.entrySet()) {
+            DocumentTypeStatVO stat = new DocumentTypeStatVO();
+            stat.setDocumentType(entry.getKey());
+            stat.setTypeName(getDocumentTypeName(entry.getKey()));
+            stat.setCount(entry.getValue().size());
+            BigDecimal typeAmount = entry.getValue().stream()
+                    .map(d -> d.getTotalAmount() != null ? d.getTotalAmount() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            stat.setTotalAmount(typeAmount);
+            typeStats.add(stat);
+        }
+        vo.setTypeStats(typeStats);
+
+        // 按月统计
+        Map<Integer, List<Document>> monthGroup = documents.stream()
+                .filter(d -> d.getDocumentDate() != null)
+                .collect(Collectors.groupingBy(
+                        d -> d.getDocumentDate().getMonthValue(),
+                        TreeMap::new,
+                        Collectors.toList()));
+        List<DocumentMonthlyStatVO> monthlyStats = new ArrayList<>();
+        for (Map.Entry<Integer, List<Document>> entry : monthGroup.entrySet()) {
+            DocumentMonthlyStatVO stat = new DocumentMonthlyStatVO();
+            stat.setYear(year);
+            stat.setMonth(entry.getKey());
+            stat.setCount(entry.getValue().size());
+            BigDecimal monthAmount = entry.getValue().stream()
+                    .map(d -> d.getTotalAmount() != null ? d.getTotalAmount() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            stat.setTotalAmount(monthAmount);
+            monthlyStats.add(stat);
+        }
+        vo.setMonthlyStats(monthlyStats);
+
+        return vo;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void archiveDocuments(Long accountSetId, Integer year, Integer month) {
+        // 查询该账套该月所有未完成（status != 2）的票据
+        LocalDate startDate = LocalDate.of(year, month, 1);
+        LocalDate endDate = startDate.withDayOfMonth(startDate.lengthOfMonth());
+
+        LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Document::getAccountSetId, accountSetId)
+                .ge(Document::getDocumentDate, startDate)
+                .le(Document::getDocumentDate, endDate)
+                .ne(Document::getStatus, 2);
+        List<Document> documents = this.list(wrapper);
+
+        int archivedCount = 0;
+        for (Document document : documents) {
+            // 已关联凭证的票据标记为已完成（归档）
+            if (document.getStatus() != null && document.getStatus() == 1) {
+                document.setStatus(2);
+                this.updateById(document);
+                archivedCount++;
+            }
+        }
+        log.info("票据归档完成，账套ID: {}, 年月: {}-{}, 归档数量: {}", accountSetId, year, month, archivedCount);
+    }
+
+    /**
+     * 获取票据类型名称
+     */
+    private String getDocumentTypeName(Integer documentType) {
+        if (documentType == null) {
+            return "其他";
+        }
+        switch (documentType) {
+            case 1:
+                return "发票";
+            case 2:
+                return "银行回单";
+            case 3:
+                return "费用单据";
+            case 4:
+                return "其他";
+            default:
+                return "其他";
+        }
     }
 
     /**

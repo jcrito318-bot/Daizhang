@@ -158,8 +158,8 @@ async function loadData() {
   try {
     const params = { ...queryForm, startMonth: startMonth.value, endMonth: endMonth.value }
     const res = await ledgerApi.getGeneralLedger(params)
-    tableData.value = res.data.list
-    total.value = res.data.total
+    tableData.value = res.data
+    total.value = res.data.length
   } catch {
     // handled by interceptor
   } finally {

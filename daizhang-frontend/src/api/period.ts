@@ -15,17 +15,11 @@ export interface ClosePeriodResultVO {
 }
 
 export const periodApi = {
-  listPeriods(accountSetId: number) {
+  listPeriods(accountSetId: number): Promise<Result<any[]>> {
     return request.get('/accountset/period/list', { params: { accountSetId } })
   },
-  initPeriods(accountSetId: number, year: number) {
+  initPeriods(accountSetId: number, year: number): Promise<Result<void>> {
     return request.post('/accountset/period/init', null, { params: { accountSetId, year } })
-  },
-  closePeriod(accountSetId: number, year: number, month: number) {
-    return request.post('/accountset/period/close', null, { params: { accountSetId, year, month } })
-  },
-  reopenPeriod(accountSetId: number, year: number, month: number) {
-    return request.post('/accountset/period/reopen', null, { params: { accountSetId, year, month } })
   },
   trialBalance(accountSetId: number, year: number, month: number): Promise<Result<TrialBalanceResultVO>> {
     return request.get('/period/trial-balance', { params: { accountSetId, year, month } })

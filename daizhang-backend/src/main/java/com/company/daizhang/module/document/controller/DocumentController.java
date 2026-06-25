@@ -6,6 +6,7 @@ import com.company.daizhang.module.document.dto.DocumentCreateRequest;
 import com.company.daizhang.module.document.dto.DocumentQueryRequest;
 import com.company.daizhang.module.document.dto.DocumentUpdateRequest;
 import com.company.daizhang.module.document.service.DocumentService;
+import com.company.daizhang.module.document.vo.DocumentLedgerVO;
 import com.company.daizhang.module.document.vo.DocumentVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -70,6 +71,23 @@ public class DocumentController {
     @PostMapping("/{id}/unlink-voucher")
     public Result<Void> unlinkVoucher(@PathVariable Long id) {
         documentService.unlinkVoucher(id);
+        return Result.success();
+    }
+
+    @Operation(summary = "获取票据台账")
+    @GetMapping("/ledger")
+    public Result<DocumentLedgerVO> ledger(@RequestParam Long accountSetId,
+                                            @RequestParam Integer year) {
+        DocumentLedgerVO ledger = documentService.getDocumentLedger(accountSetId, year);
+        return Result.success(ledger);
+    }
+
+    @Operation(summary = "归档票据")
+    @PostMapping("/archive")
+    public Result<Void> archive(@RequestParam Long accountSetId,
+                                 @RequestParam Integer year,
+                                 @RequestParam Integer month) {
+        documentService.archiveDocuments(accountSetId, year, month);
         return Result.success();
     }
 }

@@ -40,6 +40,14 @@ public class SubjectServiceImpl extends ServiceImpl<SubjectMapper, Subject> impl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void initDefaultSubjects(Long accountSetId, String accountingStandard) {
+        // 检查是否已存在科目，避免重复初始化
+        long existingCount = this.count(new LambdaQueryWrapper<Subject>()
+                .eq(Subject::getAccountSetId, accountSetId));
+        if (existingCount > 0) {
+            log.info("账套ID: {} 的科目已存在，跳过初始化", accountSetId);
+            return;
+        }
+
         List<Subject> subjects = new ArrayList<>();
         
         // 资产类

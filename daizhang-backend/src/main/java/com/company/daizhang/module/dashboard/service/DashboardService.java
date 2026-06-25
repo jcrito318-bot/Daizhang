@@ -1,14 +1,14 @@
 package com.company.daizhang.module.dashboard.service;
 
-import com.company.daizhang.module.dashboard.vo.DashboardStatsVO;
+import com.company.daizhang.module.dashboard.vo.DashboardVO;
 
 /**
- * 仪表盘服务接口
+ * 代账公司运营看板服务
  */
 public interface DashboardService {
-    
+
     /**
-     * 获取统计数据
+     * 获取运营看板总览（含统计、客户摘要、待办看板）
      */
-    DashboardStatsVO getStats(Long accountSetId);
+    DashboardVO getDashboard();
 }

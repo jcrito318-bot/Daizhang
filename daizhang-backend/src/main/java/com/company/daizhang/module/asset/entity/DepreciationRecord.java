@@ -1,5 +1,6 @@
 package com.company.daizhang.module.asset.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.company.daizhang.common.BaseEntity;
 import lombok.Data;
@@ -38,11 +39,13 @@ public class DepreciationRecord extends BaseEntity {
     /**
      * 年度
      */
+    @TableField("`year`")
     private Integer year;
 
     /**
      * 月份
      */
+    @TableField("`month`")
     private Integer month;
 
     /**

@@ -1,5 +1,6 @@
 package com.company.daizhang.module.voucher.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.company.daizhang.common.BaseEntity;
 import lombok.Data;
@@ -25,8 +26,10 @@ public class Voucher extends BaseEntity {
 
     private LocalDate voucherDate;
 
+    @TableField("`year`")
     private Integer year;
 
+    @TableField("`month`")
     private Integer month;
 
     private BigDecimal totalDebit;
@@ -52,4 +55,9 @@ public class Voucher extends BaseEntity {
      * 来源 0-手工录入
      */
     private Integer source;
+
+    /**
+     * 草稿状态 0-正常 1-草稿
+     */
+    private Integer draftStatus;
 }

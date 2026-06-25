@@ -1,5 +1,6 @@
 package com.company.daizhang.module.subject.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.company.daizhang.common.BaseEntity;
 import lombok.Data;
@@ -12,17 +13,18 @@ import lombok.EqualsAndHashCode;
 @EqualsAndHashCode(callSuper = true)
 @TableName("acc_subject")
 public class Subject extends BaseEntity {
-    
+
     private Long accountSetId;
-    
+
     private String code;
-    
+
     private String name;
-    
+
     private String category;
-    
+
     private Long parentId;
-    
+
+    @TableField("`level`")
     private Integer level;
     
     private Integer balanceDirection;

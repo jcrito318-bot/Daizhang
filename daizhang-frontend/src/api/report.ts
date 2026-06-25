@@ -8,5 +8,17 @@ export const reportApi = {
   },
   getIncomeStatement(params: ReportQueryRequest): Promise<Result<IncomeStatementVO>> {
     return request.get('/report/income-statement', { params })
+  },
+  getSubjectBalanceTable(params: ReportQueryRequest): Promise<Result<unknown>> {
+    return request.get('/report/subject-balance-table', { params })
+  },
+  exportBalanceSheet(params: ReportQueryRequest): Promise<Blob> {
+    return request.get('/report/balance-sheet/export', { params, responseType: 'blob' })
+  },
+  exportIncomeStatement(params: ReportQueryRequest): Promise<Blob> {
+    return request.get('/report/income-statement/export', { params, responseType: 'blob' })
+  },
+  exportSubjectBalanceTable(params: ReportQueryRequest): Promise<Blob> {
+    return request.get('/report/subject-balance-table/export', { params, responseType: 'blob' })
   }
 }

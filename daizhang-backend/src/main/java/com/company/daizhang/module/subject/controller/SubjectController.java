@@ -1,17 +1,25 @@
 package com.company.daizhang.module.subject.controller;
 
 import com.company.daizhang.common.result.Result;
+import com.company.daizhang.common.vo.ImportResultVO;
 import com.company.daizhang.module.subject.dto.SubjectCreateRequest;
 import com.company.daizhang.module.subject.dto.SubjectUpdateRequest;
+import com.company.daizhang.module.subject.service.SubjectImportService;
 import com.company.daizhang.module.subject.service.SubjectService;
 import com.company.daizhang.module.subject.vo.SubjectVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
@@ -25,6 +33,7 @@ import java.util.List;
 public class SubjectController {
 
     private final SubjectService subjectService;
+    private final SubjectImportService subjectImportService;
 
     /**
      * 查询科目树
@@ -92,6 +101,27 @@ public class SubjectController {
     }
 
     /**
+     * 批量导入科目
+     */
+    @PostMapping("/import")
+    @Operation(summary = "批量导入科目", description = "从Excel文件批量导入科目")
+    public Result<ImportResultVO> importSubjects(@RequestParam Long accountSetId,
+                                                  @RequestParam("file") MultipartFile file) {
+        ImportResultVO result = subjectImportService.importSubjects(accountSetId, file);
+        return Result.success(result);
+    }
+
+    /**
+     * 下载科目导入模板
+     */
+    @GetMapping("/import/template")
+    @Operation(summary = "下载科目导入模板", description = "下载科目Excel导入模板")
+    public void downloadTemplate(HttpServletResponse response) throws IOException {
+        byte[] data = subjectImportService.downloadTemplate();
+        writeExcelResponse(response, data, "科目导入模板.xlsx");
+    }
+
+    /**
      * 构建树形结构
      */
     private List<SubjectVO> buildTree(List<SubjectVO> subjects, Long parentId) {
@@ -102,5 +132,19 @@ public class SubjectController {
                     subject.setChildren(children);
                 })
                 .collect(java.util.stream.Collectors.toList());
+    }
+
+    /**
+     * 输出Excel文件到响应
+     */
+    private void writeExcelResponse(HttpServletResponse response, byte[] data, String fileName) throws IOException {
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setCharacterEncoding("utf-8");
+        String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replaceAll("\\+", "%20");
+        response.setHeader("Content-disposition", "attachment;filename*=utf-8''" + encodedFileName);
+        try (OutputStream os = response.getOutputStream()) {
+            os.write(data);
+            os.flush();
+        }
     }
 }

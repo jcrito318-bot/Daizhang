@@ -75,6 +75,39 @@ public class GlmAiService {
     }
 
     /**
+     * 票据OCR识别并返回结构化JSON结果
+     * 自动识别票据类型，并清理返回结果中的非JSON内容（如markdown代码块标记）
+     * @param file 票据图片文件
+     * @return 结构化JSON字符串
+     */
+    public String recognizeInvoiceAndParseResult(MultipartFile file) throws IOException {
+        String result = recognizeInvoice(file, null);
+        return cleanJsonResult(result);
+    }
+
+    /**
+     * 清理GLM返回结果中的非JSON内容（如markdown代码块标记）
+     */
+    private String cleanJsonResult(String result) {
+        if (result == null || result.isEmpty()) {
+            return result;
+        }
+        String trimmed = result.trim();
+        // 去除markdown代码块标记 ```json ... ``` 或 ``` ... ```
+        if (trimmed.startsWith("```")) {
+            int firstNewline = trimmed.indexOf('\n');
+            if (firstNewline > 0) {
+                trimmed = trimmed.substring(firstNewline + 1);
+            }
+            if (trimmed.endsWith("```")) {
+                trimmed = trimmed.substring(0, trimmed.length() - 3);
+            }
+            trimmed = trimmed.trim();
+        }
+        return trimmed;
+    }
+
+    /**
      * 获取票据类型名称
      */
     private String getInvoiceTypeName(Integer invoiceType) {

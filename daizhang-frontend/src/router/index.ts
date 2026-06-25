@@ -47,7 +47,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'voucher/:id',
         name: 'VoucherDetail',
-        component: () => import('@/views/voucher/VoucherCreate.vue'),
+        component: () => import('@/views/voucher/VoucherDetail.vue'),
         meta: { title: '凭证详情' }
       },
       {

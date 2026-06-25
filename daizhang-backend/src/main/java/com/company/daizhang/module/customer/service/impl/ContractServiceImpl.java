@@ -15,11 +15,15 @@ import com.company.daizhang.module.customer.entity.ServiceContract;
 import com.company.daizhang.module.customer.mapper.CustomerMapper;
 import com.company.daizhang.module.customer.mapper.ServiceContractMapper;
 import com.company.daizhang.module.customer.service.ContractService;
+import com.company.daizhang.module.customer.vo.ContractRenewalReminderVO;
 import com.company.daizhang.module.customer.vo.ContractVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -119,6 +123,55 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
         }
 
         this.removeById(id);
+    }
+
+    @Override
+    public List<ContractRenewalReminderVO> getRenewalReminders(Integer daysThreshold) {
+        if (daysThreshold == null || daysThreshold <= 0) {
+            daysThreshold = 30;
+        }
+
+        LocalDate today = LocalDate.now();
+        LocalDate thresholdDate = today.plusDays(daysThreshold);
+
+        // 查询到期日在今天到阈值日期之间的合同（包含已过期的）
+        LambdaQueryWrapper<ServiceContract> wrapper = new LambdaQueryWrapper<>();
+        wrapper.isNotNull(ServiceContract::getEndDate)
+               .le(ServiceContract::getEndDate, thresholdDate)
+               .orderByAsc(ServiceContract::getEndDate);
+        List<ServiceContract> contracts = this.list(wrapper);
+
+        List<ContractRenewalReminderVO> reminders = new ArrayList<>();
+        for (ServiceContract contract : contracts) {
+            ContractRenewalReminderVO vo = new ContractRenewalReminderVO();
+            vo.setContractId(contract.getId());
+            vo.setCustomerId(contract.getCustomerId());
+            vo.setContractName(contract.getContractName());
+            vo.setEndDate(contract.getEndDate());
+            vo.setContractAmount(contract.getAmount());
+
+            // 填充客户名称
+            if (contract.getCustomerId() != null) {
+                Customer customer = customerMapper.selectById(contract.getCustomerId());
+                if (customer != null) {
+                    vo.setCustomerName(customer.getCustomerName());
+                }
+            }
+
+            // 计算剩余天数
+            int daysRemaining = (int) java.time.temporal.ChronoUnit.DAYS.between(today, contract.getEndDate());
+            vo.setDaysRemaining(daysRemaining);
+
+            // 状态：已到期/即将到期
+            vo.setStatus(daysRemaining < 0 ? "已到期" : "即将到期");
+
+            reminders.add(vo);
+        }
+
+        // 按剩余天数升序排序（已到期在前）
+        reminders.sort(Comparator.comparingInt(ContractRenewalReminderVO::getDaysRemaining));
+
+        return reminders;
     }
 
     private ContractVO convertToVO(ServiceContract contract) {

@@ -16,13 +16,19 @@ import com.company.daizhang.module.asset.mapper.AssetCategoryMapper;
 import com.company.daizhang.module.asset.mapper.DepreciationRecordMapper;
 import com.company.daizhang.module.asset.mapper.FixedAssetMapper;
 import com.company.daizhang.module.asset.service.AssetService;
+import com.company.daizhang.module.asset.vo.AssetCategoryStatVO;
 import com.company.daizhang.module.asset.vo.AssetCategoryVO;
+import com.company.daizhang.module.asset.vo.AssetDepreciationMonthlyVO;
+import com.company.daizhang.module.asset.vo.AssetReportVO;
 import com.company.daizhang.module.asset.vo.DepreciationRecordVO;
 import com.company.daizhang.module.asset.vo.FixedAssetVO;
+import com.company.daizhang.module.subject.entity.Subject;
+import com.company.daizhang.module.subject.mapper.SubjectMapper;
 import com.company.daizhang.module.voucher.dto.VoucherCreateRequest;
 import com.company.daizhang.module.voucher.dto.VoucherDetailRequest;
 import com.company.daizhang.module.voucher.service.VoucherService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,6 +43,7 @@ import java.util.stream.Collectors;
 /**
  * 资产服务实现
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> implements AssetService {
@@ -44,6 +51,7 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
     private final AssetCategoryMapper assetCategoryMapper;
     private final DepreciationRecordMapper depreciationRecordMapper;
     private final VoucherService voucherService;
+    private final SubjectMapper subjectMapper;
 
     // ==================== 资产分类管理 ====================
 
@@ -380,6 +388,10 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "该折旧记录已生成凭证");
         }
 
+        // 动态查询折旧相关科目
+        Long depreciationExpenseSubjectId = getDepreciationExpenseSubjectId(record.getAccountSetId());
+        Long accumulatedDepreciationSubjectId = getAccumulatedDepreciationSubjectId(record.getAccountSetId());
+
         // 创建凭证
         VoucherCreateRequest voucherRequest = new VoucherCreateRequest();
         voucherRequest.setAccountSetId(record.getAccountSetId());
@@ -393,7 +405,7 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         // 借方：管理费用-折旧费
         VoucherDetailRequest debitDetail = new VoucherDetailRequest();
         debitDetail.setSummary("计提折旧-" + record.getAssetName());
-        debitDetail.setSubjectId(1L); // 需要查询科目ID，这里简化处理
+        debitDetail.setSubjectId(depreciationExpenseSubjectId);
         debitDetail.setDebit(record.getDepreciationAmount());
         debitDetail.setCredit(BigDecimal.ZERO);
         debitDetail.setLineNo(1);
@@ -402,7 +414,7 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         // 贷方：累计折旧
         VoucherDetailRequest creditDetail = new VoucherDetailRequest();
         creditDetail.setSummary("计提折旧-" + record.getAssetName());
-        creditDetail.setSubjectId(2L); // 需要查询科目ID，这里简化处理
+        creditDetail.setSubjectId(accumulatedDepreciationSubjectId);
         creditDetail.setDebit(BigDecimal.ZERO);
         creditDetail.setCredit(record.getDepreciationAmount());
         creditDetail.setLineNo(2);
@@ -433,7 +445,147 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         }
     }
 
+    @Override
+    public AssetReportVO getAssetReport(Long accountSetId, Integer year) {
+        // 查询该账套所有资产
+        LambdaQueryWrapper<FixedAsset> assetWrapper = new LambdaQueryWrapper<>();
+        assetWrapper.eq(FixedAsset::getAccountSetId, accountSetId);
+        List<FixedAsset> assets = this.list(assetWrapper);
+
+        AssetReportVO vo = new AssetReportVO();
+        vo.setTotalAssets(assets.size());
+
+        // 原值合计、累计折旧、净值合计
+        BigDecimal totalOriginalValue = assets.stream()
+                .map(a -> a.getPurchaseAmount() != null ? a.getPurchaseAmount() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalAccumulatedDepreciation = assets.stream()
+                .map(a -> a.getAccumulatedDeprecation() != null ? a.getAccumulatedDeprecation() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalNetValue = assets.stream()
+                .map(a -> a.getNetValue() != null ? a.getNetValue() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        vo.setTotalOriginalValue(totalOriginalValue);
+        vo.setTotalAccumulatedDepreciation(totalAccumulatedDepreciation);
+        vo.setTotalNetValue(totalNetValue);
+
+        // 按分类统计
+        Map<Long, List<FixedAsset>> categoryGroup = assets.stream()
+                .filter(a -> a.getCategoryId() != null)
+                .collect(Collectors.groupingBy(FixedAsset::getCategoryId));
+        List<AssetCategoryStatVO> categoryStats = new ArrayList<>();
+        for (Map.Entry<Long, List<FixedAsset>> entry : categoryGroup.entrySet()) {
+            AssetCategoryStatVO stat = new AssetCategoryStatVO();
+            stat.setCategoryId(entry.getKey());
+            // 分类名称取第一条资产的分类名
+            String categoryName = entry.getValue().stream()
+                    .map(FixedAsset::getCategoryName)
+                    .filter(StrUtil::isNotBlank)
+                    .findFirst()
+                    .orElse(null);
+            if (StrUtil.isBlank(categoryName)) {
+                AssetCategory category = assetCategoryMapper.selectById(entry.getKey());
+                if (category != null) {
+                    categoryName = category.getCategoryName();
+                }
+            }
+            stat.setCategoryName(categoryName);
+            stat.setAssetCount(entry.getValue().size());
+            stat.setOriginalValue(entry.getValue().stream()
+                    .map(a -> a.getPurchaseAmount() != null ? a.getPurchaseAmount() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add));
+            stat.setAccumulatedDepreciation(entry.getValue().stream()
+                    .map(a -> a.getAccumulatedDeprecation() != null ? a.getAccumulatedDeprecation() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add));
+            stat.setNetValue(entry.getValue().stream()
+                    .map(a -> a.getNetValue() != null ? a.getNetValue() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add));
+            categoryStats.add(stat);
+        }
+        vo.setCategoryStats(categoryStats);
+
+        // 月折旧趋势（该年度各月折旧）
+        LambdaQueryWrapper<DepreciationRecord> depWrapper = new LambdaQueryWrapper<>();
+        depWrapper.eq(DepreciationRecord::getAccountSetId, accountSetId)
+                .eq(DepreciationRecord::getYear, year)
+                .orderByAsc(DepreciationRecord::getMonth);
+        List<DepreciationRecord> depRecords = depreciationRecordMapper.selectList(depWrapper);
+
+        Map<Integer, List<DepreciationRecord>> monthGroup = depRecords.stream()
+                .filter(r -> r.getMonth() != null)
+                .collect(Collectors.groupingBy(DepreciationRecord::getMonth));
+        List<AssetDepreciationMonthlyVO> monthlyDepreciations = new ArrayList<>();
+        for (int m = 1; m <= 12; m++) {
+            List<DepreciationRecord> monthRecords = monthGroup.get(m);
+            if (monthRecords == null || monthRecords.isEmpty()) {
+                continue;
+            }
+            AssetDepreciationMonthlyVO monthly = new AssetDepreciationMonthlyVO();
+            monthly.setYear(year);
+            monthly.setMonth(m);
+            monthly.setDepreciationAmount(monthRecords.stream()
+                    .map(r -> r.getDepreciationAmount() != null ? r.getDepreciationAmount() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add));
+            // 累计折旧取该月最后一条记录的累计折旧
+            BigDecimal lastAccumulated = monthRecords.stream()
+                    .map(r -> r.getAccumulatedDepreciation() != null ? r.getAccumulatedDepreciation() : BigDecimal.ZERO)
+                    .reduce((a, b) -> b)
+                    .orElse(BigDecimal.ZERO);
+            monthly.setAccumulatedDepreciation(lastAccumulated);
+            monthlyDepreciations.add(monthly);
+        }
+        vo.setMonthlyDepreciations(monthlyDepreciations);
+
+        return vo;
+    }
+
     // ==================== 辅助方法 ====================
+
+    /**
+     * 查询累计折旧科目ID（编码1602：固定资产累计折旧）
+     * 查不到时使用默认值1L并记录警告日志
+     */
+    private Long getAccumulatedDepreciationSubjectId(Long accountSetId) {
+        return getSubjectIdByCode(accountSetId, "1602", 1L, "累计折旧");
+    }
+
+    /**
+     * 查询折旧费用科目ID（编码5301或6602：管理费用-折旧）
+     * 查不到时使用默认值2L并记录警告日志
+     */
+    private Long getDepreciationExpenseSubjectId(Long accountSetId) {
+        // 优先查询5301，再查询6602
+        Long subjectId = getSubjectIdByCode(accountSetId, "5301", null, "折旧费用");
+        if (subjectId == null) {
+            subjectId = getSubjectIdByCode(accountSetId, "6602", 2L, "折旧费用");
+        }
+        return subjectId;
+    }
+
+    /**
+     * 通过科目编码查询科目ID
+     *
+     * @param accountSetId 账套ID
+     * @param code         科目编码
+     * @param defaultId    查不到时的默认ID（可为null，表示不使用默认值继续向上返回）
+     * @param subjectName  科目名称（用于日志）
+     * @return 科目ID
+     */
+    private Long getSubjectIdByCode(Long accountSetId, String code, Long defaultId, String subjectName) {
+        Subject subject = subjectMapper.selectOne(new LambdaQueryWrapper<Subject>()
+                .eq(Subject::getAccountSetId, accountSetId)
+                .eq(Subject::getCode, code));
+        if (subject != null) {
+            return subject.getId();
+        }
+        if (defaultId != null) {
+            log.warn("未查询到{}科目（编码: {}），账套ID: {}，使用默认科目ID: {}",
+                    subjectName, code, accountSetId, defaultId);
+            return defaultId;
+        }
+        return null;
+    }
 
     /**
      * 计算月折旧额

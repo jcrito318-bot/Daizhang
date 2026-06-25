@@ -28,14 +28,16 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
+                .headers(headers -> headers.frameOptions(frame -> frame.disable()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
-                                "/api/auth/**",
-                                "/api/doc.html/**",
-                                "/api/swagger-resources/**",
-                                "/api/v3/api-docs/**",
-                                "/api/druid/**"
+                                "/auth/**",
+                                "/doc.html/**",
+                                "/swagger-resources/**",
+                                "/v3/api-docs/**",
+                                "/druid/**",
+                                "/h2-console/**"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )

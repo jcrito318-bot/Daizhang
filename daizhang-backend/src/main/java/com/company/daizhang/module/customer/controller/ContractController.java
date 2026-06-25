@@ -6,6 +6,7 @@ import com.company.daizhang.module.customer.dto.ContractCreateRequest;
 import com.company.daizhang.module.customer.dto.ContractQueryRequest;
 import com.company.daizhang.module.customer.dto.ContractUpdateRequest;
 import com.company.daizhang.module.customer.service.ContractService;
+import com.company.daizhang.module.customer.vo.ContractRenewalReminderVO;
 import com.company.daizhang.module.customer.vo.ContractVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -66,5 +67,13 @@ public class ContractController {
     public Result<Void> delete(@PathVariable Long id) {
         contractService.deleteContract(id);
         return Result.success();
+    }
+
+    @Operation(summary = "合同续费提醒")
+    @GetMapping("/renewal-reminder")
+    public Result<List<ContractRenewalReminderVO>> renewalReminder(
+            @RequestParam(defaultValue = "30") Integer daysThreshold) {
+        List<ContractRenewalReminderVO> reminders = contractService.getRenewalReminders(daysThreshold);
+        return Result.success(reminders);
     }
 }

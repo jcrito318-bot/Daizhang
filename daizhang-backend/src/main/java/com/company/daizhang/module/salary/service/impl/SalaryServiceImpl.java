@@ -15,6 +15,7 @@ import com.company.daizhang.module.salary.mapper.EmployeeMapper;
 import com.company.daizhang.module.salary.mapper.SalaryItemMapper;
 import com.company.daizhang.module.salary.mapper.SalarySheetMapper;
 import com.company.daizhang.module.salary.service.SalaryService;
+import com.company.daizhang.module.salary.util.SalaryExportUtil;
 import com.company.daizhang.module.salary.vo.EmployeeVO;
 import com.company.daizhang.module.salary.vo.SalaryItemVO;
 import com.company.daizhang.module.salary.vo.SalarySheetVO;
@@ -27,6 +28,7 @@ import com.company.daizhang.module.voucher.dto.VoucherDetailRequest;
 import com.company.daizhang.module.voucher.entity.VoucherWord;
 import com.company.daizhang.module.voucher.mapper.VoucherWordMapper;
 import com.company.daizhang.module.voucher.service.VoucherService;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,6 +38,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -52,6 +55,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
     private final SysUserMapper sysUserMapper;
     private final VoucherService voucherService;
     private final VoucherWordMapper voucherWordMapper;
+    private final SalaryExportUtil salaryExportUtil;
 
     // ==================== 员工管理 ====================
 
@@ -717,5 +721,50 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         }
 
         return vo;
+    }
+
+    // ==================== 薪资导出 ====================
+
+    @Override
+    public void exportBankDisbursementFile(Long accountSetId, Integer year, Integer month, HttpServletResponse response) {
+        List<SalarySheet> sheets = listSalarySheetsByPeriod(accountSetId, year, month);
+        Map<Long, Employee> employeeMap = loadEmployeeMap(accountSetId);
+        salaryExportUtil.exportBankDisbursementFile(sheets, employeeMap, year, month, response);
+    }
+
+    @Override
+    public void exportPayslips(Long accountSetId, Integer year, Integer month, HttpServletResponse response) {
+        List<SalarySheet> sheets = listSalarySheetsByPeriod(accountSetId, year, month);
+        Map<Long, Employee> employeeMap = loadEmployeeMap(accountSetId);
+        salaryExportUtil.exportPayslips(sheets, employeeMap, year, month, response);
+    }
+
+    /**
+     * 查询某期间全部薪资表
+     */
+    private List<SalarySheet> listSalarySheetsByPeriod(Long accountSetId, Integer year, Integer month) {
+        if (accountSetId == null || year == null || month == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "账套ID、年、月不能为空");
+        }
+        LambdaQueryWrapper<SalarySheet> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(SalarySheet::getAccountSetId, accountSetId)
+                .eq(SalarySheet::getYear, year)
+                .eq(SalarySheet::getMonth, month)
+                .orderByAsc(SalarySheet::getEmployeeId);
+        List<SalarySheet> sheets = salarySheetMapper.selectList(wrapper);
+        if (sheets.isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "该期间无薪资数据");
+        }
+        return sheets;
+    }
+
+    /**
+     * 加载账套下全部员工映射
+     */
+    private Map<Long, Employee> loadEmployeeMap(Long accountSetId) {
+        LambdaQueryWrapper<Employee> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Employee::getAccountSetId, accountSetId);
+        List<Employee> employees = employeeMapper.selectList(wrapper);
+        return employees.stream().collect(Collectors.toMap(Employee::getId, e -> e, (x, y) -> x));
     }
 }

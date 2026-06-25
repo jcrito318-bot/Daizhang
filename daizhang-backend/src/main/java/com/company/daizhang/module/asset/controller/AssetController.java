@@ -148,4 +148,12 @@ public class AssetController {
         assetService.batchGenerateDepreciationVoucher(request);
         return Result.success();
     }
+
+    @Operation(summary = "获取资产报表")
+    @GetMapping("/report")
+    public Result<AssetReportVO> report(@RequestParam Long accountSetId,
+                                        @RequestParam Integer year) {
+        AssetReportVO report = assetService.getAssetReport(accountSetId, year);
+        return Result.success(report);
+    }
 }

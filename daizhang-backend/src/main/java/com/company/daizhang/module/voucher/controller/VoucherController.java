@@ -2,20 +2,31 @@ package com.company.daizhang.module.voucher.controller;
 
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
+import com.company.daizhang.common.vo.ImportResultVO;
 import com.company.daizhang.module.voucher.dto.VoucherCreateRequest;
 import com.company.daizhang.module.voucher.dto.VoucherQueryRequest;
 import com.company.daizhang.module.voucher.dto.VoucherUpdateRequest;
+import com.company.daizhang.module.voucher.service.VoucherImportService;
 import com.company.daizhang.module.voucher.service.VoucherService;
 import com.company.daizhang.module.voucher.vo.VoucherVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 
 /**
  * 凭证管理控制器
  */
+@Slf4j
 @Tag(name = "凭证管理")
 @RestController
 @RequestMapping("/voucher")
@@ -23,6 +34,7 @@ import org.springframework.web.bind.annotation.*;
 public class VoucherController {
 
     private final VoucherService voucherService;
+    private final VoucherImportService voucherImportService;
 
     @Operation(summary = "分页查询凭证")
     @GetMapping("/page")
@@ -73,10 +85,90 @@ public class VoucherController {
         return Result.success();
     }
 
+    @Operation(summary = "批量审核凭证")
+    @PostMapping("/batch-audit")
+    public Result<Integer> batchAudit(@RequestBody java.util.List<Long> ids) {
+        int success = voucherService.batchAuditVoucher(ids);
+        return Result.success(success);
+    }
+
+    @Operation(summary = "批量反审核凭证")
+    @PostMapping("/batch-unaudit")
+    public Result<Integer> batchUnaudit(@RequestBody java.util.List<Long> ids) {
+        int success = voucherService.batchUnauditVoucher(ids);
+        return Result.success(success);
+    }
+
     @Operation(summary = "过账凭证")
     @PostMapping("/{id}/post")
     public Result<Void> post(@PathVariable Long id) {
         voucherService.postVoucher(id);
         return Result.success();
+    }
+
+    @Operation(summary = "复制凭证")
+    @PostMapping("/{id}/copy")
+    public Result<Long> copy(@PathVariable Long id) {
+        Long newId = voucherService.copyVoucher(id);
+        return Result.success(newId);
+    }
+
+    @Operation(summary = "红冲凭证")
+    @PostMapping("/{id}/reverse")
+    public Result<Long> reverse(@PathVariable Long id) {
+        Long newId = voucherService.reverseVoucher(id);
+        return Result.success(newId);
+    }
+
+    @Operation(summary = "保存凭证草稿")
+    @PostMapping("/draft")
+    public Result<Long> saveDraft(@Valid @RequestBody VoucherCreateRequest request) {
+        Long id = voucherService.saveDraft(request);
+        return Result.success(id);
+    }
+
+    @Operation(summary = "提交凭证草稿")
+    @PostMapping("/{id}/submit-draft")
+    public Result<Void> submitDraft(@PathVariable Long id) {
+        voucherService.submitDraft(id);
+        return Result.success();
+    }
+
+    @Operation(summary = "凭证整理（断号重编）")
+    @PostMapping("/rearrange")
+    public Result<Void> rearrange(@RequestParam Long accountSetId,
+                                  @RequestParam Integer year,
+                                  @RequestParam Integer month) {
+        voucherService.rearrangeVoucherNo(accountSetId, year, month);
+        return Result.success();
+    }
+
+    @Operation(summary = "批量导入凭证")
+    @PostMapping("/import")
+    public Result<ImportResultVO> importVouchers(@RequestParam Long accountSetId,
+                                                  @RequestParam("file") MultipartFile file) {
+        ImportResultVO result = voucherImportService.importVouchers(accountSetId, file);
+        return Result.success(result);
+    }
+
+    @Operation(summary = "下载凭证导入模板")
+    @GetMapping("/import/template")
+    public void downloadTemplate(HttpServletResponse response) throws IOException {
+        byte[] data = voucherImportService.downloadTemplate();
+        writeExcelResponse(response, data, "凭证导入模板.xlsx");
+    }
+
+    /**
+     * 输出Excel文件到响应
+     */
+    private void writeExcelResponse(HttpServletResponse response, byte[] data, String fileName) throws IOException {
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setCharacterEncoding("utf-8");
+        String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replaceAll("\\+", "%20");
+        response.setHeader("Content-disposition", "attachment;filename*=utf-8''" + encodedFileName);
+        try (OutputStream os = response.getOutputStream()) {
+            os.write(data);
+            os.flush();
+        }
     }
 }

@@ -51,6 +51,16 @@ public class Employee extends BaseEntity {
     private String phone;
 
     /**
+     * 开户银行
+     */
+    private String bankName;
+
+    /**
+     * 银行账号
+     */
+    private String bankAccount;
+
+    /**
      * 入职日期
      */
     private LocalDate entryDate;

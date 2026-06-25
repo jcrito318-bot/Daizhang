@@ -29,6 +29,10 @@ public class EmployeeCreateRequest {
 
     private String phone;
 
+    private String bankName;
+
+    private String bankAccount;
+
     private LocalDate entryDate;
 
     private Integer status;

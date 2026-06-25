@@ -26,6 +26,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -305,23 +306,30 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     private UserVO convertToVO(SysUser user) {
         UserVO vo = new UserVO();
         BeanUtil.copyProperties(user, vo);
-        
+
         // 查询用户角色
         LambdaQueryWrapper<SysUserRole> urWrapper = new LambdaQueryWrapper<>();
         urWrapper.eq(SysUserRole::getUserId, user.getId());
         List<SysUserRole> userRoles = userRoleMapper.selectList(urWrapper);
-        
+
         if (!userRoles.isEmpty()) {
             List<Long> roleIds = userRoles.stream()
                     .map(SysUserRole::getRoleId)
                     .collect(Collectors.toList());
-            
+
             List<SysRole> roles = roleMapper.selectBatchIds(roleIds);
             vo.setRoles(roles.stream()
                     .map(SysRole::getRoleCode)
                     .collect(Collectors.toList()));
         }
-        
+
+        // 设置权限（管理员拥有所有权限）
+        List<String> permissions = new ArrayList<>();
+        if (userRoles.stream().anyMatch(ur -> ur.getRoleId() == 1L)) {
+            permissions.add("*");
+        }
+        vo.setPermissions(permissions);
+
         return vo;
     }
 }

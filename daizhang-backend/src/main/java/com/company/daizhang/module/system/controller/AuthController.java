@@ -5,6 +5,7 @@ import com.company.daizhang.common.result.Result;
 import com.company.daizhang.common.utils.JwtUtils;
 import com.company.daizhang.module.system.dto.LoginRequest;
 import com.company.daizhang.module.system.dto.LoginResponse;
+import com.company.daizhang.module.system.service.SysUserService;
 import com.company.daizhang.module.system.vo.MenuVO;
 import com.company.daizhang.module.system.vo.UserVO;
 import io.swagger.v3.oas.annotations.Operation;
@@ -36,6 +37,9 @@ public class AuthController {
     @Autowired
     private JwtUtils jwtUtils;
 
+    @Autowired
+    private SysUserService sysUserService;
+
     @PostMapping("/login")
     @Operation(summary = "用户登录")
     public Result<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
@@ -52,10 +56,8 @@ public class AuthController {
             LoginResponse response = new LoginResponse();
             response.setToken(token);
 
-            UserVO userVO = new UserVO();
-            userVO.setId(userDetails.getUserId());
-            userVO.setUsername(userDetails.getUsername());
-            userVO.setPermissions(new ArrayList<>(userDetails.getPermissions()));
+            // 从数据库查询完整用户信息
+            UserVO userVO = sysUserService.getUserById(userDetails.getUserId());
             response.setUserInfo(userVO);
 
             return Result.success("登录成功", response);
@@ -82,14 +84,8 @@ public class AuthController {
 
         SecurityUserDetails userDetails = (SecurityUserDetails) authentication.getPrincipal();
 
-        UserVO userVO = new UserVO();
-        userVO.setId(userDetails.getUserId());
-        userVO.setUsername(userDetails.getUsername());
-        userVO.setPermissions(new ArrayList<>(userDetails.getPermissions()));
-
-        // 临时返回空菜单列表，实际项目中应该从数据库查询
-        userVO.setMenus(new ArrayList<>());
-        userVO.setRoles(new ArrayList<>());
+        // 从数据库查询完整用户信息
+        UserVO userVO = sysUserService.getUserById(userDetails.getUserId());
 
         return Result.success(userVO);
     }

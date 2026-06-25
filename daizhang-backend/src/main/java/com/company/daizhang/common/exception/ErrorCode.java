@@ -64,11 +64,22 @@ public enum ErrorCode {
     VOUCHER_MONTH_BLANK(3020, "月份不能为空"),
     VOUCHER_YEAR_INVALID(3021, "年度格式不正确"),
     VOUCHER_MONTH_INVALID(3022, "月份必须在1-12之间"),
+    VOUCHER_TEMPLATE_NOT_FOUND(3031, "凭证模板不存在"),
+    VOUCHER_TEMPLATE_DETAIL_EMPTY(3032, "凭证模板明细不能为空"),
 
     // 票据相关 3101-3199
     DOCUMENT_NOT_FOUND(3101, "票据不存在"),
     DOCUMENT_ALREADY_LINKED(3102, "票据已关联凭证"),
     DOCUMENT_NOT_LINKED(3103, "票据未关联凭证"),
+
+    // 发票相关 3201-3299
+    INPUT_INVOICE_NOT_FOUND(3201, "进项发票不存在"),
+    INPUT_INVOICE_ALREADY_AUTHENTICATED(3202, "进项发票已认证"),
+    INPUT_INVOICE_ALREADY_VOID(3203, "进项发票已作废"),
+    OUTPUT_INVOICE_NOT_FOUND(3204, "销项发票不存在"),
+    OUTPUT_INVOICE_ALREADY_VOID(3205, "销项发票已作废"),
+    OUTPUT_INVOICE_ALREADY_RED(3206, "销项发票已红冲"),
+    INVOICE_NUMBER_DUPLICATE(3207, "发票号码已存在"),
 
     // 系统管理相关 4001-4099
     USER_NOT_FOUND(4001, "用户不存在"),

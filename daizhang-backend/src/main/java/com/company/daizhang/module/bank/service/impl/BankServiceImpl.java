@@ -14,8 +14,10 @@ import com.company.daizhang.module.bank.entity.BankTransaction;
 import com.company.daizhang.module.bank.mapper.BankReconciliationMapper;
 import com.company.daizhang.module.bank.mapper.BankTransactionMapper;
 import com.company.daizhang.module.bank.service.BankService;
+import com.company.daizhang.module.bank.service.BankVoucherService;
 import com.company.daizhang.module.bank.vo.BankReconciliationVO;
 import com.company.daizhang.module.bank.vo.BankTransactionVO;
+import com.company.daizhang.module.bank.vo.UnmatchedItemVO;
 import com.company.daizhang.module.system.entity.SysUser;
 import com.company.daizhang.module.system.mapper.SysUserMapper;
 import com.company.daizhang.module.voucher.entity.Voucher;
@@ -23,13 +25,19 @@ import com.company.daizhang.module.voucher.entity.VoucherDetail;
 import com.company.daizhang.module.voucher.mapper.VoucherDetailMapper;
 import com.company.daizhang.module.voucher.mapper.VoucherMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -37,6 +45,7 @@ import java.util.stream.Collectors;
 /**
  * 银行对账服务实现
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTransaction> implements BankService {
@@ -45,6 +54,7 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
     private final VoucherMapper voucherMapper;
     private final VoucherDetailMapper voucherDetailMapper;
     private final SysUserMapper sysUserMapper;
+    private final BankVoucherService bankVoucherService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -347,6 +357,286 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
                 .collect(Collectors.toList());
 
         return new PageResult<>(voList, result.getTotal(), request.getPageNum(), request.getPageSize());
+    }
+
+    @Override
+    public List<Map<String, Object>> smartMatch(Long accountSetId) {
+        // 1. 查询未匹配的银行流水
+        LambdaQueryWrapper<BankTransaction> txWrapper = new LambdaQueryWrapper<>();
+        txWrapper.eq(BankTransaction::getAccountSetId, accountSetId)
+                 .eq(BankTransaction::getMatchedStatus, 0);
+        List<BankTransaction> unmatchedTransactions = this.list(txWrapper);
+
+        if (unmatchedTransactions.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        // 2. 查询未匹配的已过账凭证（状态=2）
+        LambdaQueryWrapper<Voucher> vWrapper = new LambdaQueryWrapper<>();
+        vWrapper.eq(Voucher::getAccountSetId, accountSetId)
+                .eq(Voucher::getStatus, 2);
+        List<Voucher> vouchers = voucherMapper.selectList(vWrapper);
+
+        if (vouchers.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        // 查询凭证明细
+        List<Long> voucherIds = vouchers.stream().map(Voucher::getId).collect(Collectors.toList());
+        LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
+        detailWrapper.in(VoucherDetail::getVoucherId, voucherIds);
+        List<VoucherDetail> details = voucherDetailMapper.selectList(detailWrapper);
+
+        // 按凭证ID分组明细
+        Map<Long, List<VoucherDetail>> detailsByVoucherId = details.stream()
+                .collect(Collectors.groupingBy(VoucherDetail::getVoucherId));
+
+        List<Map<String, Object>> suggestions = new ArrayList<>();
+
+        // 3. 对每条流水进行匹配
+        for (BankTransaction transaction : unmatchedTransactions) {
+            BigDecimal txAmount = transaction.getAmount();
+            LocalDate txDate = transaction.getTransactionDate();
+            String txSummary = transaction.getSummary() != null ? transaction.getSummary() : "";
+
+            Voucher matchedVoucher = null;
+            String matchType = null;
+
+            // 先尝试精确匹配（金额相同+日期相同）
+            for (Voucher voucher : vouchers) {
+                List<VoucherDetail> voucherDetails = detailsByVoucherId.get(voucher.getId());
+                if (voucherDetails == null) {
+                    continue;
+                }
+
+                for (VoucherDetail detail : voucherDetails) {
+                    BigDecimal detailAmount = transaction.getTransactionType() == 1
+                            ? detail.getDebit() : detail.getCredit();
+                    if (detailAmount != null && detailAmount.compareTo(txAmount) == 0
+                            && voucher.getVoucherDate().equals(txDate)) {
+                        matchedVoucher = voucher;
+                        matchType = "exact";
+                        break;
+                    }
+                }
+                if (matchedVoucher != null) {
+                    break;
+                }
+            }
+
+            // 再尝试模糊匹配（金额相同+摘要包含关键词）
+            if (matchedVoucher == null) {
+                for (Voucher voucher : vouchers) {
+                    List<VoucherDetail> voucherDetails = detailsByVoucherId.get(voucher.getId());
+                    if (voucherDetails == null) {
+                        continue;
+                    }
+
+                    for (VoucherDetail detail : voucherDetails) {
+                        BigDecimal detailAmount = transaction.getTransactionType() == 1
+                                ? detail.getDebit() : detail.getCredit();
+                        if (detailAmount != null && detailAmount.compareTo(txAmount) == 0) {
+                            String detailSummary = detail.getSummary() != null ? detail.getSummary() : "";
+                            if (StrUtil.isNotBlank(txSummary) && StrUtil.isNotBlank(detailSummary)
+                                    && (txSummary.contains(detailSummary) || detailSummary.contains(txSummary))) {
+                                matchedVoucher = voucher;
+                                matchType = "fuzzy";
+                                break;
+                            }
+                        }
+                    }
+                    if (matchedVoucher != null) {
+                        break;
+                    }
+                }
+            }
+
+            if (matchedVoucher != null) {
+                Map<String, Object> suggestion = new HashMap<>();
+                suggestion.put("transactionId", transaction.getId());
+                suggestion.put("transactionDate", txDate);
+                suggestion.put("transactionAmount", txAmount);
+                suggestion.put("transactionSummary", transaction.getSummary());
+                suggestion.put("transactionType", transaction.getTransactionType());
+                suggestion.put("voucherId", matchedVoucher.getId());
+                suggestion.put("voucherNo", matchedVoucher.getVoucherNo());
+                suggestion.put("voucherDate", matchedVoucher.getVoucherDate());
+                suggestion.put("matchType", matchType);
+                suggestion.put("matchTypeName", "exact".equals(matchType) ? "精确匹配" : "模糊匹配");
+                suggestions.add(suggestion);
+            }
+        }
+
+        return suggestions;
+    }
+
+    @Override
+    public byte[] exportReconciliation(Long reconciliationId) {
+        BankReconciliationVO vo = getReconciliation(reconciliationId);
+
+        try (Workbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+            Sheet sheet = workbook.createSheet("余额调节表");
+
+            // 创建标题行样式
+            CellStyle headerStyle = workbook.createCellStyle();
+            Font headerFont = workbook.createFont();
+            headerFont.setBold(true);
+            headerStyle.setFont(headerFont);
+            headerStyle.setAlignment(HorizontalAlignment.CENTER);
+
+            // 标题
+            Row titleRow = sheet.createRow(0);
+            Cell titleCell = titleRow.createCell(0);
+            titleCell.setCellValue("余额调节表 " + vo.getYear() + "年" + vo.getMonth() + "月");
+            titleCell.setCellStyle(headerStyle);
+
+            // 表头
+            Row headerRow = sheet.createRow(2);
+            headerRow.createCell(0).setCellValue("项目");
+            headerRow.createCell(1).setCellValue("金额");
+            for (int i = 0; i < 2; i++) {
+                headerRow.getCell(i).setCellStyle(headerStyle);
+            }
+
+            // 数据行
+            int rowNum = 3;
+            rowNum = writeReconciliationRow(sheet, rowNum, "银行存款余额", vo.getBankBalance());
+            rowNum = writeReconciliationRow(sheet, rowNum, "账面余额", vo.getBookBalance());
+            rowNum = writeReconciliationRow(sheet, rowNum, "差异", vo.getDifference());
+            rowNum = writeReconciliationRow(sheet, rowNum, "未达账项数量",
+                    vo.getUnreconciledItems() != null ? new BigDecimal(vo.getUnreconciledItems()) : BigDecimal.ZERO);
+            rowNum = writeReconciliationRow(sheet, rowNum, "对账状态", vo.getStatusName());
+            rowNum = writeReconciliationRow(sheet, rowNum, "对账日期",
+                    vo.getReconciledDate() != null ? vo.getReconciledDate().toString() : "");
+            rowNum = writeReconciliationRow(sheet, rowNum, "对账人",
+                    vo.getReconciledByName() != null ? vo.getReconciledByName() : "");
+            if (StrUtil.isNotBlank(vo.getRemark())) {
+                rowNum = writeReconciliationRow(sheet, rowNum, "备注", vo.getRemark());
+            }
+
+            // 未达账项明细
+            if (vo.getUnreconciledTransactions() != null && !vo.getUnreconciledTransactions().isEmpty()) {
+                rowNum++;
+                Row sectionRow = sheet.createRow(rowNum++);
+                Cell sectionCell = sectionRow.createCell(0);
+                sectionCell.setCellValue("未达账项明细");
+                sectionCell.setCellStyle(headerStyle);
+
+                Row detailHeaderRow = sheet.createRow(rowNum++);
+                detailHeaderRow.createCell(0).setCellValue("交易日期");
+                detailHeaderRow.createCell(1).setCellValue("交易类型");
+                detailHeaderRow.createCell(2).setCellValue("金额");
+                detailHeaderRow.createCell(3).setCellValue("摘要");
+                detailHeaderRow.createCell(4).setCellValue("对方账户");
+                for (int i = 0; i < 5; i++) {
+                    detailHeaderRow.getCell(i).setCellStyle(headerStyle);
+                }
+
+                for (BankTransactionVO tx : vo.getUnreconciledTransactions()) {
+                    Row row = sheet.createRow(rowNum++);
+                    row.createCell(0).setCellValue(tx.getTransactionDate() != null ? tx.getTransactionDate().toString() : "");
+                    row.createCell(1).setCellValue(tx.getTransactionTypeName() != null ? tx.getTransactionTypeName() : "");
+                    row.createCell(2).setCellValue(tx.getAmount() != null ? tx.getAmount().doubleValue() : 0);
+                    row.createCell(3).setCellValue(tx.getSummary() != null ? tx.getSummary() : "");
+                    row.createCell(4).setCellValue(tx.getCounterparty() != null ? tx.getCounterparty() : "");
+                }
+            }
+
+            // 设置列宽
+            sheet.setColumnWidth(0, 25 * 256);
+            sheet.setColumnWidth(1, 20 * 256);
+            sheet.setColumnWidth(2, 15 * 256);
+            sheet.setColumnWidth(3, 30 * 256);
+            sheet.setColumnWidth(4, 20 * 256);
+
+            workbook.write(outputStream);
+            return outputStream.toByteArray();
+        } catch (IOException e) {
+            log.error("导出余额调节表失败", e);
+            throw new BusinessException("导出余额调节表失败");
+        }
+    }
+
+    @Override
+    public List<UnmatchedItemVO> listUnmatchedItems(Long accountSetId, Integer year, Integer month) {
+        if (accountSetId == null) {
+            throw new BusinessException("账套ID不能为空");
+        }
+
+        LambdaQueryWrapper<BankTransaction> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(BankTransaction::getAccountSetId, accountSetId)
+               .eq(BankTransaction::getMatchedStatus, 0);
+
+        // 按年月过滤
+        if (year != null && month != null) {
+            LocalDate startDate = LocalDate.of(year, month, 1);
+            LocalDate endDate = startDate.plusMonths(1).minusDays(1);
+            wrapper.ge(BankTransaction::getTransactionDate, startDate)
+                   .le(BankTransaction::getTransactionDate, endDate);
+        } else if (year != null) {
+            LocalDate startDate = LocalDate.of(year, 1, 1);
+            LocalDate endDate = LocalDate.of(year, 12, 31);
+            wrapper.ge(BankTransaction::getTransactionDate, startDate)
+                   .le(BankTransaction::getTransactionDate, endDate);
+        }
+
+        wrapper.orderByAsc(BankTransaction::getTransactionDate);
+        List<BankTransaction> transactions = this.list(wrapper);
+
+        return transactions.stream()
+                .map(this::convertToUnmatchedItemVO)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Long generateVoucherFromUnmatched(Long transactionId) {
+        BankTransaction transaction = this.getById(transactionId);
+        if (transaction == null) {
+            throw new BusinessException("银行流水不存在");
+        }
+        if (transaction.getMatchedStatus() != null && transaction.getMatchedStatus() == 1) {
+            throw new BusinessException("该银行流水已匹配，无需生成凭证");
+        }
+
+        // 复用银行流水生成凭证的逻辑：
+        // 收入: 借银行存款 贷应收账款/主营业务收入
+        // 支出: 借应付账款/管理费用 贷银行存款
+        Long voucherId = bankVoucherService.generateVoucher(transactionId);
+        log.info("未达账项生成凭证成功，流水ID: {}, 凭证ID: {}", transactionId, voucherId);
+        return voucherId;
+    }
+
+    /**
+     * 银行流水转未达账项VO
+     */
+    private UnmatchedItemVO convertToUnmatchedItemVO(BankTransaction transaction) {
+        UnmatchedItemVO vo = new UnmatchedItemVO();
+        vo.setTransactionId(transaction.getId());
+        vo.setTransactionDate(transaction.getTransactionDate());
+        vo.setAmount(transaction.getAmount());
+        vo.setSummary(transaction.getSummary());
+        vo.setType(transaction.getTransactionType() != null && transaction.getTransactionType() == 1
+                ? "收入" : "支出");
+        return vo;
+    }
+
+    /**
+     * 写入余额调节表数据行
+     */
+    private int writeReconciliationRow(Sheet sheet, int rowNum, String label, Object value) {
+        Row row = sheet.createRow(rowNum);
+        row.createCell(0).setCellValue(label);
+        Cell valueCell = row.createCell(1);
+        if (value instanceof BigDecimal) {
+            valueCell.setCellValue(((BigDecimal) value).doubleValue());
+        } else if (value instanceof String) {
+            valueCell.setCellValue((String) value);
+        } else if (value instanceof Integer) {
+            valueCell.setCellValue((Integer) value);
+        }
+        return rowNum + 1;
     }
 
     /**
