@@ -35,6 +35,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -259,26 +260,45 @@ public class PeriodServiceImpl implements PeriodService {
         Map<Long, AccountBalance> balanceMap = balances.stream()
                 .collect(Collectors.toMap(AccountBalance::getSubjectId, b -> b));
 
-        // 6. 计算收入总额（收入类科目通常为贷方余额）
+        // 6. 计算收入总额（按净额: endCredit - endDebit,处理销售退回等借方余额）
         BigDecimal totalRevenue = BigDecimal.ZERO;
+        Map<Long, BigDecimal> revenueNetMap = new HashMap<>();
         for (Subject subject : revenueSubjects) {
             AccountBalance balance = balanceMap.get(subject.getId());
-            if (balance != null && balance.getEndCredit() != null) {
-                totalRevenue = totalRevenue.add(balance.getEndCredit());
+            if (balance != null) {
+                BigDecimal credit = balance.getEndCredit() != null ? balance.getEndCredit() : BigDecimal.ZERO;
+                BigDecimal debit = balance.getEndDebit() != null ? balance.getEndDebit() : BigDecimal.ZERO;
+                BigDecimal net = credit.subtract(debit);
+                if (net.compareTo(BigDecimal.ZERO) != 0) {
+                    revenueNetMap.put(subject.getId(), net);
+                    if (net.compareTo(BigDecimal.ZERO) > 0) {
+                        totalRevenue = totalRevenue.add(net);
+                    }
+                }
             }
         }
 
-        // 7. 计算费用总额（费用类科目通常为借方余额）
+        // 7. 计算费用总额（按净额: endDebit - endCredit,处理费用红字冲销等贷方余额）
         BigDecimal totalExpense = BigDecimal.ZERO;
+        Map<Long, BigDecimal> expenseNetMap = new HashMap<>();
         for (Subject subject : expenseSubjects) {
             AccountBalance balance = balanceMap.get(subject.getId());
-            if (balance != null && balance.getEndDebit() != null) {
-                totalExpense = totalExpense.add(balance.getEndDebit());
+            if (balance != null) {
+                BigDecimal debit = balance.getEndDebit() != null ? balance.getEndDebit() : BigDecimal.ZERO;
+                BigDecimal credit = balance.getEndCredit() != null ? balance.getEndCredit() : BigDecimal.ZERO;
+                BigDecimal net = debit.subtract(credit);
+                if (net.compareTo(BigDecimal.ZERO) != 0) {
+                    expenseNetMap.put(subject.getId(), net);
+                    if (net.compareTo(BigDecimal.ZERO) > 0) {
+                        totalExpense = totalExpense.add(net);
+                    }
+                }
             }
         }
 
         // 如果没有损益发生，无需结转
-        if (totalRevenue.compareTo(BigDecimal.ZERO) == 0 && totalExpense.compareTo(BigDecimal.ZERO) == 0) {
+        if (totalRevenue.compareTo(BigDecimal.ZERO) == 0 && totalExpense.compareTo(BigDecimal.ZERO) == 0
+                && revenueNetMap.isEmpty() && expenseNetMap.isEmpty()) {
             log.info("本期无损益发生，无需结转");
             return;
         }
@@ -315,43 +335,59 @@ public class PeriodServiceImpl implements PeriodService {
 
         voucherMapper.insert(voucher);
 
-        // 9. 凭证明细：收入科目结转（借记收入科目，将其余额转为0）
+        // 9. 凭证明细：收入科目结转（借记收入科目净额,将其余额转为0;反向余额则贷记）
         int lineNo = 1;
         for (Subject subject : revenueSubjects) {
-            AccountBalance balance = balanceMap.get(subject.getId());
-            if (balance != null && balance.getEndCredit() != null && balance.getEndCredit().compareTo(BigDecimal.ZERO) > 0) {
-                VoucherDetail detail = new VoucherDetail();
-                detail.setVoucherId(voucher.getId());
-                detail.setLineNo(lineNo);
-                detail.setSummary("结转收入");
-                detail.setSubjectId(subject.getId());
-                detail.setSubjectCode(subject.getCode());
-                detail.setSubjectName(subject.getName());
-                detail.setDebit(balance.getEndCredit());
-                detail.setCredit(BigDecimal.ZERO);
-                detail.setSortOrder(lineNo);
-                voucherDetailMapper.insert(detail);
-                lineNo++;
+            BigDecimal netAmount = revenueNetMap.get(subject.getId());
+            if (netAmount == null) {
+                continue;
             }
+            VoucherDetail detail = new VoucherDetail();
+            detail.setVoucherId(voucher.getId());
+            detail.setLineNo(lineNo);
+            detail.setSummary("结转收入");
+            detail.setSubjectId(subject.getId());
+            detail.setSubjectCode(subject.getCode());
+            detail.setSubjectName(subject.getName());
+            if (netAmount.compareTo(BigDecimal.ZERO) > 0) {
+                // 贷方净余额:借记结转
+                detail.setDebit(netAmount);
+                detail.setCredit(BigDecimal.ZERO);
+            } else {
+                // 借方净余额(销售退回等):贷记结转
+                detail.setDebit(BigDecimal.ZERO);
+                detail.setCredit(netAmount.abs());
+            }
+            detail.setSortOrder(lineNo);
+            voucherDetailMapper.insert(detail);
+            lineNo++;
         }
 
-        // 10. 凭证明细：费用科目结转（贷记费用科目，将其余额转为0）
+        // 10. 凭证明细：费用科目结转（贷记费用科目净额,将其余额转为0;反向余额则借记）
         for (Subject subject : expenseSubjects) {
-            AccountBalance balance = balanceMap.get(subject.getId());
-            if (balance != null && balance.getEndDebit() != null && balance.getEndDebit().compareTo(BigDecimal.ZERO) > 0) {
-                VoucherDetail detail = new VoucherDetail();
-                detail.setVoucherId(voucher.getId());
-                detail.setLineNo(lineNo);
-                detail.setSummary("结转费用");
-                detail.setSubjectId(subject.getId());
-                detail.setSubjectCode(subject.getCode());
-                detail.setSubjectName(subject.getName());
-                detail.setDebit(BigDecimal.ZERO);
-                detail.setCredit(balance.getEndDebit());
-                detail.setSortOrder(lineNo);
-                voucherDetailMapper.insert(detail);
-                lineNo++;
+            BigDecimal netAmount = expenseNetMap.get(subject.getId());
+            if (netAmount == null) {
+                continue;
             }
+            VoucherDetail detail = new VoucherDetail();
+            detail.setVoucherId(voucher.getId());
+            detail.setLineNo(lineNo);
+            detail.setSummary("结转费用");
+            detail.setSubjectId(subject.getId());
+            detail.setSubjectCode(subject.getCode());
+            detail.setSubjectName(subject.getName());
+            if (netAmount.compareTo(BigDecimal.ZERO) > 0) {
+                // 借方净余额:贷记结转
+                detail.setDebit(BigDecimal.ZERO);
+                detail.setCredit(netAmount);
+            } else {
+                // 贷方净余额(红字冲销等):借记结转
+                detail.setDebit(netAmount.abs());
+                detail.setCredit(BigDecimal.ZERO);
+            }
+            detail.setSortOrder(lineNo);
+            voucherDetailMapper.insert(detail);
+            lineNo++;
         }
 
         // 11. 凭证明细：本年利润
@@ -374,26 +410,46 @@ public class PeriodServiceImpl implements PeriodService {
         profitDetail.setSortOrder(lineNo);
         voucherDetailMapper.insert(profitDetail);
 
-        // 12. 更新损益类科目余额为0（同步更新本期发生额，保持余额等式）
+        // 12. 更新损益类科目余额为0（按净额结转后,期末借贷余额清零）
         for (Subject subject : revenueSubjects) {
+            BigDecimal netAmount = revenueNetMap.get(subject.getId());
+            if (netAmount == null) {
+                continue;
+            }
             AccountBalance balance = balanceMap.get(subject.getId());
             if (balance != null) {
-                BigDecimal carryAmount = balance.getEndCredit() != null ? balance.getEndCredit() : BigDecimal.ZERO;
-                // 结转凭证借记收入科目，累加本期借方发生额
-                BigDecimal newPeriodDebit = (balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO).add(carryAmount);
-                balance.setPeriodDebit(newPeriodDebit);
+                BigDecimal carryAmount = netAmount.abs();
+                if (netAmount.compareTo(BigDecimal.ZERO) > 0) {
+                    // 贷方净余额:结转凭证借记,累加本期借方发生额
+                    BigDecimal newPeriodDebit = (balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO).add(carryAmount);
+                    balance.setPeriodDebit(newPeriodDebit);
+                } else {
+                    // 借方净余额:结转凭证贷记,累加本期贷方发生额
+                    BigDecimal newPeriodCredit = (balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO).add(carryAmount);
+                    balance.setPeriodCredit(newPeriodCredit);
+                }
                 balance.setEndDebit(BigDecimal.ZERO);
                 balance.setEndCredit(BigDecimal.ZERO);
                 accountBalanceMapper.updateById(balance);
             }
         }
         for (Subject subject : expenseSubjects) {
+            BigDecimal netAmount = expenseNetMap.get(subject.getId());
+            if (netAmount == null) {
+                continue;
+            }
             AccountBalance balance = balanceMap.get(subject.getId());
             if (balance != null) {
-                BigDecimal carryAmount = balance.getEndDebit() != null ? balance.getEndDebit() : BigDecimal.ZERO;
-                // 结转凭证贷记费用科目，累加本期贷方发生额
-                BigDecimal newPeriodCredit = (balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO).add(carryAmount);
-                balance.setPeriodCredit(newPeriodCredit);
+                BigDecimal carryAmount = netAmount.abs();
+                if (netAmount.compareTo(BigDecimal.ZERO) > 0) {
+                    // 借方净余额:结转凭证贷记,累加本期贷方发生额
+                    BigDecimal newPeriodCredit = (balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO).add(carryAmount);
+                    balance.setPeriodCredit(newPeriodCredit);
+                } else {
+                    // 贷方净余额:结转凭证借记,累加本期借方发生额
+                    BigDecimal newPeriodDebit = (balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO).add(carryAmount);
+                    balance.setPeriodDebit(newPeriodDebit);
+                }
                 balance.setEndDebit(BigDecimal.ZERO);
                 balance.setEndCredit(BigDecimal.ZERO);
                 accountBalanceMapper.updateById(balance);

@@ -22,6 +22,7 @@ import com.company.daizhang.module.subject.entity.Subject;
 import com.company.daizhang.module.subject.mapper.SubjectMapper;
 import com.company.daizhang.module.voucher.dto.VoucherCreateRequest;
 import com.company.daizhang.module.voucher.dto.VoucherDetailRequest;
+import com.company.daizhang.module.voucher.mapper.VoucherDetailMapper;
 import com.company.daizhang.module.voucher.service.VoucherService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -48,6 +49,7 @@ public class AssetStocktakeServiceImpl implements AssetStocktakeService {
     private final FixedAssetMapper fixedAssetMapper;
     private final SubjectMapper subjectMapper;
     private final VoucherService voucherService;
+    private final VoucherDetailMapper voucherDetailMapper;
 
     // 待处理财产损溢科目编码(1901)，固定资产科目编码(1601)，累计折旧科目编码(1602)
     private static final String CODE_PENDING_ASSET_LOSS = "1901";
@@ -187,15 +189,16 @@ public class AssetStocktakeServiceImpl implements AssetStocktakeService {
         BigDecimal diffQty = actQty.subtract(bookQty);
         BigDecimal diffAmt = actVal.subtract(bookVal);
 
-        // 计算结果
+        // 计算结果：优先按数量差异判断,数量一致时按金额差异判断(价值重估场景)
         String result;
-        int cmp = diffQty.compareTo(BigDecimal.ZERO);
-        if (cmp == 0) {
-            result = RESULT_MATCH;
-        } else if (cmp < 0) {
+        int cmpQty = diffQty.compareTo(BigDecimal.ZERO);
+        int cmpAmt = diffAmt.compareTo(BigDecimal.ZERO);
+        if (cmpQty < 0 || (cmpQty == 0 && cmpAmt < 0)) {
             result = RESULT_LOSS;
-        } else {
+        } else if (cmpQty > 0 || (cmpQty == 0 && cmpAmt > 0)) {
             result = RESULT_GAIN;
+        } else {
+            result = RESULT_MATCH;
         }
 
         detail.setActualQuantity(actQty);
@@ -258,6 +261,16 @@ public class AssetStocktakeServiceImpl implements AssetStocktakeService {
         if (stocktake.getStatus() == null || stocktake.getStatus() != 1) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "盘点单未完成，无法生成调账凭证");
         }
+
+        // 校验是否已生成过调账凭证,避免重复生成(通过盘点名称匹配摘要)
+        LambdaQueryWrapper<com.company.daizhang.module.voucher.entity.VoucherDetail> existWrapper = new LambdaQueryWrapper<>();
+        existWrapper.like(com.company.daizhang.module.voucher.entity.VoucherDetail::getSummary,
+                "-" + stocktake.getStocktakeName());
+        Long existCount = voucherDetailMapper.selectCount(existWrapper);
+        if (existCount != null && existCount > 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "该盘点单已生成调账凭证,不能重复生成");
+        }
+
 
         // 查询差异明细
         LambdaQueryWrapper<AssetStocktakeDetail> detailWrapper = new LambdaQueryWrapper<>();
@@ -337,8 +350,17 @@ public class AssetStocktakeServiceImpl implements AssetStocktakeService {
         voucherRequest.setDetails(voucherDetails);
         voucherService.createVoucher(voucherRequest);
 
-        log.info("盘点单 {} 生成调账凭证成功，盘亏={}, 盘盈={}", id, lossAmount, gainAmount);
-        return 0L; // 简化返回，凭证ID需VoucherService返回
+        // 查询刚创建的凭证ID(通过摘要匹配盘点名称)
+        LambdaQueryWrapper<com.company.daizhang.module.voucher.entity.VoucherDetail> createdWrapper = new LambdaQueryWrapper<>();
+        createdWrapper.like(com.company.daizhang.module.voucher.entity.VoucherDetail::getSummary,
+                "-" + stocktake.getStocktakeName())
+                .orderByDesc(com.company.daizhang.module.voucher.entity.VoucherDetail::getVoucherId)
+                .last("LIMIT 1");
+        com.company.daizhang.module.voucher.entity.VoucherDetail createdDetail = voucherDetailMapper.selectOne(createdWrapper);
+        Long voucherId = createdDetail != null ? createdDetail.getVoucherId() : 0L;
+
+        log.info("盘点单 {} 生成调账凭证成功，凭证ID={}, 盘亏={}, 盘盈={}", id, voucherId, lossAmount, gainAmount);
+        return voucherId;
     }
 
     /**

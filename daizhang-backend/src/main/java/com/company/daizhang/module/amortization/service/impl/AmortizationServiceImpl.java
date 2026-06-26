@@ -85,6 +85,11 @@ public class AmortizationServiceImpl implements AmortizationService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createAmortization(AmortizationRequest request) {
+        // 校验总月数必须大于0,防止除零异常
+        if (request.getTotalMonths() == null || request.getTotalMonths() <= 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "总月数必须大于0");
+        }
+
         Amortization amortization = new Amortization();
         BeanUtil.copyProperties(request, amortization);
 
@@ -111,6 +116,11 @@ public class AmortizationServiceImpl implements AmortizationService {
         Amortization amortization = amortizationMapper.selectById(id);
         if (amortization == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "长期待摊费用不存在");
+        }
+
+        // 校验总月数必须大于0,防止除零异常
+        if (request.getTotalMonths() == null || request.getTotalMonths() <= 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "总月数必须大于0");
         }
 
         BeanUtil.copyProperties(request, amortization);
@@ -155,25 +165,39 @@ public class AmortizationServiceImpl implements AmortizationService {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "该费用已摊完，无法继续摊销");
         }
 
+        // 校验该期间是否已生成过摊销凭证,避免重复摊销
+        if (existsAmortizationVoucher(id, year, month)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "该费用在" + year + "年" + month + "月已摊销,不能重复摊销");
+        }
+
         BigDecimal monthlyAmount = amortization.getMonthlyAmount();
         if (monthlyAmount == null) {
             monthlyAmount = BigDecimal.ZERO;
         }
 
-        // 已摊销额 += 月摊销额
-        BigDecimal amortizedAmount = amortization.getAmortizedAmount();
-        if (amortizedAmount == null) {
-            amortizedAmount = BigDecimal.ZERO;
-        }
-        amortizedAmount = amortizedAmount.add(monthlyAmount);
-        amortization.setAmortizedAmount(amortizedAmount);
-
-        // 剩余待摊 -= 月摊销额
+        // 剩余待摊金额
         BigDecimal remainingAmount = amortization.getRemainingAmount();
         if (remainingAmount == null) {
             remainingAmount = BigDecimal.ZERO;
         }
-        remainingAmount = remainingAmount.subtract(monthlyAmount);
+
+        // 本次摊销额 = min(月摊销额, 剩余待摊),防止amortizedAmount超过totalAmount
+        BigDecimal actualAmount = monthlyAmount.min(remainingAmount);
+        if (actualAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "剩余待摊金额为零,无需摊销");
+        }
+
+        // 已摊销额 += 本次摊销额
+        BigDecimal amortizedAmount = amortization.getAmortizedAmount();
+        if (amortizedAmount == null) {
+            amortizedAmount = BigDecimal.ZERO;
+        }
+        amortizedAmount = amortizedAmount.add(actualAmount);
+        amortization.setAmortizedAmount(amortizedAmount);
+
+        // 剩余待摊 -= 本次摊销额
+        remainingAmount = remainingAmount.subtract(actualAmount);
         amortization.setRemainingAmount(remainingAmount);
 
         // 如果剩余待摊 <= 0，状态改为已摊完
@@ -185,7 +209,7 @@ public class AmortizationServiceImpl implements AmortizationService {
 
         amortizationMapper.updateById(amortization);
 
-        log.info("长期待摊费用摊销成功：id={}, year={}, month={}, 摊销金额={}", id, year, month, monthlyAmount);
+        log.info("长期待摊费用摊销成功：id={}, year={}, month={}, 摊销金额={}", id, year, month, actualAmount);
     }
 
     @Override
@@ -203,23 +227,37 @@ public class AmortizationServiceImpl implements AmortizationService {
                 continue;
             }
 
+            // 跳过该期间已摊销的
+            if (existsAmortizationVoucher(amortization.getId(), year, month)) {
+                log.warn("批量摊销跳过,已摊销: amortizationId={}, year={}, month={}",
+                        amortization.getId(), year, month);
+                continue;
+            }
+
             BigDecimal monthlyAmount = amortization.getMonthlyAmount();
             if (monthlyAmount == null) {
                 monthlyAmount = BigDecimal.ZERO;
+            }
+
+            BigDecimal remainingAmount = amortization.getRemainingAmount();
+            if (remainingAmount == null) {
+                remainingAmount = BigDecimal.ZERO;
+            }
+
+            // 本次摊销额 = min(月摊销额, 剩余待摊),防止超额
+            BigDecimal actualAmount = monthlyAmount.min(remainingAmount);
+            if (actualAmount.compareTo(BigDecimal.ZERO) <= 0) {
+                continue;
             }
 
             BigDecimal amortizedAmount = amortization.getAmortizedAmount();
             if (amortizedAmount == null) {
                 amortizedAmount = BigDecimal.ZERO;
             }
-            amortizedAmount = amortizedAmount.add(monthlyAmount);
+            amortizedAmount = amortizedAmount.add(actualAmount);
             amortization.setAmortizedAmount(amortizedAmount);
 
-            BigDecimal remainingAmount = amortization.getRemainingAmount();
-            if (remainingAmount == null) {
-                remainingAmount = BigDecimal.ZERO;
-            }
-            remainingAmount = remainingAmount.subtract(monthlyAmount);
+            remainingAmount = remainingAmount.subtract(actualAmount);
 
             if (remainingAmount.compareTo(BigDecimal.ZERO) <= 0) {
                 amortization.setStatus(1);
@@ -246,6 +284,12 @@ public class AmortizationServiceImpl implements AmortizationService {
         }
 
         Long accountSetId = amortization.getAccountSetId();
+
+        // 校验该期间是否已生成过摊销凭证,避免重复生成
+        if (existsAmortizationVoucher(id, year, month)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "该费用在" + year + "年" + month + "月已生成摊销凭证,不能重复生成");
+        }
         BigDecimal monthlyAmount = amortization.getMonthlyAmount() != null
                 ? amortization.getMonthlyAmount() : BigDecimal.ZERO;
         if (monthlyAmount.compareTo(BigDecimal.ZERO) <= 0) {
@@ -310,6 +354,37 @@ public class AmortizationServiceImpl implements AmortizationService {
     }
 
     // ==================== 摊销凭证辅助方法 ====================
+
+    /**
+     * 校验指定摊销对象在指定期间是否已生成过摊销凭证。
+     * 通过查询该期间的凭证中是否存在摘要以"长期待摊费用摊销-"开头且贷方科目为1801的明细来判断。
+     * 此方法不依赖额外字段,避免修改数据库schema。
+     */
+    private boolean existsAmortizationVoucher(Long amortizationId, Integer year, Integer month) {
+        Amortization amortization = amortizationMapper.selectById(amortizationId);
+        if (amortization == null) {
+            return false;
+        }
+        Long accountSetId = amortization.getAccountSetId();
+        // 查询该期间所有凭证(source=1 表示系统生成)
+        LambdaQueryWrapper<Voucher> voucherWrapper = new LambdaQueryWrapper<>();
+        voucherWrapper.eq(Voucher::getAccountSetId, accountSetId)
+                .eq(Voucher::getYear, year)
+                .eq(Voucher::getMonth, month)
+                .eq(Voucher::getSource, 1);
+        List<Voucher> vouchers = voucherMapper.selectList(voucherWrapper);
+        if (vouchers.isEmpty()) {
+            return false;
+        }
+        List<Long> voucherIds = vouchers.stream().map(Voucher::getId).collect(Collectors.toList());
+        // 查询这些凭证的明细,判断是否存在摘要包含摊销名称且贷方科目为长期待摊费用的明细
+        LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
+        detailWrapper.in(VoucherDetail::getVoucherId, voucherIds)
+                .like(VoucherDetail::getSummary, "长期待摊费用摊销-")
+                .gt(VoucherDetail::getCredit, BigDecimal.ZERO);
+        Long count = voucherDetailMapper.selectCount(detailWrapper);
+        return count != null && count > 0;
+    }
 
     private AccountPeriod checkPeriodExists(Long accountSetId, Integer year, Integer month) {
         LambdaQueryWrapper<AccountPeriod> wrapper = new LambdaQueryWrapper<>();

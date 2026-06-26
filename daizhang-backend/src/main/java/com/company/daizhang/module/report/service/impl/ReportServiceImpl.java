@@ -1327,37 +1327,31 @@ public class ReportServiceImpl implements ReportService {
     }
 
     /**
-     * 计算期初余额
+     * 计算期初余额(按净额,正确处理反向余额,如资产出现贷方余额时返回负数)
      */
     private BigDecimal calculateBeginningBalance(AccountBalance balance, Integer balanceDirection, boolean isAsset) {
         if (balance == null) {
             return BigDecimal.ZERO;
         }
 
-        if (isAsset) {
-            // 资产类：期初借方余额
-            return balance.getBeginDebit() != null ? balance.getBeginDebit() : BigDecimal.ZERO;
-        } else {
-            // 负债/权益类：期初贷方余额
-            return balance.getBeginCredit() != null ? balance.getBeginCredit() : BigDecimal.ZERO;
-        }
+        BigDecimal debit = balance.getBeginDebit() != null ? balance.getBeginDebit() : BigDecimal.ZERO;
+        BigDecimal credit = balance.getBeginCredit() != null ? balance.getBeginCredit() : BigDecimal.ZERO;
+        // 资产类:借-贷;负债/权益类:贷-借。这样反向余额能正确显示为负数
+        return isAsset ? debit.subtract(credit) : credit.subtract(debit);
     }
 
     /**
-     * 计算期末余额
+     * 计算期末余额(按净额,正确处理反向余额,如资产出现贷方余额时返回负数)
      */
     private BigDecimal calculateEndingBalance(AccountBalance balance, Integer balanceDirection, boolean isAsset) {
         if (balance == null) {
             return BigDecimal.ZERO;
         }
 
-        if (isAsset) {
-            // 资产类：期末借方余额
-            return balance.getEndDebit() != null ? balance.getEndDebit() : BigDecimal.ZERO;
-        } else {
-            // 负债/权益类：期末贷方余额
-            return balance.getEndCredit() != null ? balance.getEndCredit() : BigDecimal.ZERO;
-        }
+        BigDecimal debit = balance.getEndDebit() != null ? balance.getEndDebit() : BigDecimal.ZERO;
+        BigDecimal credit = balance.getEndCredit() != null ? balance.getEndCredit() : BigDecimal.ZERO;
+        // 资产类:借-贷;负债/权益类:贷-借。这样反向余额能正确显示为负数
+        return isAsset ? debit.subtract(credit) : credit.subtract(debit);
     }
 
     /**
@@ -1404,9 +1398,9 @@ public class ReportServiceImpl implements ReportService {
             AccountBalance beginBal = beginMap.get(subject.getId());
             AccountBalance endBal = endMap.get(subject.getId());
 
-            // 所有者权益科目余额在贷方
-            BigDecimal beginAmount = beginBal != null && beginBal.getEndCredit() != null
-                    ? beginBal.getEndCredit() : BigDecimal.ZERO;
+            // 所有者权益科目余额在贷方;年初余额应取beginCredit(年初),而非endCredit(1月末)
+            BigDecimal beginAmount = beginBal != null && beginBal.getBeginCredit() != null
+                    ? beginBal.getBeginCredit() : BigDecimal.ZERO;
             BigDecimal endAmount = endBal != null && endBal.getEndCredit() != null
                     ? endBal.getEndCredit() : BigDecimal.ZERO;
             BigDecimal increase = endAmount.subtract(beginAmount);
@@ -1486,12 +1480,13 @@ public class ReportServiceImpl implements ReportService {
         Set<Long> expenseSubjectIds = expenseSubjects.stream()
                 .map(Subject::getId).collect(Collectors.toSet());
 
-        // 4. 查询本期凭证明细，筛选费用类科目且有部门辅助核算
-        // 先找该期间所有凭证ID
+        // 4. 查询本期已过账凭证明细，筛选费用类科目且有部门辅助核算
+        // 先找该期间所有已过账(status=2)凭证ID
         LambdaQueryWrapper<Voucher> voucherWrapper = new LambdaQueryWrapper<>();
         voucherWrapper.eq(Voucher::getAccountSetId, accountSetId)
                 .eq(Voucher::getYear, year)
                 .eq(Voucher::getMonth, month)
+                .eq(Voucher::getStatus, 2)
                 .select(Voucher::getId);
         List<Long> voucherIds = voucherMapper.selectList(voucherWrapper).stream()
                 .map(Voucher::getId).collect(Collectors.toList());

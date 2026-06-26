@@ -161,26 +161,39 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
                 .collect(Collectors.groupingBy(VoucherDetail::getVoucherId));
 
         int matchCount = 0;
+        // 记录已匹配的凭证ID,避免同一凭证被多条流水重复匹配
+        java.util.Set<Long> matchedVoucherIds = new java.util.HashSet<>();
 
         for (BankTransaction transaction : unmatchedTransactions) {
             BigDecimal txAmount = transaction.getAmount();
             LocalDate txDate = transaction.getTransactionDate();
+            Integer txType = transaction.getTransactionType();
 
             for (Voucher voucher : vouchers) {
+                // 跳过已被其他流水匹配的凭证
+                if (matchedVoucherIds.contains(voucher.getId())) {
+                    continue;
+                }
                 List<VoucherDetail> voucherDetails = detailsByVoucherId.get(voucher.getId());
                 if (voucherDetails == null) {
                     continue;
                 }
 
-                // 匹配规则：金额相同且日期相同
+                // 匹配规则：金额相同且日期相同;transactionType为空时跳过
                 boolean matched = false;
-                for (VoucherDetail detail : voucherDetails) {
-                    BigDecimal detailAmount = transaction.getTransactionType() == 1
-                            ? detail.getDebit() : detail.getCredit();
-                    if (detailAmount != null && detailAmount.compareTo(txAmount) == 0
-                            && voucher.getVoucherDate().equals(txDate)) {
-                        matched = true;
-                        break;
+                if (txType != null) {
+                    for (VoucherDetail detail : voucherDetails) {
+                        // 仅匹配银行存款(1002)科目明细,避免误匹配其他科目
+                        if (!"1002".equals(detail.getSubjectCode())) {
+                            continue;
+                        }
+                        BigDecimal detailAmount = txType == 1
+                                ? detail.getDebit() : detail.getCredit();
+                        if (detailAmount != null && detailAmount.compareTo(txAmount) == 0
+                                && txDate != null && txDate.equals(voucher.getVoucherDate())) {
+                            matched = true;
+                            break;
+                        }
                     }
                 }
 
@@ -188,6 +201,7 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
                     transaction.setMatchedStatus(1);
                     transaction.setVoucherId(voucher.getId());
                     this.updateById(transaction);
+                    matchedVoucherIds.add(voucher.getId());
                     matchCount++;
                     break;
                 }
@@ -276,7 +290,7 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal bankBalance = bankIncome.subtract(bankExpense);
 
-        // 查询账簿余额（从凭证明细中计算）
+        // 查询账簿余额（从凭证明细中计算）,只统计银行存款(1002)科目的借贷
         LambdaQueryWrapper<Voucher> vWrapper = new LambdaQueryWrapper<>();
         vWrapper.eq(Voucher::getAccountSetId, request.getAccountSetId())
                 .eq(Voucher::getYear, request.getYear())
@@ -288,14 +302,15 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
         if (!vouchers.isEmpty()) {
             List<Long> voucherIds = vouchers.stream().map(Voucher::getId).collect(Collectors.toList());
             LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
-            detailWrapper.in(VoucherDetail::getVoucherId, voucherIds);
-            List<VoucherDetail> details = voucherDetailMapper.selectList(detailWrapper);
+            detailWrapper.in(VoucherDetail::getVoucherId, voucherIds)
+                    .eq(VoucherDetail::getSubjectCode, "1002");
+            List<VoucherDetail> bankDetails = voucherDetailMapper.selectList(detailWrapper);
 
-            // 计算银行科目相关的借贷合计
-            BigDecimal bookDebit = details.stream()
+            // 只计算银行存款(1002)科目的借贷合计,否则复式记账借贷相等会导致账面余额恒为0
+            BigDecimal bookDebit = bankDetails.stream()
                     .map(d -> d.getDebit() != null ? d.getDebit() : BigDecimal.ZERO)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
-            BigDecimal bookCredit = details.stream()
+            BigDecimal bookCredit = bankDetails.stream()
                     .map(d -> d.getCredit() != null ? d.getCredit() : BigDecimal.ZERO)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
             bookBalance = bookDebit.subtract(bookCredit);
@@ -404,11 +419,17 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
             BigDecimal txAmount = transaction.getAmount();
             LocalDate txDate = transaction.getTransactionDate();
             String txSummary = transaction.getSummary() != null ? transaction.getSummary() : "";
+            Integer txType = transaction.getTransactionType();
+
+            // transactionType为null无法判断借贷方向,跳过
+            if (txType == null) {
+                continue;
+            }
 
             Voucher matchedVoucher = null;
             String matchType = null;
 
-            // 先尝试精确匹配（金额相同+日期相同）
+            // 先尝试精确匹配（金额相同+日期相同）,仅匹配银行存款(1002)明细
             for (Voucher voucher : vouchers) {
                 List<VoucherDetail> voucherDetails = detailsByVoucherId.get(voucher.getId());
                 if (voucherDetails == null) {
@@ -416,10 +437,13 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
                 }
 
                 for (VoucherDetail detail : voucherDetails) {
-                    BigDecimal detailAmount = transaction.getTransactionType() == 1
+                    if (!"1002".equals(detail.getSubjectCode())) {
+                        continue;
+                    }
+                    BigDecimal detailAmount = txType == 1
                             ? detail.getDebit() : detail.getCredit();
                     if (detailAmount != null && detailAmount.compareTo(txAmount) == 0
-                            && voucher.getVoucherDate().equals(txDate)) {
+                            && txDate != null && txDate.equals(voucher.getVoucherDate())) {
                         matchedVoucher = voucher;
                         matchType = "exact";
                         break;
@@ -439,7 +463,10 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
                     }
 
                     for (VoucherDetail detail : voucherDetails) {
-                        BigDecimal detailAmount = transaction.getTransactionType() == 1
+                        if (!"1002".equals(detail.getSubjectCode())) {
+                            continue;
+                        }
+                        BigDecimal detailAmount = txType == 1
                                 ? detail.getDebit() : detail.getCredit();
                         if (detailAmount != null && detailAmount.compareTo(txAmount) == 0) {
                             String detailSummary = detail.getSummary() != null ? detail.getSummary() : "";
