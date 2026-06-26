@@ -33,6 +33,13 @@ public class AssetController {
         return Result.success(page);
     }
 
+    @Operation(summary = "查询资产分类树")
+    @GetMapping("/category/tree")
+    public Result<List<AssetCategoryVO>> listCategoryTree(@RequestParam Long accountSetId) {
+        List<AssetCategoryVO> tree = assetService.listCategoryTree(accountSetId);
+        return Result.success(tree);
+    }
+
     @Operation(summary = "根据ID查询资产分类")
     @GetMapping("/category/{id}")
     public Result<AssetCategoryVO> getCategoryById(@PathVariable Long id) {
@@ -59,13 +66,6 @@ public class AssetController {
     public Result<Void> deleteCategory(@PathVariable Long id) {
         assetService.deleteCategory(id);
         return Result.success();
-    }
-
-    @Operation(summary = "查询资产分类树")
-    @GetMapping("/category/tree")
-    public Result<List<AssetCategoryVO>> listCategoryTree(@RequestParam Long accountSetId) {
-        List<AssetCategoryVO> tree = assetService.listCategoryTree(accountSetId);
-        return Result.success(tree);
     }
 
     // ==================== 固定资产管理 ====================

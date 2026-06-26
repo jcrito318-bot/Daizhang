@@ -1,5 +1,6 @@
 package com.company.daizhang.module.salary.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.company.daizhang.common.BaseEntity;
 import lombok.Data;
@@ -38,6 +39,7 @@ public class Employee extends BaseEntity {
     /**
      * 职位
      */
+    @TableField("`job_position`")
     private String position;
 
     /**

@@ -592,8 +592,8 @@ CREATE TABLE IF NOT EXISTS `bank_account` (
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_account_set_account_number` (`account_set_id`, `account_number`),
-  KEY `idx_account_set_id` (`account_set_id`),
-  KEY `idx_status` (`status`)
+  KEY `idx_bank_account_account_set_id` (`account_set_id`),
+  KEY `idx_bank_account_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='银行账户主数据表';
 
 -- ============================================
@@ -607,7 +607,7 @@ CREATE TABLE IF NOT EXISTS `sal_employee` (
   `employee_code` VARCHAR(50) NOT NULL COMMENT '员工编号',
   `employee_name` VARCHAR(50) NOT NULL COMMENT '员工姓名',
   `department` VARCHAR(100) DEFAULT NULL COMMENT '部门',
-  `position` VARCHAR(100) DEFAULT NULL COMMENT '职位',
+  `job_position` VARCHAR(100) DEFAULT NULL COMMENT '职位',
   `id_card` VARCHAR(20) DEFAULT NULL COMMENT '身份证号',
   `phone` VARCHAR(20) DEFAULT NULL COMMENT '联系电话',
   `bank_name` VARCHAR(200) DEFAULT NULL COMMENT '开户银行',
@@ -623,10 +623,10 @@ CREATE TABLE IF NOT EXISTS `sal_employee` (
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_account_set_employee_code` (`account_set_id`, `employee_code`),
-  KEY `idx_account_set_id` (`account_set_id`),
+  KEY `idx_sal_employee_account_set_id` (`account_set_id`),
   KEY `idx_employee_name` (`employee_name`),
   KEY `idx_department` (`department`),
-  KEY `idx_status` (`status`)
+  KEY `idx_sal_employee_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='员工表';
 
 -- 薪资项目表
@@ -678,7 +678,7 @@ CREATE TABLE IF NOT EXISTS `sal_salary_sheet` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_account_set_year_month_employee` (`account_set_id`, `year`, `month`, `employee_id`),
   KEY `idx_salary_sheet_year_month` (`account_set_id`, `year`, `month`),
-  KEY `idx_employee_id` (`employee_id`),
+  KEY `idx_sal_salary_sheet_employee_id` (`employee_id`),
   KEY `idx_salary_sheet_employee_name` (`employee_name`),
   KEY `idx_salary_sheet_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='薪资表';
@@ -1526,8 +1526,8 @@ CREATE TABLE IF NOT EXISTS `sal_special_deduction` (
   `update_by` BIGINT DEFAULT NULL COMMENT '更新人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
-  KEY `idx_account_set_id` (`account_set_id`),
-  KEY `idx_employee_id` (`employee_id`),
+  KEY `idx_sal_special_deduction_account_set_id` (`account_set_id`),
+  KEY `idx_sal_special_deduction_employee_id` (`employee_id`),
   KEY `idx_deduction_type` (`deduction_type`),
   KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='个税专项附加扣除表';
