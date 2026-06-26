@@ -1668,3 +1668,133 @@ CREATE TABLE IF NOT EXISTS `sys_exchange_rate` (
   PRIMARY KEY (`id`),
   KEY `idx_exchange_rate_date` (`rate_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='汇率表';
+
+-- ============================================
+-- 18. 库存管理模块
+-- ============================================
+
+-- 商品/物料表
+CREATE TABLE IF NOT EXISTS `inv_item` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `account_set_id` BIGINT NOT NULL COMMENT '账套ID',
+  `item_code` VARCHAR(50) NOT NULL COMMENT '商品编码',
+  `item_name` VARCHAR(200) NOT NULL COMMENT '商品名称',
+  `specification` VARCHAR(200) COMMENT '规格型号',
+  `unit` VARCHAR(20) COMMENT '计量单位',
+  `unit_price` DECIMAL(18,4) COMMENT '参考单价',
+  `category` VARCHAR(50) COMMENT '商品分类',
+  `status` TINYINT DEFAULT 1 COMMENT '状态:0禁用1启用',
+  `remark` VARCHAR(500) COMMENT '备注',
+  `create_by` BIGINT COMMENT '创建人ID',
+  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_inv_item_account_set` (`account_set_id`),
+  KEY `idx_inv_item_code` (`item_code`),
+  KEY `idx_inv_item_name` (`item_name`),
+  KEY `idx_inv_item_category` (`category`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='商品物料表';
+
+-- 库存余额表（按月）
+CREATE TABLE IF NOT EXISTS `inv_stock` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `account_set_id` BIGINT NOT NULL COMMENT '账套ID',
+  `item_id` BIGINT NOT NULL COMMENT '商品ID',
+  `year` INT NOT NULL COMMENT '年度',
+  `month` INT NOT NULL COMMENT '月份',
+  `begin_quantity` DECIMAL(18,4) DEFAULT 0 COMMENT '期初数量',
+  `begin_amount` DECIMAL(18,2) DEFAULT 0 COMMENT '期初金额',
+  `in_quantity` DECIMAL(18,4) DEFAULT 0 COMMENT '本期入库数量',
+  `in_amount` DECIMAL(18,2) DEFAULT 0 COMMENT '本期入库金额',
+  `out_quantity` DECIMAL(18,4) DEFAULT 0 COMMENT '本期出库数量',
+  `out_amount` DECIMAL(18,2) DEFAULT 0 COMMENT '本期出库金额',
+  `end_quantity` DECIMAL(18,4) DEFAULT 0 COMMENT '期末数量',
+  `end_amount` DECIMAL(18,2) DEFAULT 0 COMMENT '期末金额',
+  `unit_cost` DECIMAL(18,6) DEFAULT 0 COMMENT '单位成本',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_inv_stock_item_period` (`account_set_id`, `item_id`, `year`, `month`),
+  KEY `idx_inv_stock_item` (`item_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='库存余额表';
+
+-- 入库单表
+CREATE TABLE IF NOT EXISTS `inv_in` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `account_set_id` BIGINT NOT NULL COMMENT '账套ID',
+  `in_no` VARCHAR(30) NOT NULL COMMENT '入库单号',
+  `in_type` TINYINT DEFAULT 1 COMMENT '入库类型:1采购入库2盘盈3其他入库',
+  `in_date` DATE NOT NULL COMMENT '入库日期',
+  `supplier` VARCHAR(200) COMMENT '供应商',
+  `total_quantity` DECIMAL(18,4) DEFAULT 0 COMMENT '总数量',
+  `total_amount` DECIMAL(18,2) DEFAULT 0 COMMENT '总金额',
+  `status` TINYINT DEFAULT 0 COMMENT '状态:0待审核1已审核',
+  `remark` VARCHAR(500) COMMENT '备注',
+  `create_by` BIGINT COMMENT '创建人ID',
+  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_inv_in_no` (`in_no`),
+  KEY `idx_inv_in_account_set` (`account_set_id`),
+  KEY `idx_inv_in_date` (`in_date`),
+  KEY `idx_inv_in_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='入库单表';
+
+-- 入库单明细表
+CREATE TABLE IF NOT EXISTS `inv_in_detail` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `in_id` BIGINT NOT NULL COMMENT '入库单ID',
+  `item_id` BIGINT NOT NULL COMMENT '商品ID',
+  `item_code` VARCHAR(50) COMMENT '商品编码',
+  `item_name` VARCHAR(200) COMMENT '商品名称',
+  `specification` VARCHAR(200) COMMENT '规格型号',
+  `unit` VARCHAR(20) COMMENT '单位',
+  `quantity` DECIMAL(18,4) NOT NULL COMMENT '数量',
+  `unit_price` DECIMAL(18,4) NOT NULL COMMENT '单价',
+  `amount` DECIMAL(18,2) NOT NULL COMMENT '金额',
+  `remark` VARCHAR(500) COMMENT '备注',
+  PRIMARY KEY (`id`),
+  KEY `idx_inv_in_detail_in_id` (`in_id`),
+  KEY `idx_inv_in_detail_item_id` (`item_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='入库单明细表';
+
+-- 出库单表
+CREATE TABLE IF NOT EXISTS `inv_out` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `account_set_id` BIGINT NOT NULL COMMENT '账套ID',
+  `out_no` VARCHAR(30) NOT NULL COMMENT '出库单号',
+  `out_type` TINYINT DEFAULT 1 COMMENT '出库类型:1销售出库2盘亏3其他出库',
+  `out_date` DATE NOT NULL COMMENT '出库日期',
+  `customer` VARCHAR(200) COMMENT '客户',
+  `total_quantity` DECIMAL(18,4) DEFAULT 0 COMMENT '总数量',
+  `total_amount` DECIMAL(18,2) DEFAULT 0 COMMENT '总金额',
+  `cost_amount` DECIMAL(18,2) DEFAULT 0 COMMENT '成本金额',
+  `status` TINYINT DEFAULT 0 COMMENT '状态:0待审核1已审核',
+  `remark` VARCHAR(500) COMMENT '备注',
+  `create_by` BIGINT COMMENT '创建人ID',
+  `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_inv_out_no` (`out_no`),
+  KEY `idx_inv_out_account_set` (`account_set_id`),
+  KEY `idx_inv_out_date` (`out_date`),
+  KEY `idx_inv_out_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='出库单表';
+
+-- 出库单明细表
+CREATE TABLE IF NOT EXISTS `inv_out_detail` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `out_id` BIGINT NOT NULL COMMENT '出库单ID',
+  `item_id` BIGINT NOT NULL COMMENT '商品ID',
+  `item_code` VARCHAR(50) COMMENT '商品编码',
+  `item_name` VARCHAR(200) COMMENT '商品名称',
+  `specification` VARCHAR(200) COMMENT '规格型号',
+  `unit` VARCHAR(20) COMMENT '单位',
+  `quantity` DECIMAL(18,4) NOT NULL COMMENT '数量',
+  `unit_price` DECIMAL(18,4) NOT NULL COMMENT '售价',
+  `amount` DECIMAL(18,2) NOT NULL COMMENT '售价金额',
+  `unit_cost` DECIMAL(18,4) DEFAULT 0 COMMENT '单位成本',
+  `cost_amount` DECIMAL(18,2) DEFAULT 0 COMMENT '成本金额',
+  `remark` VARCHAR(500) COMMENT '备注',
+  PRIMARY KEY (`id`),
+  KEY `idx_inv_out_detail_out_id` (`out_id`),
+  KEY `idx_inv_out_detail_item_id` (`item_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='出库单明细表';

@@ -63,6 +63,7 @@ public class TaxServiceImpl implements TaxService {
     private final FixedAssetMapper fixedAssetMapper;
     private final TaxDeclarationMapper taxDeclarationMapper;
     private final CustomerMapper customerMapper;
+    private final com.company.daizhang.module.salary.mapper.EmployeeMapper employeeMapper;
 
     @Override
     public TaxDeclarationFormVO generateDeclarationForm(Long accountSetId, Integer year, Integer month, String formType) {
@@ -90,6 +91,12 @@ public class TaxServiceImpl implements TaxService {
                 return generateLandUseTaxForm(accountSet, year, month);
             case "VehicleTax":
                 return generateVehicleTaxForm(accountSet, year, month);
+            case "BusinessIncomeTax":
+                return generateBusinessIncomeTaxForm(accountSet, year, month);
+            case "SocialInsurance":
+                return generateSocialInsuranceForm(accountSet, year, month);
+            case "DisabledEmploymentFund":
+                return generateDisabledEmploymentFundForm(accountSet, year, month);
             default:
                 throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "不支持的申报表类型: " + formType);
         }
@@ -768,6 +775,223 @@ public class TaxServiceImpl implements TaxService {
         vo.setTaxableIncome(new BigDecimal(vehicleCount));
         vo.setTaxRate(annualTaxPerVehicle);
         vo.setTaxAmount(taxAmount);
+        vo.setItems(items);
+        return vo;
+    }
+
+    /**
+     * 生成经营所得个人所得税申报表
+     * 适用于个体工商户、个人独资企业、合伙企业
+     * 按年计算，分月或分季预缴，年度终了后3个月内汇算清缴
+     * 五级超额累进税率：5%-35%
+     */
+    private TaxDeclarationFormVO generateBusinessIncomeTaxForm(AccountSet accountSet, Integer year, Integer month) {
+        TaxDeclarationFormVO vo = buildBaseForm(accountSet, year, month, "BusinessIncomeTax", "经营所得个人所得税纳税申报表（A表）");
+
+        Map<Long, AccountBalance> balanceMap = queryBalanceMap(accountSet.getId(), year, month);
+        List<Subject> subjects = querySubjects(accountSet.getId());
+
+        BigDecimal operatingRevenue = sumBySubjectPrefix(subjects, balanceMap, "5001", true, false);
+        BigDecimal operatingCost = sumBySubjectPrefix(subjects, balanceMap, "5401", false, true);
+        BigDecimal adminExpense = sumBySubjectPrefix(subjects, balanceMap, "5602", false, true);
+        BigDecimal sellingExpense = sumBySubjectPrefix(subjects, balanceMap, "5601", false, true);
+        BigDecimal financialExpense = sumBySubjectPrefix(subjects, balanceMap, "5603", false, true);
+
+        // 应纳税所得额 = 收入 - 成本 - 费用 - 投资者减除费用（每月5000）
+        BigDecimal totalExpense = operatingCost.add(adminExpense).add(sellingExpense).add(financialExpense);
+        BigDecimal investorDeduction = new BigDecimal("5000");
+        BigDecimal taxableIncome = operatingRevenue.subtract(totalExpense).subtract(investorDeduction);
+        if (taxableIncome.compareTo(BigDecimal.ZERO) < 0) {
+            taxableIncome = BigDecimal.ZERO;
+        }
+
+        // 五级超额累进税率
+        BigDecimal taxRate;
+        BigDecimal quickDeduction;
+        BigDecimal annualTaxableIncome = taxableIncome;
+        if (annualTaxableIncome.compareTo(new BigDecimal("30000")) <= 0) {
+            taxRate = new BigDecimal("0.05");
+            quickDeduction = BigDecimal.ZERO;
+        } else if (annualTaxableIncome.compareTo(new BigDecimal("90000")) <= 0) {
+            taxRate = new BigDecimal("0.10");
+            quickDeduction = new BigDecimal("1500");
+        } else if (annualTaxableIncome.compareTo(new BigDecimal("300000")) <= 0) {
+            taxRate = new BigDecimal("0.20");
+            quickDeduction = new BigDecimal("10500");
+        } else if (annualTaxableIncome.compareTo(new BigDecimal("500000")) <= 0) {
+            taxRate = new BigDecimal("0.30");
+            quickDeduction = new BigDecimal("40500");
+        } else {
+            taxRate = new BigDecimal("0.35");
+            quickDeduction = new BigDecimal("65500");
+        }
+
+        BigDecimal taxAmount = annualTaxableIncome.multiply(taxRate).subtract(quickDeduction);
+        if (taxAmount.compareTo(BigDecimal.ZERO) < 0) {
+            taxAmount = BigDecimal.ZERO;
+        }
+        taxAmount = taxAmount.setScale(2, RoundingMode.HALF_UP);
+
+        List<TaxDeclarationFormItemVO> items = new ArrayList<>();
+        items.add(buildItem(1, "收入总额", "主营业务收入", operatingRevenue));
+        items.add(buildItem(2, "成本费用", "营业成本+期间费用", totalExpense));
+        items.add(buildItem(3, "投资者减除费用", "每月5000元", investorDeduction));
+        items.add(buildItem(4, "应纳税所得额", "收入-成本-减除费用", taxableIncome));
+        items.add(buildItem(5, "适用税率", "五级超额累进税率", taxRate));
+        items.add(buildItem(6, "速算扣除数", "", quickDeduction));
+        items.add(buildItem(7, "应纳税额", "应纳税所得额×税率-速算扣除数", taxAmount));
+
+        vo.setTaxableIncome(taxableIncome);
+        vo.setTaxRate(taxRate);
+        vo.setTaxAmount(taxAmount);
+        vo.setItems(items);
+        return vo;
+    }
+
+    /**
+     * 生成社会保险费申报表
+     * 包含养老保险、医疗保险、失业保险、工伤保险、生育保险、住房公积金
+     * 数据来源：薪资模块社保配置
+     */
+    private TaxDeclarationFormVO generateSocialInsuranceForm(AccountSet accountSet, Integer year, Integer month) {
+        TaxDeclarationFormVO vo = buildBaseForm(accountSet, year, month, "SocialInsurance", "社会保险费缴费申报表");
+
+        LambdaQueryWrapper<com.company.daizhang.module.salary.entity.SalarySheet> sheetWrapper = new LambdaQueryWrapper<>();
+        sheetWrapper.eq(com.company.daizhang.module.salary.entity.SalarySheet::getAccountSetId, accountSet.getId())
+                .eq(com.company.daizhang.module.salary.entity.SalarySheet::getYear, year)
+                .eq(com.company.daizhang.module.salary.entity.SalarySheet::getMonth, month);
+        List<com.company.daizhang.module.salary.entity.SalarySheet> sheets = salarySheetMapper.selectList(sheetWrapper);
+
+        BigDecimal totalBase = BigDecimal.ZERO;
+        BigDecimal totalSocialSecurity = BigDecimal.ZERO;
+        BigDecimal totalHousingFund = BigDecimal.ZERO;
+
+        for (com.company.daizhang.module.salary.entity.SalarySheet sheet : sheets) {
+            BigDecimal base = sheet.getBaseSalary() != null ? sheet.getBaseSalary() : BigDecimal.ZERO;
+            totalBase = totalBase.add(base);
+            if (sheet.getSocialSecurity() != null) {
+                totalSocialSecurity = totalSocialSecurity.add(sheet.getSocialSecurity());
+            }
+            if (sheet.getHousingFund() != null) {
+                totalHousingFund = totalHousingFund.add(sheet.getHousingFund());
+            }
+        }
+
+        // 社保个人部分约占社保合计的2/3（养老8%+医疗2%+失业0.5% ≈ 10.5% / 28% ≈ 37.5%，
+        // 此处简化按个人:单位 = 1:2 估算）
+        BigDecimal socialSecurityPersonal = totalSocialSecurity.multiply(new BigDecimal("0.375"))
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal socialSecurityCompany = totalSocialSecurity.subtract(socialSecurityPersonal);
+
+        // 公积金个人和单位各50%
+        BigDecimal housingFundPersonal = totalHousingFund.divide(new BigDecimal("2"), 2, RoundingMode.HALF_UP);
+        BigDecimal housingFundCompany = totalHousingFund.subtract(housingFundPersonal);
+
+        // 社保中各险种比例（按个人10.5%分配）
+        BigDecimal pensionPersonal = socialSecurityPersonal.multiply(new BigDecimal("0.762"))
+                .setScale(2, RoundingMode.HALF_UP); // 养老8%/10.5%
+        BigDecimal medicalPersonal = socialSecurityPersonal.multiply(new BigDecimal("0.190"))
+                .setScale(2, RoundingMode.HALF_UP); // 医疗2%/10.5%
+        BigDecimal unemploymentPersonal = socialSecurityPersonal.multiply(new BigDecimal("0.048"))
+                .setScale(2, RoundingMode.HALF_UP); // 失业0.5%/10.5%
+
+        BigDecimal pensionCompany = socialSecurityCompany.multiply(new BigDecimal("0.571"))
+                .setScale(2, RoundingMode.HALF_UP); // 养老16%/28%
+        BigDecimal medicalCompany = socialSecurityCompany.multiply(new BigDecimal("0.339"))
+                .setScale(2, RoundingMode.HALF_UP); // 医疗9.5%/28%
+        BigDecimal unemploymentCompany = socialSecurityCompany.multiply(new BigDecimal("0.018"))
+                .setScale(2, RoundingMode.HALF_UP); // 失业0.5%/28%
+        BigDecimal injuryCompany = socialSecurityCompany.multiply(new BigDecimal("0.018"))
+                .setScale(2, RoundingMode.HALF_UP); // 工伤0.5%/28%
+        BigDecimal maternityCompany = socialSecurityCompany.multiply(new BigDecimal("0.036"))
+                .setScale(2, RoundingMode.HALF_UP); // 生育1%/28%
+
+        BigDecimal totalPersonal = socialSecurityPersonal.add(housingFundPersonal);
+        BigDecimal totalCompany = socialSecurityCompany.add(housingFundCompany);
+        BigDecimal totalPremium = totalPersonal.add(totalCompany);
+
+        List<TaxDeclarationFormItemVO> items = new ArrayList<>();
+        items.add(buildItem(1, "参保人数", "", new BigDecimal(sheets.size())));
+        items.add(buildItem(2, "缴费基数合计", "", totalBase));
+        items.add(buildItem(3, "养老保险-个人", "基数×8%", pensionPersonal));
+        items.add(buildItem(4, "养老保险-单位", "基数×16%", pensionCompany));
+        items.add(buildItem(5, "医疗保险-个人", "基数×2%", medicalPersonal));
+        items.add(buildItem(6, "医疗保险-单位", "基数×9.5%", medicalCompany));
+        items.add(buildItem(7, "失业保险-个人", "基数×0.5%", unemploymentPersonal));
+        items.add(buildItem(8, "失业保险-单位", "基数×0.5%", unemploymentCompany));
+        items.add(buildItem(9, "工伤保险-单位", "基数×0.5%", injuryCompany));
+        items.add(buildItem(10, "生育保险-单位", "基数×1%", maternityCompany));
+        items.add(buildItem(11, "住房公积金-个人", "基数×5-12%", housingFundPersonal));
+        items.add(buildItem(12, "住房公积金-单位", "基数×5-12%", housingFundCompany));
+        items.add(buildItem(13, "个人缴费合计", "社保个人+公积金个人", totalPersonal));
+        items.add(buildItem(14, "单位缴费合计", "社保单位+公积金单位", totalCompany));
+        items.add(buildItem(15, "缴费总额", "个人+单位", totalPremium));
+
+        vo.setTaxableIncome(totalBase);
+        vo.setTaxAmount(totalPremium);
+        vo.setItems(items);
+        return vo;
+    }
+
+    /**
+     * 生成残疾人就业保障金申报表
+     * 计算公式：保障金年缴纳额 = (上年用人单位在职职工人数×1.5% - 上年用人单位实际安排的残疾人就业人数) × 上年用人单位在职职工年平均工资
+     * 按月申报：月缴纳额 = 年缴纳额 ÷ 12
+     */
+    private TaxDeclarationFormVO generateDisabledEmploymentFundForm(AccountSet accountSet, Integer year, Integer month) {
+        TaxDeclarationFormVO vo = buildBaseForm(accountSet, year, month, "DisabledEmploymentFund", "残疾人就业保障金缴费申报表");
+
+        LambdaQueryWrapper<com.company.daizhang.module.salary.entity.Employee> empWrapper = new LambdaQueryWrapper<>();
+        empWrapper.eq(com.company.daizhang.module.salary.entity.Employee::getAccountSetId, accountSet.getId())
+                .eq(com.company.daizhang.module.salary.entity.Employee::getStatus, 1);
+        Long employeeCount = employeeMapper.selectCount(empWrapper);
+        int empCount = employeeCount != null ? employeeCount.intValue() : 0;
+
+        LambdaQueryWrapper<com.company.daizhang.module.salary.entity.SalarySheet> sheetWrapper = new LambdaQueryWrapper<>();
+        sheetWrapper.eq(com.company.daizhang.module.salary.entity.SalarySheet::getAccountSetId, accountSet.getId())
+                .eq(com.company.daizhang.module.salary.entity.SalarySheet::getYear, year)
+                .eq(com.company.daizhang.module.salary.entity.SalarySheet::getMonth, month);
+        List<com.company.daizhang.module.salary.entity.SalarySheet> sheets = salarySheetMapper.selectList(sheetWrapper);
+
+        BigDecimal totalSalary = BigDecimal.ZERO;
+        for (com.company.daizhang.module.salary.entity.SalarySheet sheet : sheets) {
+            BigDecimal base = sheet.getBaseSalary() != null ? sheet.getBaseSalary() : BigDecimal.ZERO;
+            totalSalary = totalSalary.add(base);
+        }
+        BigDecimal avgSalary = empCount > 0 ? totalSalary.divide(new BigDecimal(empCount), 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
+
+        // 安置比例1.5%
+        BigDecimal placementRate = new BigDecimal("0.015");
+        int disabledEmployees = 0;
+        BigDecimal requiredDisabled = new BigDecimal(empCount).multiply(placementRate);
+        BigDecimal actualDisabled = new BigDecimal(disabledEmployees);
+        BigDecimal diffCount = requiredDisabled.subtract(actualDisabled);
+        if (diffCount.compareTo(BigDecimal.ZERO) < 0) {
+            diffCount = BigDecimal.ZERO;
+        }
+
+        // 月缴纳额 = 差额人数 × 月平均工资
+        BigDecimal monthlyPremium = diffCount.multiply(avgSalary).setScale(2, RoundingMode.HALF_UP);
+
+        // 减免政策：在职职工30人以下（含）暂免征收
+        boolean exempted = empCount <= 30;
+        BigDecimal finalPremium = exempted ? BigDecimal.ZERO : monthlyPremium;
+
+        List<TaxDeclarationFormItemVO> items = new ArrayList<>();
+        items.add(buildItem(1, "在职职工人数", "上月末人数", new BigDecimal(empCount)));
+        items.add(buildItem(2, "应安排残疾人就业比例", "1.5%", placementRate));
+        items.add(buildItem(3, "应安排残疾人就业人数", "职工人数×1.5%", requiredDisabled));
+        items.add(buildItem(4, "实际安排残疾人就业人数", "", actualDisabled));
+        items.add(buildItem(5, "差额人数", "应安排-已安排", diffCount));
+        items.add(buildItem(6, "在职职工月平均工资", "", avgSalary));
+        items.add(buildItem(7, "本期应缴保障金", "差额人数×平均工资", monthlyPremium));
+        if (exempted) {
+            items.add(buildItem(8, "减免金额", "30人以下免征", monthlyPremium));
+            items.add(buildItem(9, "本期实际应缴", "应缴-减免", finalPremium));
+        }
+
+        vo.setTaxableIncome(new BigDecimal(empCount));
+        vo.setTaxAmount(finalPremium);
         vo.setItems(items);
         return vo;
     }

@@ -12,6 +12,8 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
+
 /**
  * 期末处理控制器
  */
@@ -67,5 +69,16 @@ public class PeriodController {
                                          @RequestParam Integer fromYear) {
         periodService.carryForwardYear(accountSetId, fromYear);
         return Result.success();
+    }
+
+    @Operation(summary = "期末成本结转")
+    @PostMapping("/carry-forward-cost")
+    @OperationLog("成本结转")
+    public Result<Long> carryForwardCost(@RequestParam Long accountSetId,
+                                          @RequestParam int year,
+                                          @RequestParam int month,
+                                          @RequestParam(required = false) BigDecimal costRate) {
+        Long voucherId = periodService.carryForwardCost(accountSetId, year, month, costRate);
+        return Result.success(voucherId);
     }
 }

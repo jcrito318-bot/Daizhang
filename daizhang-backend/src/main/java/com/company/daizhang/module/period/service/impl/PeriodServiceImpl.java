@@ -30,6 +30,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -525,5 +526,133 @@ public class PeriodServiceImpl implements PeriodService {
 
         // 5. 标记年度结转完成
         log.info("年度结转完成，账套ID：{}，从{}年度结转至{}年度", accountSetId, fromYear, toYear);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Long carryForwardCost(Long accountSetId, Integer year, Integer month, BigDecimal costRate) {
+        log.info("期末成本结转，账套ID：{}，期间：{}-{}，成本率：{}", accountSetId, year, month, costRate);
+
+        if (costRate == null) {
+            costRate = new BigDecimal("0.80");
+        }
+        if (costRate.compareTo(BigDecimal.ZERO) < 0 || costRate.compareTo(BigDecimal.ONE) > 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "成本率必须在0-1之间");
+        }
+
+        AccountPeriod period = getPeriod(accountSetId, year, month);
+
+        LambdaQueryWrapper<Subject> subjectWrapper = new LambdaQueryWrapper<>();
+        subjectWrapper.eq(Subject::getAccountSetId, accountSetId)
+                .eq(Subject::getStatus, 1);
+        List<Subject> subjects = subjectMapper.selectList(subjectWrapper);
+
+        LambdaQueryWrapper<AccountBalance> balanceWrapper = new LambdaQueryWrapper<>();
+        balanceWrapper.eq(AccountBalance::getAccountSetId, accountSetId)
+                .eq(AccountBalance::getYear, year)
+                .eq(AccountBalance::getMonth, month);
+        List<AccountBalance> balances = accountBalanceMapper.selectList(balanceWrapper);
+        Map<Long, AccountBalance> balanceMap = balances.stream()
+                .collect(Collectors.toMap(AccountBalance::getSubjectId, b -> b));
+
+        BigDecimal totalSalesRevenue = BigDecimal.ZERO;
+        for (Subject subject : subjects) {
+            if (subject.getCode() != null && subject.getCode().startsWith("5001")) {
+                AccountBalance balance = balanceMap.get(subject.getId());
+                if (balance != null && balance.getPeriodCredit() != null) {
+                    totalSalesRevenue = totalSalesRevenue.add(balance.getPeriodCredit());
+                }
+            }
+        }
+
+        if (totalSalesRevenue.compareTo(BigDecimal.ZERO) == 0) {
+            log.info("本期无销售收入，无需结转成本");
+            return null;
+        }
+
+        BigDecimal costAmount = totalSalesRevenue.multiply(costRate).setScale(2, RoundingMode.HALF_UP);
+
+        Subject costSubject = findSubjectByCode(subjects, "5401");
+        if (costSubject == null) {
+            costSubject = findSubjectByCodePrefix(subjects, "5401");
+        }
+        if (costSubject == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "未找到主营业务成本科目(5401)");
+        }
+
+        Subject inventorySubject = findSubjectByCode(subjects, "1405");
+        if (inventorySubject == null) {
+            inventorySubject = findSubjectByCodePrefix(subjects, "1405");
+        }
+        if (inventorySubject == null) {
+            inventorySubject = findSubjectByCodePrefix(subjects, "14");
+        }
+        if (inventorySubject == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "未找到库存商品科目(1405)");
+        }
+
+        Voucher voucher = new Voucher();
+        voucher.setAccountSetId(accountSetId);
+        voucher.setVoucherDate(period.getEndDate());
+        voucher.setYear(year);
+        voucher.setMonth(month);
+        voucher.setStatus(VoucherStatus.UNAUDITED.getCode());
+        voucher.setSource(1);
+        voucher.setTotalDebit(costAmount);
+        voucher.setTotalCredit(costAmount);
+        voucher.setAttachmentCount(0);
+        voucher.setVoucherWordId(1L);
+
+        LambdaQueryWrapper<Voucher> countWrapper = new LambdaQueryWrapper<>();
+        countWrapper.eq(Voucher::getAccountSetId, accountSetId)
+                .eq(Voucher::getYear, year)
+                .eq(Voucher::getMonth, month);
+        Long voucherCount = voucherMapper.selectCount(countWrapper);
+        voucher.setVoucherNo(String.valueOf((voucherCount != null ? voucherCount.intValue() : 0) + 1));
+
+        voucherMapper.insert(voucher);
+
+        VoucherDetail debitDetail = new VoucherDetail();
+        debitDetail.setVoucherId(voucher.getId());
+        debitDetail.setLineNo(1);
+        debitDetail.setSummary("结转销售成本");
+        debitDetail.setSubjectId(costSubject.getId());
+        debitDetail.setSubjectCode(costSubject.getCode());
+        debitDetail.setSubjectName(costSubject.getName());
+        debitDetail.setDebit(costAmount);
+        debitDetail.setCredit(BigDecimal.ZERO);
+        voucherDetailMapper.insert(debitDetail);
+
+        VoucherDetail creditDetail = new VoucherDetail();
+        creditDetail.setVoucherId(voucher.getId());
+        creditDetail.setLineNo(2);
+        creditDetail.setSummary("结转销售成本");
+        creditDetail.setSubjectId(inventorySubject.getId());
+        creditDetail.setSubjectCode(inventorySubject.getCode());
+        creditDetail.setSubjectName(inventorySubject.getName());
+        creditDetail.setDebit(BigDecimal.ZERO);
+        creditDetail.setCredit(costAmount);
+        voucherDetailMapper.insert(creditDetail);
+
+        log.info("成本结转凭证生成成功，凭证ID：{}，成本金额：{}", voucher.getId(), costAmount);
+        return voucher.getId();
+    }
+
+    private Subject findSubjectByCode(List<Subject> subjects, String code) {
+        for (Subject subject : subjects) {
+            if (code.equals(subject.getCode())) {
+                return subject;
+            }
+        }
+        return null;
+    }
+
+    private Subject findSubjectByCodePrefix(List<Subject> subjects, String prefix) {
+        for (Subject subject : subjects) {
+            if (subject.getCode() != null && subject.getCode().startsWith(prefix)) {
+                return subject;
+            }
+        }
+        return null;
     }
 }
