@@ -16,12 +16,18 @@ import com.company.daizhang.module.document.mapper.InputInvoiceMapper;
 import com.company.daizhang.module.document.mapper.OutputInvoiceMapper;
 import com.company.daizhang.module.salary.entity.SalarySheet;
 import com.company.daizhang.module.salary.mapper.SalarySheetMapper;
+import com.company.daizhang.module.customer.entity.Customer;
+import com.company.daizhang.module.customer.mapper.CustomerMapper;
 import com.company.daizhang.module.subject.entity.Subject;
 import com.company.daizhang.module.subject.mapper.SubjectMapper;
 import com.company.daizhang.module.tax.service.TaxService;
+import com.company.daizhang.module.tax.vo.TaxCheckResultVO;
+import com.company.daizhang.module.tax.vo.TaxCheckSummaryVO;
 import com.company.daizhang.module.tax.vo.TaxDeadlineReminderVO;
 import com.company.daizhang.module.tax.vo.TaxDeclarationFormItemVO;
 import com.company.daizhang.module.tax.vo.TaxDeclarationFormVO;
+import com.company.daizhang.module.tax.entity.TaxDeclaration;
+import com.company.daizhang.module.tax.mapper.TaxDeclarationMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
@@ -55,6 +61,8 @@ public class TaxServiceImpl implements TaxService {
     private final OutputInvoiceMapper outputInvoiceMapper;
     private final SalarySheetMapper salarySheetMapper;
     private final FixedAssetMapper fixedAssetMapper;
+    private final TaxDeclarationMapper taxDeclarationMapper;
+    private final CustomerMapper customerMapper;
 
     @Override
     public TaxDeclarationFormVO generateDeclarationForm(Long accountSetId, Integer year, Integer month, String formType) {
@@ -252,6 +260,172 @@ public class TaxServiceImpl implements TaxService {
         }
 
         return reminders;
+    }
+
+    @Override
+    public List<TaxCheckResultVO> checkTaxDeclaration(Long accountSetId, Integer year, Integer month) {
+        List<TaxCheckResultVO> results = new ArrayList<>();
+        AccountSet accountSet = accountSetMapper.selectById(accountSetId);
+        if (accountSet == null) {
+            return results;
+        }
+
+        String customerName = getCustomerNameByAccountSetId(accountSetId);
+        String[] taxTypes = getApplicableTaxTypes(accountSet.getTaxpayerType());
+
+        for (String taxType : taxTypes) {
+            checkSingleTaxType(accountSetId, customerName, year, month, taxType, results);
+        }
+
+        return results;
+    }
+
+    @Override
+    public TaxCheckSummaryVO checkAllTaxDeclarations(Integer year, Integer month) {
+        TaxCheckSummaryVO summary = new TaxCheckSummaryVO();
+        summary.setYear(year);
+        summary.setMonth(month);
+
+        List<AccountSet> accountSets = accountSetMapper.selectList(null);
+        summary.setTotalAccountSets(accountSets.size());
+
+        List<TaxCheckResultVO> allResults = new ArrayList<>();
+        int problemCount = 0;
+        int missingCount = 0;
+        int mismatchCount = 0;
+        int highRisk = 0;
+        int mediumRisk = 0;
+        int lowRisk = 0;
+
+        java.util.Set<Long> problemAccountSets = new java.util.HashSet<>();
+
+        for (AccountSet accountSet : accountSets) {
+            List<TaxCheckResultVO> results = checkTaxDeclaration(accountSet.getId(), year, month);
+            if (!results.isEmpty()) {
+                problemAccountSets.add(accountSet.getId());
+                allResults.addAll(results);
+                for (TaxCheckResultVO r : results) {
+                    if ("MISSING_DECLARATION".equals(r.getCheckType())) {
+                        missingCount++;
+                    } else if ("AMOUNT_MISMATCH".equals(r.getCheckType())) {
+                        mismatchCount++;
+                    }
+                    if (r.getRiskLevel() != null) {
+                        if (r.getRiskLevel() == 1) highRisk++;
+                        else if (r.getRiskLevel() == 2) mediumRisk++;
+                        else lowRisk++;
+                    }
+                }
+            }
+        }
+
+        summary.setProblemCount(problemAccountSets.size());
+        summary.setMissingDeclarationCount(missingCount);
+        summary.setAmountMismatchCount(mismatchCount);
+        summary.setHighRiskCount(highRisk);
+        summary.setMediumRiskCount(mediumRisk);
+        summary.setLowRiskCount(lowRisk);
+        summary.setResults(allResults);
+
+        return summary;
+    }
+
+    private void checkSingleTaxType(Long accountSetId, String customerName, Integer year, Integer month,
+                                    String taxType, List<TaxCheckResultVO> results) {
+        LambdaQueryWrapper<TaxDeclaration> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(TaxDeclaration::getAccountSetId, accountSetId)
+                .eq(TaxDeclaration::getYear, year)
+                .eq(TaxDeclaration::getMonth, month)
+                .eq(TaxDeclaration::getTaxType, taxType);
+        TaxDeclaration declaration = taxDeclarationMapper.selectOne(wrapper);
+
+        // 1. 漏报检查：无申报记录 或 状态为未申报(0)且已过申报期
+        if (declaration == null) {
+            TaxCheckResultVO vo = buildCheckResult(accountSetId, customerName, year, month, taxType,
+                    "MISSING_DECLARATION", 1, BigDecimal.ZERO, BigDecimal.ZERO,
+                    taxType + "无申报记录", "请及时补报" + taxType);
+            results.add(vo);
+            return;
+        }
+
+        if (declaration.getStatus() != null && declaration.getStatus() == 0) {
+            LocalDate deadline = LocalDate.of(year, month, 15).plusMonths(1);
+            if (LocalDate.now().isAfter(deadline)) {
+                TaxCheckResultVO vo = buildCheckResult(accountSetId, customerName, year, month, taxType,
+                        "MISSING_DECLARATION", 1,
+                        declaration.getTaxAmount() != null ? declaration.getTaxAmount() : BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        taxType + "已逾期未申报", "请立即申报并缴纳税款");
+                results.add(vo);
+            }
+        }
+
+        // 2. 错报检查：系统计算应纳税额 vs 申报税额差异超过5%
+        try {
+            TaxDeclarationFormVO form = generateDeclarationForm(accountSetId, year, month, taxType);
+            BigDecimal expectedAmount = form.getTaxAmount() != null ? form.getTaxAmount() : BigDecimal.ZERO;
+            BigDecimal declaredAmount = declaration.getDeclaredAmount() != null ? declaration.getDeclaredAmount() : BigDecimal.ZERO;
+
+            if (expectedAmount.compareTo(BigDecimal.ZERO) > 0
+                    && declaredAmount.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal diff = expectedAmount.subtract(declaredAmount).abs();
+                BigDecimal ratio = diff.divide(expectedAmount, 4, RoundingMode.HALF_UP);
+                if (ratio.compareTo(new BigDecimal("0.05")) > 0) {
+                    int riskLevel = ratio.compareTo(new BigDecimal("0.2")) > 0 ? 1 : 2;
+                    TaxCheckResultVO vo = buildCheckResult(accountSetId, customerName, year, month, taxType,
+                            "AMOUNT_MISMATCH", riskLevel,
+                            expectedAmount, declaredAmount,
+                            taxType + "申报税额与系统计算差异" + ratio.multiply(new BigDecimal("100")).setScale(2, RoundingMode.HALF_UP) + "%",
+                            "请复核申报表数据");
+                    results.add(vo);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("计算{}应纳税额失败: {}", taxType, e.getMessage());
+        }
+
+        // 3. 状态异常检查：已申报但无申报日期
+        if (declaration.getStatus() != null && declaration.getStatus() >= 1 && declaration.getDeclarationDate() == null) {
+            TaxCheckResultVO vo = buildCheckResult(accountSetId, customerName, year, month, taxType,
+                    "STATUS_ABNORMAL", 3, BigDecimal.ZERO, BigDecimal.ZERO,
+                    taxType + "申报状态异常：已申报但无申报日期", "请补充申报日期信息");
+            results.add(vo);
+        }
+    }
+
+    private TaxCheckResultVO buildCheckResult(Long accountSetId, String customerName, Integer year, Integer month,
+                                               String taxType, String checkType, Integer riskLevel,
+                                               BigDecimal expectedAmount, BigDecimal declaredAmount,
+                                               String description, String suggestion) {
+        TaxCheckResultVO vo = new TaxCheckResultVO();
+        vo.setAccountSetId(accountSetId);
+        vo.setCustomerName(customerName);
+        vo.setYear(year);
+        vo.setMonth(month);
+        vo.setTaxType(taxType);
+        vo.setCheckType(checkType);
+        vo.setRiskLevel(riskLevel);
+        vo.setExpectedTaxAmount(expectedAmount);
+        vo.setDeclaredAmount(declaredAmount);
+        vo.setDiffAmount(expectedAmount.subtract(declaredAmount).abs());
+        vo.setDescription(description);
+        vo.setSuggestion(suggestion);
+        return vo;
+    }
+
+    private String[] getApplicableTaxTypes(String taxpayerType) {
+        if ("小规模纳税人".equals(taxpayerType)) {
+            return new String[]{"SmallScaleVAT", "Surcharge", "IncomeTax", "PersonalTax", "StampTax"};
+        }
+        return new String[]{"VAT", "Surcharge", "IncomeTax", "PersonalTax", "StampTax",
+                "HouseTax", "LandUseTax", "VehicleTax"};
+    }
+
+    private String getCustomerNameByAccountSetId(Long accountSetId) {
+        LambdaQueryWrapper<Customer> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Customer::getAccountSetId, accountSetId);
+        Customer customer = customerMapper.selectOne(wrapper);
+        return customer != null ? customer.getCustomerName() : "";
     }
 
     // ==================== 申报表生成 ====================

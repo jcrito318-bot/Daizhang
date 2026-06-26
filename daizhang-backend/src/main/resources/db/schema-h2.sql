@@ -935,6 +935,59 @@ CREATE TABLE IF NOT EXISTS `cst_billing_record` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='客户开票记录表';
 
 -- ============================================
+-- 13.5 工商服务模块
+-- ============================================
+
+-- 工商服务记录表
+CREATE TABLE IF NOT EXISTS `ic_service` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `customer_id` BIGINT NOT NULL COMMENT '客户ID',
+  `contract_id` BIGINT DEFAULT NULL COMMENT '合同ID',
+  `service_type` TINYINT NOT NULL DEFAULT 1 COMMENT '服务类型 1-工商注册 2-工商变更 3-工商注销',
+  `service_name` VARCHAR(200) DEFAULT NULL COMMENT '服务项目名称',
+  `service_status` TINYINT NOT NULL DEFAULT 0 COMMENT '状态 0-待派工 1-进行中 2-已完成 3-已取消',
+  `assignee_id` BIGINT DEFAULT NULL COMMENT '经办人ID',
+  `expected_complete_date` DATE DEFAULT NULL COMMENT '预计完成日期',
+  `actual_complete_date` DATE DEFAULT NULL COMMENT '实际完成日期',
+  `cost_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 COMMENT '成本金额',
+  `service_amount` DECIMAL(18,2) NOT NULL DEFAULT 0.00 COMMENT '服务金额',
+  `remark` VARCHAR(500) DEFAULT NULL COMMENT '备注',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标志 0-未删除 1-已删除',
+  `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+  `create_by` BIGINT DEFAULT NULL COMMENT '创建人',
+  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` BIGINT DEFAULT NULL COMMENT '更新人',
+  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ic_service_customer_id` (`customer_id`),
+  KEY `idx_ic_service_status` (`service_status`),
+  KEY `idx_ic_service_assignee` (`assignee_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='工商服务记录表';
+
+-- 工商外勤任务表
+CREATE TABLE IF NOT EXISTS `ic_task` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `service_id` BIGINT NOT NULL COMMENT '工商服务ID',
+  `task_name` VARCHAR(200) NOT NULL COMMENT '任务名称',
+  `task_status` TINYINT NOT NULL DEFAULT 0 COMMENT '状态 0-待处理 1-进行中 2-已完成 3-已取消',
+  `assignee_id` BIGINT DEFAULT NULL COMMENT '经办人ID',
+  `field_date` DATE DEFAULT NULL COMMENT '外勤日期',
+  `location` VARCHAR(200) DEFAULT NULL COMMENT '地点',
+  `remark` VARCHAR(500) DEFAULT NULL COMMENT '备注',
+  `complete_time` DATETIME DEFAULT NULL COMMENT '完成时间',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标志 0-未删除 1-已删除',
+  `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+  `create_by` BIGINT DEFAULT NULL COMMENT '创建人',
+  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` BIGINT DEFAULT NULL COMMENT '更新人',
+  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_ic_task_service_id` (`service_id`),
+  KEY `idx_ic_task_status` (`task_status`),
+  KEY `idx_ic_task_assignee` (`assignee_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='工商外勤任务表';
+
+-- ============================================
 -- 14. 期初余额模块
 -- ============================================
 

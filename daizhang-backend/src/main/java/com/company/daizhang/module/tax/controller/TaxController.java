@@ -13,6 +13,8 @@ import com.company.daizhang.module.tax.service.TaxDeclarationService;
 import com.company.daizhang.module.tax.service.TaxService;
 import com.company.daizhang.module.tax.vo.TaxCalculationResultVO;
 import com.company.daizhang.module.tax.vo.TaxCalculationVO;
+import com.company.daizhang.module.tax.vo.TaxCheckResultVO;
+import com.company.daizhang.module.tax.vo.TaxCheckSummaryVO;
 import com.company.daizhang.module.tax.vo.TaxDeadlineReminderVO;
 import com.company.daizhang.module.tax.vo.TaxDeclarationFormVO;
 import com.company.daizhang.module.tax.vo.TaxDeclarationVO;
@@ -90,6 +92,23 @@ public class TaxController {
     public Result<List<TaxDeadlineReminderVO>> deadlineReminder() {
         List<TaxDeadlineReminderVO> reminders = taxService.getDeadlineReminders();
         return Result.success(reminders);
+    }
+
+    @Operation(summary = "单账套税务检查（漏报/错报/状态异常）")
+    @GetMapping("/check")
+    public Result<List<TaxCheckResultVO>> checkTaxDeclaration(@RequestParam Long accountSetId,
+                                                               @RequestParam Integer year,
+                                                               @RequestParam Integer month) {
+        List<TaxCheckResultVO> results = taxService.checkTaxDeclaration(accountSetId, year, month);
+        return Result.success(results);
+    }
+
+    @Operation(summary = "全账套税务检查汇总（漏报/错报检查）")
+    @GetMapping("/check/all")
+    public Result<TaxCheckSummaryVO> checkAllTaxDeclarations(@RequestParam Integer year,
+                                                              @RequestParam Integer month) {
+        TaxCheckSummaryVO summary = taxService.checkAllTaxDeclarations(year, month);
+        return Result.success(summary);
     }
 
     // ==================== 申报记录CRUD（tax_declaration表） ====================

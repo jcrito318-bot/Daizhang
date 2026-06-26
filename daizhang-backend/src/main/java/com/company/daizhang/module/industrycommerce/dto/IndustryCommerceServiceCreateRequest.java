@@ -1,0 +1,60 @@
+package com.company.daizhang.module.industrycommerce.dto;
+
+import jakarta.validation.constraints.NotNull;
+import lombok.Data;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+
+/**
+ * 工商服务创建请求
+ */
+@Data
+public class IndustryCommerceServiceCreateRequest {
+
+    /**
+     * 客户ID
+     */
+    @NotNull(message = "客户ID不能为空")
+    private Long customerId;
+
+    /**
+     * 合同ID（可空）
+     */
+    private Long contractId;
+
+    /**
+     * 服务类型:1注册 2变更 3注销
+     */
+    private Integer serviceType;
+
+    /**
+     * 服务项目名称
+     */
+    private String serviceName;
+
+    /**
+     * 经办人ID
+     */
+    private Long assigneeId;
+
+    /**
+     * 预计完成日期
+     */
+    private LocalDate expectedCompleteDate;
+
+    /**
+     * 成本金额
+     */
+    private BigDecimal costAmount = BigDecimal.ZERO;
+
+    /**
+     * 服务金额
+     */
+    private BigDecimal serviceAmount = BigDecimal.ZERO;
+
+    /**
+     * 备注
+     */
+    private String remark;
+}
