@@ -228,6 +228,25 @@ public class PeriodServiceImpl implements PeriodService {
         // 1. 查询该期间
         AccountPeriod period = getPeriod(accountSetId, year, month);
 
+        // 1.1 幂等校验:检查本期是否已存在系统生成的损益结转凭证,避免重复结转
+        LambdaQueryWrapper<Voucher> existWrapper = new LambdaQueryWrapper<>();
+        existWrapper.eq(Voucher::getAccountSetId, accountSetId)
+                   .eq(Voucher::getYear, year)
+                   .eq(Voucher::getMonth, month)
+                   .eq(Voucher::getSource, 1);
+        List<Voucher> existVouchers = voucherMapper.selectList(existWrapper);
+        if (!existVouchers.isEmpty()) {
+            List<Long> voucherIds = existVouchers.stream().map(Voucher::getId).collect(Collectors.toList());
+            LambdaQueryWrapper<VoucherDetail> carryDetailWrapper = new LambdaQueryWrapper<>();
+            carryDetailWrapper.in(VoucherDetail::getVoucherId, voucherIds)
+                    .eq(VoucherDetail::getSummary, "结转本年利润");
+            Long carryCount = voucherDetailMapper.selectCount(carryDetailWrapper);
+            if (carryCount != null && carryCount > 0) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                        "本期" + year + "年" + month + "月已执行损益结转,不能重复结转");
+            }
+        }
+
         // 2. 查询收入类科目（损益类且贷方余额，balance_direction=2）
         LambdaQueryWrapper<Subject> revenueWrapper = new LambdaQueryWrapper<>();
         revenueWrapper.eq(Subject::getAccountSetId, accountSetId)
@@ -261,6 +280,7 @@ public class PeriodServiceImpl implements PeriodService {
                 .collect(Collectors.toMap(AccountBalance::getSubjectId, b -> b));
 
         // 6. 计算收入总额（按净额: endCredit - endDebit,处理销售退回等借方余额）
+        // 收入净额可能为正(正常收入)或负(销售退回),totalRevenue累加全部净额保证借贷平衡
         BigDecimal totalRevenue = BigDecimal.ZERO;
         Map<Long, BigDecimal> revenueNetMap = new HashMap<>();
         for (Subject subject : revenueSubjects) {
@@ -271,14 +291,13 @@ public class PeriodServiceImpl implements PeriodService {
                 BigDecimal net = credit.subtract(debit);
                 if (net.compareTo(BigDecimal.ZERO) != 0) {
                     revenueNetMap.put(subject.getId(), net);
-                    if (net.compareTo(BigDecimal.ZERO) > 0) {
-                        totalRevenue = totalRevenue.add(net);
-                    }
+                    totalRevenue = totalRevenue.add(net);
                 }
             }
         }
 
         // 7. 计算费用总额（按净额: endDebit - endCredit,处理费用红字冲销等贷方余额）
+        // 费用净额可能为正(正常费用)或负(红字冲销),totalExpense累加全部净额保证借贷平衡
         BigDecimal totalExpense = BigDecimal.ZERO;
         Map<Long, BigDecimal> expenseNetMap = new HashMap<>();
         for (Subject subject : expenseSubjects) {
@@ -289,9 +308,7 @@ public class PeriodServiceImpl implements PeriodService {
                 BigDecimal net = debit.subtract(credit);
                 if (net.compareTo(BigDecimal.ZERO) != 0) {
                     expenseNetMap.put(subject.getId(), net);
-                    if (net.compareTo(BigDecimal.ZERO) > 0) {
-                        totalExpense = totalExpense.add(net);
-                    }
+                    totalExpense = totalExpense.add(net);
                 }
             }
         }
@@ -304,9 +321,43 @@ public class PeriodServiceImpl implements PeriodService {
         }
 
         // 8. 生成结转凭证
-        // 凭证总额 = max(收入总额, 费用总额)，保证借贷平衡
-        BigDecimal totalAmount = totalRevenue.max(totalExpense);
+        // 利润 = 收入净额合计 - 费用净额合计(含正负值,保证借贷平衡)
         BigDecimal profit = totalRevenue.subtract(totalExpense);
+        // 凭证借贷合计:借方=正向收入净额+正向(负费用净额abs)+亏损abs;贷方=正向费用净额+负向收入净额abs+盈利
+        // 简化:totalAmount取借方合计=正向收入净额合计 + 负向费用净额abs合计 + (亏损?亏损abs:0)
+        // 由于复式记账借贷必等,直接用借方合计作为totalDebit和totalCredit
+        BigDecimal positiveRevenue = BigDecimal.ZERO;
+        BigDecimal negativeRevenueAbs = BigDecimal.ZERO;
+        for (BigDecimal net : revenueNetMap.values()) {
+            if (net.compareTo(BigDecimal.ZERO) > 0) {
+                positiveRevenue = positiveRevenue.add(net);
+            } else {
+                negativeRevenueAbs = negativeRevenueAbs.add(net.abs());
+            }
+        }
+        BigDecimal positiveExpense = BigDecimal.ZERO;
+        BigDecimal negativeExpenseAbs = BigDecimal.ZERO;
+        for (BigDecimal net : expenseNetMap.values()) {
+            if (net.compareTo(BigDecimal.ZERO) > 0) {
+                positiveExpense = positiveExpense.add(net);
+            } else {
+                negativeExpenseAbs = negativeExpenseAbs.add(net.abs());
+            }
+        }
+        // 借方合计 = 正向收入(借记) + 负向费用abs(借记) + 亏损abs(借记本年利润)
+        // 贷方合计 = 正向费用(贷记) + 负向收入abs(贷记) + 盈利(贷记本年利润)
+        // 两者必然相等(复式记账平衡)
+        BigDecimal totalAmount = positiveRevenue.add(negativeExpenseAbs);
+        if (profit.compareTo(BigDecimal.ZERO) < 0) {
+            totalAmount = totalAmount.add(profit.abs());
+        } else {
+            // 盈利时贷方多出profit,借方需包含其他项使两者相等
+            // 实际借方=正向收入+负向费用abs, 贷方=正向费用+负向收入abs+profit
+            // 验证: 借-贷 = (正向收入+负向费用abs) - (正向费用+负向收入abs+profit)
+            //       = (正向收入-负向收入abs) - (正向费用-负向费用abs) - profit
+            //       = totalRevenue - totalExpense - profit = 0 (因profit=totalRevenue-totalExpense)
+            // 所以totalAmount=借方合计=正向收入+负向费用abs,贷方=正向费用+负向收入abs+profit,两者相等
+        }
 
         Voucher voucher = new Voucher();
         voucher.setAccountSetId(accountSetId);

@@ -2,6 +2,7 @@ package com.company.daizhang.module.accountset.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.utils.SecurityUtils;
@@ -9,6 +10,9 @@ import com.company.daizhang.module.accountset.entity.AccountPeriod;
 import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
 import com.company.daizhang.module.accountset.service.AccountPeriodService;
 import com.company.daizhang.module.accountset.vo.AccountPeriodVO;
+import com.company.daizhang.module.voucher.entity.Voucher;
+import com.company.daizhang.module.voucher.mapper.VoucherMapper;
+import com.company.daizhang.common.enums.VoucherStatus;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,6 +30,7 @@ import java.util.stream.Collectors;
 public class AccountPeriodServiceImpl implements AccountPeriodService {
     
     private final AccountPeriodMapper accountPeriodMapper;
+    private final VoucherMapper voucherMapper;
     
     @Override
     public List<AccountPeriodVO> listPeriods(Long accountSetId) {
@@ -71,32 +76,72 @@ public class AccountPeriodServiceImpl implements AccountPeriodService {
     @Transactional(rollbackFor = Exception.class)
     public void closePeriod(Long accountSetId, int year, int month) {
         AccountPeriod period = getPeriod(accountSetId, year, month);
-        
+
         if (period.getStatus() == 1) {
             throw new BusinessException(400, "该期间已结账");
         }
-        
-        period.setStatus(1);
-        period.setCloseBy(SecurityUtils.getCurrentUserId());
-        period.setCloseTime(LocalDateTime.now());
-        
-        accountPeriodMapper.updateById(period);
+
+        // 校验本期凭证是否全部审核
+        LambdaQueryWrapper<Voucher> unauditWrapper = new LambdaQueryWrapper<>();
+        unauditWrapper.eq(Voucher::getAccountSetId, accountSetId)
+                     .eq(Voucher::getYear, year)
+                     .eq(Voucher::getMonth, month)
+                     .eq(Voucher::getStatus, VoucherStatus.UNAUDITED.getCode());
+        long unauditedCount = voucherMapper.selectCount(unauditWrapper);
+        if (unauditedCount > 0) {
+            throw new BusinessException(400, "存在" + unauditedCount + "张未审核的凭证，无法结账");
+        }
+
+        // 校验本期凭证是否全部过账
+        LambdaQueryWrapper<Voucher> unpostWrapper = new LambdaQueryWrapper<>();
+        unpostWrapper.eq(Voucher::getAccountSetId, accountSetId)
+                    .eq(Voucher::getYear, year)
+                    .eq(Voucher::getMonth, month)
+                    .ne(Voucher::getStatus, VoucherStatus.POSTED.getCode());
+        long unpostedCount = voucherMapper.selectCount(unpostWrapper);
+        if (unpostedCount > 0) {
+            throw new BusinessException(400, "存在" + unpostedCount + "张未过账的凭证，无法结账");
+        }
+
+        // 使用LambdaUpdateWrapper确保null字段能正确更新
+        LambdaUpdateWrapper<AccountPeriod> updateWrapper = new LambdaUpdateWrapper<>();
+        updateWrapper.eq(AccountPeriod::getId, period.getId())
+                .set(AccountPeriod::getStatus, 1)
+                .set(AccountPeriod::getCloseBy, SecurityUtils.getCurrentUserId())
+                .set(AccountPeriod::getCloseTime, LocalDateTime.now());
+        accountPeriodMapper.update(null, updateWrapper);
     }
-    
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void reopenPeriod(Long accountSetId, int year, int month) {
         AccountPeriod period = getPeriod(accountSetId, year, month);
-        
+
         if (period.getStatus() == 0) {
             throw new BusinessException(400, "该期间未结账");
         }
-        
-        period.setStatus(0);
-        period.setCloseBy(null);
-        period.setCloseTime(null);
-        
-        accountPeriodMapper.updateById(period);
+
+        // 校验是否存在已结账的后续期间(必须从后往前依次反结账)
+        LambdaQueryWrapper<AccountPeriod> subsequentWrapper = new LambdaQueryWrapper<>();
+        subsequentWrapper.eq(AccountPeriod::getAccountSetId, accountSetId)
+                        .eq(AccountPeriod::getStatus, 1)
+                        .and(w -> w
+                                .gt(AccountPeriod::getYear, year)
+                                .or()
+                                .eq(AccountPeriod::getYear, year)
+                                .gt(AccountPeriod::getMonth, month));
+        Long subsequentCount = accountPeriodMapper.selectCount(subsequentWrapper);
+        if (subsequentCount != null && subsequentCount > 0) {
+            throw new BusinessException(400, "存在已结账的后续期间，请先反结账后续期间");
+        }
+
+        // 使用LambdaUpdateWrapper显式置空closeBy/closeTime,避免NOT_NULL策略导致null字段不更新
+        LambdaUpdateWrapper<AccountPeriod> updateWrapper = new LambdaUpdateWrapper<>();
+        updateWrapper.eq(AccountPeriod::getId, period.getId())
+                .set(AccountPeriod::getStatus, 0)
+                .set(AccountPeriod::getCloseBy, null)
+                .set(AccountPeriod::getCloseTime, null);
+        accountPeriodMapper.update(null, updateWrapper);
     }
     
     @Override

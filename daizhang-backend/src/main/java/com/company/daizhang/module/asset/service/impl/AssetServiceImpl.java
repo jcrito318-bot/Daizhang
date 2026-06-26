@@ -602,9 +602,9 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
     private BigDecimal calculateMonthlyDepreciation(BigDecimal purchaseAmount, BigDecimal residualValue,
                                                      Integer usefulLife, String depreciationMethod) {
         if ("直线法".equals(depreciationMethod)) {
-            // 直线法：月折旧额 = (原值 - 残值) / 使用年限
+            // 直线法：月折旧额 = (原值 - 残值) / 使用年限 / 12
             return purchaseAmount.subtract(residualValue)
-                    .divide(BigDecimal.valueOf(usefulLife), 2, RoundingMode.HALF_UP);
+                    .divide(BigDecimal.valueOf(usefulLife).multiply(BigDecimal.valueOf(12)), 2, RoundingMode.HALF_UP);
         } else if ("双倍余额递减法".equals(depreciationMethod)) {
             // 双倍余额递减法：年折旧率 = 2 / 使用年限 * 100%
             // 月折旧额 = 原值 * 年折旧率 / 12
@@ -612,9 +612,9 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
             return purchaseAmount.multiply(rate)
                     .divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP);
         } else if ("工作量法".equals(depreciationMethod)) {
-            // 工作量法：通常按实际工作量计算，这里简化为按直线法
+            // 工作量法：简化为按直线法，月折旧额 = (原值 - 残值) / 使用年限 / 12
             return purchaseAmount.subtract(residualValue)
-                    .divide(BigDecimal.valueOf(usefulLife), 2, RoundingMode.HALF_UP);
+                    .divide(BigDecimal.valueOf(usefulLife).multiply(BigDecimal.valueOf(12)), 2, RoundingMode.HALF_UP);
         }
         return BigDecimal.ZERO;
     }
