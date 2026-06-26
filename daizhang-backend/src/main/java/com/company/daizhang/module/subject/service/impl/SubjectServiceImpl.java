@@ -51,8 +51,8 @@ public class SubjectServiceImpl extends ServiceImpl<SubjectMapper, Subject> impl
         List<Subject> subjects = new ArrayList<>();
         
         // 资产类
-        addSubject(subjects, accountSetId, "1001", "库存现金", "资产", 0L, 1, 1, 1, 1, 0, 0);
-        addSubject(subjects, accountSetId, "1002", "银行存款", "资产", 0L, 1, 1, 0, 1, 0, 0);
+        addSubject(subjects, accountSetId, "1001", "库存现金", "资产", 0L, 1, 1, 0, 1, 0, 0);
+        addSubject(subjects, accountSetId, "1002", "银行存款", "资产", 0L, 1, 1, 0, 0, 1, 0);
         addSubject(subjects, accountSetId, "1012", "其他货币资金", "资产", 0L, 1, 1, 0, 0, 0, 0);
         addSubject(subjects, accountSetId, "1101", "短期投资", "资产", 0L, 1, 1, 0, 0, 0, 0);
         addSubject(subjects, accountSetId, "1121", "应收票据", "资产", 0L, 1, 1, 0, 0, 0, 0);
@@ -101,18 +101,18 @@ public class SubjectServiceImpl extends ServiceImpl<SubjectMapper, Subject> impl
         addSubject(subjects, accountSetId, "4101", "制造费用", "成本", 0L, 1, 1, 0, 0, 0, 0);
         
         // 损益类
-        addSubject(subjects, accountSetId, "5001", "主营业务收入", "损益", 0L, 1, 2, 0, 0, 1, 0);
-        addSubject(subjects, accountSetId, "5051", "其他业务收入", "损益", 0L, 1, 2, 0, 0, 1, 0);
-        addSubject(subjects, accountSetId, "5111", "投资收益", "损益", 0L, 1, 2, 0, 0, 1, 0);
-        addSubject(subjects, accountSetId, "5301", "营业外收入", "损益", 0L, 1, 2, 0, 0, 1, 0);
-        addSubject(subjects, accountSetId, "5401", "主营业务成本", "损益", 0L, 1, 1, 0, 0, 1, 0);
-        addSubject(subjects, accountSetId, "5402", "其他业务成本", "损益", 0L, 1, 1, 0, 0, 1, 0);
-        addSubject(subjects, accountSetId, "5403", "税金及附加", "损益", 0L, 1, 1, 0, 0, 1, 0);
-        addSubject(subjects, accountSetId, "5601", "销售费用", "损益", 0L, 1, 1, 0, 0, 1, 0);
-        addSubject(subjects, accountSetId, "5602", "管理费用", "损益", 0L, 1, 1, 0, 0, 1, 0);
-        addSubject(subjects, accountSetId, "5603", "财务费用", "损益", 0L, 1, 1, 0, 0, 1, 0);
-        addSubject(subjects, accountSetId, "5711", "营业外支出", "损益", 0L, 1, 1, 0, 0, 1, 0);
-        addSubject(subjects, accountSetId, "5801", "所得税费用", "损益", 0L, 1, 1, 0, 0, 1, 0);
+        addSubject(subjects, accountSetId, "5001", "主营业务收入", "损益", 0L, 1, 2, 0, 0, 0, 1);
+        addSubject(subjects, accountSetId, "5051", "其他业务收入", "损益", 0L, 1, 2, 0, 0, 0, 1);
+        addSubject(subjects, accountSetId, "5111", "投资收益", "损益", 0L, 1, 2, 0, 0, 0, 1);
+        addSubject(subjects, accountSetId, "5301", "营业外收入", "损益", 0L, 1, 2, 0, 0, 0, 1);
+        addSubject(subjects, accountSetId, "5401", "主营业务成本", "损益", 0L, 1, 1, 0, 0, 0, 1);
+        addSubject(subjects, accountSetId, "5402", "其他业务成本", "损益", 0L, 1, 1, 0, 0, 0, 1);
+        addSubject(subjects, accountSetId, "5403", "税金及附加", "损益", 0L, 1, 1, 0, 0, 0, 1);
+        addSubject(subjects, accountSetId, "5601", "销售费用", "损益", 0L, 1, 1, 0, 0, 0, 1);
+        addSubject(subjects, accountSetId, "5602", "管理费用", "损益", 0L, 1, 1, 0, 0, 0, 1);
+        addSubject(subjects, accountSetId, "5603", "财务费用", "损益", 0L, 1, 1, 0, 0, 0, 1);
+        addSubject(subjects, accountSetId, "5711", "营业外支出", "损益", 0L, 1, 1, 0, 0, 0, 1);
+        addSubject(subjects, accountSetId, "5801", "所得税费用", "损益", 0L, 1, 1, 0, 0, 0, 1);
         
         this.saveBatch(subjects);
         

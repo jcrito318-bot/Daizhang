@@ -21,7 +21,9 @@ import com.company.daizhang.module.subject.entity.Subject;
 import com.company.daizhang.module.subject.mapper.SubjectMapper;
 import com.company.daizhang.module.subject.service.SubjectService;
 import com.company.daizhang.module.voucher.entity.Voucher;
+import com.company.daizhang.module.voucher.entity.VoucherWord;
 import com.company.daizhang.module.voucher.mapper.VoucherMapper;
+import com.company.daizhang.module.voucher.mapper.VoucherWordMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -43,6 +45,7 @@ public class AccountSetServiceImpl extends ServiceImpl<AccountSetMapper, Account
     private final SubjectMapper subjectMapper;
     private final SubjectService subjectService;
     private final VoucherMapper voucherMapper;
+    private final VoucherWordMapper voucherWordMapper;
     
     @Override
     public PageResult<AccountSetVO> pageAccountSets(AccountSetQueryRequest request) {
@@ -200,7 +203,21 @@ public class AccountSetServiceImpl extends ServiceImpl<AccountSetMapper, Account
         
         // 导入默认科目
         subjectService.initDefaultSubjects(id, accountSet.getAccountingStandard());
-        
+
+        // 复制默认凭证字模板（account_set_id=0 为系统默认模板）
+        LambdaQueryWrapper<VoucherWord> wordWrapper = new LambdaQueryWrapper<>();
+        wordWrapper.eq(VoucherWord::getAccountSetId, 0L);
+        List<VoucherWord> templateWords = voucherWordMapper.selectList(wordWrapper);
+        for (VoucherWord template : templateWords) {
+            VoucherWord word = new VoucherWord();
+            word.setAccountSetId(id);
+            word.setName(template.getName());
+            word.setCode(template.getCode());
+            word.setSortOrder(template.getSortOrder());
+            word.setStatus(1);
+            voucherWordMapper.insert(word);
+        }
+
         log.info("初始化账套成功，账套ID: {}, 启用年度: {}", id, accountSet.getStartYear());
     }
     
