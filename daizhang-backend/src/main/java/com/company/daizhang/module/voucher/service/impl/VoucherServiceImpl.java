@@ -3,13 +3,16 @@ package com.company.daizhang.module.voucher.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.utils.SecurityUtils;
+import com.company.daizhang.module.accountset.entity.AccountBalance;
 import com.company.daizhang.module.accountset.entity.AccountPeriod;
+import com.company.daizhang.module.accountset.mapper.AccountBalanceMapper;
 import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
 import com.company.daizhang.module.subject.entity.Subject;
 import com.company.daizhang.module.subject.mapper.SubjectMapper;
@@ -50,6 +53,7 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     private final VoucherDetailMapper voucherDetailMapper;
     private final VoucherWordMapper voucherWordMapper;
     private final AccountPeriodMapper accountPeriodMapper;
+    private final AccountBalanceMapper accountBalanceMapper;
     private final SysUserMapper sysUserMapper;
     private final SubjectMapper subjectMapper;
 
@@ -338,8 +342,14 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         voucher.setStatus(0);
         voucher.setAuditBy(null);
         voucher.setAuditTime(null);
-        this.updateById(voucher);
-        
+        // 使用LambdaUpdateWrapper显式set null，避免MyBatis-Plus默认NOT_NULL策略不更新null字段
+        LambdaUpdateWrapper<Voucher> updateWrapper = new LambdaUpdateWrapper<>();
+        updateWrapper.eq(Voucher::getId, id)
+                     .set(Voucher::getStatus, 0)
+                     .set(Voucher::getAuditBy, null)
+                     .set(Voucher::getAuditTime, null);
+        this.update(updateWrapper);
+
         log.info("反审核凭证成功，凭证ID: {}, 凭证号: {}", id, voucher.getVoucherNo());
     }
 
@@ -413,7 +423,13 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             voucher.setStatus(0);
             voucher.setAuditBy(null);
             voucher.setAuditTime(null);
-            this.updateById(voucher);
+            // 使用LambdaUpdateWrapper显式set null
+            LambdaUpdateWrapper<Voucher> updateWrapper = new LambdaUpdateWrapper<>();
+            updateWrapper.eq(Voucher::getId, voucher.getId())
+                         .set(Voucher::getStatus, 0)
+                         .set(Voucher::getAuditBy, null)
+                         .set(Voucher::getAuditTime, null);
+            this.update(updateWrapper);
             success++;
         }
 
@@ -438,12 +454,106 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             throw new BusinessException(ErrorCode.VOUCHER_NOT_AUDITED);
         }
 
+        // 查询凭证明细
+        LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
+        detailWrapper.eq(VoucherDetail::getVoucherId, id)
+                     .orderByAsc(VoucherDetail::getSortOrder);
+        List<VoucherDetail> details = voucherDetailMapper.selectList(detailWrapper);
+
+        // 更新各科目余额
+        for (VoucherDetail detail : details) {
+            updateAccountBalance(voucher, detail);
+        }
+
         voucher.setStatus(2);
         voucher.setPostBy(SecurityUtils.getCurrentUserId());
         voucher.setPostTime(LocalDateTime.now());
         this.updateById(voucher);
-        
+
         log.info("过账凭证成功，凭证ID: {}, 凭证号: {}", id, voucher.getVoucherNo());
+    }
+
+    /**
+     * 过账时更新科目余额（本期发生额、期末余额、本年累计）
+     */
+    private void updateAccountBalance(Voucher voucher, VoucherDetail detail) {
+        Long accountSetId = voucher.getAccountSetId();
+        Long subjectId = detail.getSubjectId();
+        Integer year = voucher.getYear();
+        Integer month = voucher.getMonth();
+
+        BigDecimal debit = detail.getDebit() != null ? detail.getDebit() : BigDecimal.ZERO;
+        BigDecimal credit = detail.getCredit() != null ? detail.getCredit() : BigDecimal.ZERO;
+        if (debit.compareTo(BigDecimal.ZERO) == 0 && credit.compareTo(BigDecimal.ZERO) == 0) {
+            return;
+        }
+
+        // 查询科目以获取余额方向
+        Subject subject = subjectMapper.selectById(subjectId);
+        Integer balanceDirection = subject != null && subject.getBalanceDirection() != null
+                ? subject.getBalanceDirection() : 1;
+
+        // 查询或创建该期间该科目的余额记录
+        LambdaQueryWrapper<AccountBalance> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(AccountBalance::getAccountSetId, accountSetId)
+               .eq(AccountBalance::getSubjectId, subjectId)
+               .eq(AccountBalance::getYear, year)
+               .eq(AccountBalance::getMonth, month);
+        AccountBalance balance = accountBalanceMapper.selectOne(wrapper);
+
+        if (balance == null) {
+            balance = new AccountBalance();
+            balance.setAccountSetId(accountSetId);
+            balance.setSubjectId(subjectId);
+            balance.setYear(year);
+            balance.setMonth(month);
+            balance.setBeginDebit(BigDecimal.ZERO);
+            balance.setBeginCredit(BigDecimal.ZERO);
+            balance.setPeriodDebit(BigDecimal.ZERO);
+            balance.setPeriodCredit(BigDecimal.ZERO);
+            balance.setYearDebit(BigDecimal.ZERO);
+            balance.setYearCredit(BigDecimal.ZERO);
+            accountBalanceMapper.insert(balance);
+        }
+
+        // 累加本期发生额
+        BigDecimal newPeriodDebit = (balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO).add(debit);
+        BigDecimal newPeriodCredit = (balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO).add(credit);
+        balance.setPeriodDebit(newPeriodDebit);
+        balance.setPeriodCredit(newPeriodCredit);
+
+        // 计算期末余额：按余额方向计算净额
+        // balanceDirection=1（借方余额）：endDebit = beginDebit + periodDebit - periodCredit（若为正）
+        // balanceDirection=2（贷方余额）：endCredit = beginCredit + periodCredit - periodDebit（若为正）
+        BigDecimal beginDebit = balance.getBeginDebit() != null ? balance.getBeginDebit() : BigDecimal.ZERO;
+        BigDecimal beginCredit = balance.getBeginCredit() != null ? balance.getBeginCredit() : BigDecimal.ZERO;
+        if (balanceDirection == 2) {
+            BigDecimal netCredit = beginCredit.add(newPeriodCredit).subtract(newPeriodDebit);
+            if (netCredit.compareTo(BigDecimal.ZERO) >= 0) {
+                balance.setEndCredit(netCredit);
+                balance.setEndDebit(BigDecimal.ZERO);
+            } else {
+                balance.setEndCredit(BigDecimal.ZERO);
+                balance.setEndDebit(netCredit.abs());
+            }
+        } else {
+            BigDecimal netDebit = beginDebit.add(newPeriodDebit).subtract(newPeriodCredit);
+            if (netDebit.compareTo(BigDecimal.ZERO) >= 0) {
+                balance.setEndDebit(netDebit);
+                balance.setEndCredit(BigDecimal.ZERO);
+            } else {
+                balance.setEndDebit(BigDecimal.ZERO);
+                balance.setEndCredit(netDebit.abs());
+            }
+        }
+
+        // 累加本年发生额
+        BigDecimal newYearDebit = (balance.getYearDebit() != null ? balance.getYearDebit() : BigDecimal.ZERO).add(debit);
+        BigDecimal newYearCredit = (balance.getYearCredit() != null ? balance.getYearCredit() : BigDecimal.ZERO).add(credit);
+        balance.setYearDebit(newYearDebit);
+        balance.setYearCredit(newYearCredit);
+
+        accountBalanceMapper.updateById(balance);
     }
 
     @Override
@@ -467,14 +577,28 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                .orderByAsc(Voucher::getCreateTime);
         List<Voucher> vouchers = this.list(wrapper);
 
-        // 重新生成连续的凭证号（格式: year-month-seq，如 2026-01-001）
+        if (vouchers.isEmpty()) {
+            log.info("凭证整理（断号重编）无凭证可整理，账套ID: {}, 年度: {}, 月份: {}", accountSetId, year, month);
+            return;
+        }
+
+        // 第一步：先把所有凭证号改成临时号（避免唯一索引冲突）
+        // 格式: TMP-{原ID}，保证全局唯一不会冲突
+        for (Voucher voucher : vouchers) {
+            Voucher update = new Voucher();
+            update.setId(voucher.getId());
+            update.setVoucherNo("TMP-" + voucher.getId());
+            this.updateById(update);
+        }
+
+        // 第二步：重新生成连续的凭证号（格式: year-month-seq，如 2026-01-001）
         int sequence = 1;
         for (Voucher voucher : vouchers) {
             String newVoucherNo = String.format("%d-%02d-%03d", year, month, sequence);
-            if (!newVoucherNo.equals(voucher.getVoucherNo())) {
-                voucher.setVoucherNo(newVoucherNo);
-                this.updateById(voucher);
-            }
+            Voucher update = new Voucher();
+            update.setId(voucher.getId());
+            update.setVoucherNo(newVoucherNo);
+            this.updateById(update);
             sequence++;
         }
 
@@ -830,19 +954,19 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         wrapper.eq(Voucher::getAccountSetId, accountSetId)
                .eq(Voucher::getYear, year)
                .eq(Voucher::getMonth, month)
-               .orderByDesc(Voucher::getVoucherNo);
-        List<Voucher> vouchers = this.list(wrapper);
+               .notLike(Voucher::getVoucherNo, "TMP-%")
+               .orderByDesc(Voucher::getVoucherNo)
+               .last("LIMIT 1");
+        Voucher lastVoucher = this.getOne(wrapper);
 
         int sequence = 1;
-        if (!vouchers.isEmpty()) {
-            String lastVoucherNo = vouchers.get(0).getVoucherNo();
-            if (StrUtil.isNotBlank(lastVoucherNo)) {
-                String[] parts = lastVoucherNo.split("-");
-                if (parts.length == 3) {
-                    try {
-                        sequence = Integer.parseInt(parts[2]) + 1;
-                    } catch (NumberFormatException ignored) {
-                    }
+        if (lastVoucher != null && StrUtil.isNotBlank(lastVoucher.getVoucherNo())) {
+            String lastVoucherNo = lastVoucher.getVoucherNo();
+            String[] parts = lastVoucherNo.split("-");
+            if (parts.length == 3) {
+                try {
+                    sequence = Integer.parseInt(parts[2]) + 1;
+                } catch (NumberFormatException ignored) {
                 }
             }
         }
@@ -852,6 +976,7 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     
     /**
      * 重新编号该期间的凭证（保证凭证号连续性）
+     * 使用两步更新避免唯一索引冲突：先将所有凭证号改为临时号，再分配连续正式号
      */
     private void renumberVouchers(Long accountSetId, Integer year, Integer month) {
         LambdaQueryWrapper<Voucher> wrapper = new LambdaQueryWrapper<>();
@@ -860,18 +985,31 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                .eq(Voucher::getMonth, month)
                .orderByAsc(Voucher::getVoucherDate, Voucher::getVoucherNo);
         List<Voucher> vouchers = this.list(wrapper);
-        
+
+        if (vouchers.isEmpty()) {
+            return;
+        }
+
+        // 第一步：将所有凭证号改为临时号 TMP-{id}，避免唯一索引冲突
+        for (Voucher voucher : vouchers) {
+            LambdaUpdateWrapper<Voucher> tempWrapper = new LambdaUpdateWrapper<>();
+            tempWrapper.eq(Voucher::getId, voucher.getId())
+                       .set(Voucher::getVoucherNo, "TMP-" + voucher.getId());
+            this.update(tempWrapper);
+        }
+
+        // 第二步：按顺序分配连续正式号
         int sequence = 1;
         for (Voucher voucher : vouchers) {
             String newVoucherNo = String.format("%d-%02d-%03d", year, month, sequence);
-            if (!newVoucherNo.equals(voucher.getVoucherNo())) {
-                voucher.setVoucherNo(newVoucherNo);
-                this.updateById(voucher);
-            }
+            LambdaUpdateWrapper<Voucher> formalWrapper = new LambdaUpdateWrapper<>();
+            formalWrapper.eq(Voucher::getId, voucher.getId())
+                         .set(Voucher::getVoucherNo, newVoucherNo);
+            this.update(formalWrapper);
             sequence++;
         }
-        
-        log.info("重新编号凭证成功，账套ID: {}, 年度: {}, 月份: {}, 凭证数量: {}", 
+
+        log.info("重新编号凭证成功，账套ID: {}, 年度: {}, 月份: {}, 凭证数量: {}",
                 accountSetId, year, month, vouchers.size());
     }
 

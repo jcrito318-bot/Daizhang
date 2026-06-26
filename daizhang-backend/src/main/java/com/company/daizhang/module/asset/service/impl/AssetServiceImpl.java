@@ -26,6 +26,8 @@ import com.company.daizhang.module.subject.entity.Subject;
 import com.company.daizhang.module.subject.mapper.SubjectMapper;
 import com.company.daizhang.module.voucher.dto.VoucherCreateRequest;
 import com.company.daizhang.module.voucher.dto.VoucherDetailRequest;
+import com.company.daizhang.module.voucher.entity.Voucher;
+import com.company.daizhang.module.voucher.mapper.VoucherMapper;
 import com.company.daizhang.module.voucher.service.VoucherService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -51,6 +53,7 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
     private final AssetCategoryMapper assetCategoryMapper;
     private final DepreciationRecordMapper depreciationRecordMapper;
     private final VoucherService voucherService;
+    private final VoucherMapper voucherMapper;
     private final SubjectMapper subjectMapper;
 
     // ==================== 资产分类管理 ====================
@@ -425,8 +428,18 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         // 调用凭证服务创建凭证
         voucherService.createVoucher(voucherRequest);
 
-        // 注意：实际实现中需要获取创建的凭证ID并更新折旧记录
-        // 这里简化处理，假设凭证创建成功
+        // 查询刚创建的凭证（按ID降序取最新一张）并回写voucherId到折旧记录，避免重复生成
+        LambdaQueryWrapper<Voucher> vw = new LambdaQueryWrapper<>();
+        vw.eq(Voucher::getAccountSetId, record.getAccountSetId())
+          .eq(Voucher::getYear, record.getYear())
+          .eq(Voucher::getMonth, record.getMonth())
+          .orderByDesc(Voucher::getId)
+          .last("LIMIT 1");
+        Voucher createdVoucher = voucherMapper.selectOne(vw);
+        if (createdVoucher != null) {
+            record.setVoucherId(createdVoucher.getId());
+            depreciationRecordMapper.updateById(record);
+        }
     }
 
     @Override
@@ -543,24 +556,20 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
     // ==================== 辅助方法 ====================
 
     /**
-     * 查询累计折旧科目ID（编码1602：固定资产累计折旧）
+     * 查询累计折旧科目ID（编码1602：累计折旧）
      * 查不到时使用默认值1L并记录警告日志
      */
     private Long getAccumulatedDepreciationSubjectId(Long accountSetId) {
+        // SubjectServiceImpl.initDefaultSubjects 中 1602=累计折旧, 1702=累计摊销
         return getSubjectIdByCode(accountSetId, "1602", 1L, "累计折旧");
     }
 
     /**
-     * 查询折旧费用科目ID（编码5301或6602：管理费用-折旧）
+     * 查询折旧费用科目ID（编码5602：管理费用-折旧）
      * 查不到时使用默认值2L并记录警告日志
      */
     private Long getDepreciationExpenseSubjectId(Long accountSetId) {
-        // 优先查询5301，再查询6602
-        Long subjectId = getSubjectIdByCode(accountSetId, "5301", null, "折旧费用");
-        if (subjectId == null) {
-            subjectId = getSubjectIdByCode(accountSetId, "6602", 2L, "折旧费用");
-        }
-        return subjectId;
+        return getSubjectIdByCode(accountSetId, "5602", 2L, "折旧费用");
     }
 
     /**

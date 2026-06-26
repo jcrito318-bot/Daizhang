@@ -3,6 +3,7 @@ package com.company.daizhang.module.bank.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
@@ -224,13 +225,18 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
         if (transaction == null) {
             throw new BusinessException("银行流水不存在");
         }
-        if (transaction.getMatchedStatus() != 1) {
+        if (transaction.getMatchedStatus() == null || transaction.getMatchedStatus() != 1) {
             throw new BusinessException("该流水未匹配，无法取消");
         }
 
         transaction.setMatchedStatus(0);
         transaction.setVoucherId(null);
-        this.updateById(transaction);
+        // 使用LambdaUpdateWrapper显式set null，避免MyBatis-Plus默认NOT_NULL策略不更新null字段
+        LambdaUpdateWrapper<BankTransaction> updateWrapper = new LambdaUpdateWrapper<>();
+        updateWrapper.eq(BankTransaction::getId, transactionId)
+                     .set(BankTransaction::getMatchedStatus, 0)
+                     .set(BankTransaction::getVoucherId, null);
+        this.update(updateWrapper);
     }
 
     @Override

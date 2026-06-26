@@ -126,11 +126,6 @@ public class ReportServiceImpl implements ReportService {
         vo.setTotalLiabilitiesAndEquity(totalLiabilitiesAndEquity);
         vo.setBalanceCheck(balanceCheck);
 
-        if (!balanceCheck) {
-            throw new BusinessException("资产负债表不平衡：资产=" + totalAssets + 
-                    "，负债+所有者权益=" + totalLiabilitiesAndEquity);
-        }
-
         return vo;
     }
 
@@ -504,15 +499,6 @@ public class ReportServiceImpl implements ReportService {
         vo.setTotalEndCredit(totalEndCredit);
         vo.setTrialBalanceCheck(trialBalanceCheck);
 
-        if (!trialBalanceCheck) {
-            throw new BusinessException("试算不平衡：期初借方=" + totalBeginDebit + 
-                    "，期初贷方=" + totalBeginCredit + 
-                    "；本期借方=" + totalPeriodDebit + 
-                    "，本期贷方=" + totalPeriodCredit + 
-                    "；期末借方=" + totalEndDebit + 
-                    "，期末贷方=" + totalEndCredit);
-        }
-
         return vo;
     }
 
@@ -667,9 +653,9 @@ public class ReportServiceImpl implements ReportService {
 
     /**
      * 根据非现金科目编码判断现金流类别
-     * 经营：6001主营收入/6051其他收入/6601销售费用/6602管理费用
+     * 经营：5001主营收入/5051其他收入/5601销售费用/5602管理费用
      * 投资：1601固定资产/1604在建工程/1606固定资产清理
-     * 筹资：2001短期借款/2002长期借款/2241其他应付款
+     * 筹资：2001短期借款/2501长期借款/2241其他应付款
      */
     private String determineCashFlowCategory(List<VoucherDetail> nonCashLines) {
         for (VoucherDetail d : nonCashLines) {
@@ -677,14 +663,14 @@ public class ReportServiceImpl implements ReportService {
             if (code == null) {
                 continue;
             }
-            if (code.startsWith("6001") || code.startsWith("6051")
-                    || code.startsWith("6601") || code.startsWith("6602")) {
+            if (code.startsWith("5001") || code.startsWith("5051")
+                    || code.startsWith("5601") || code.startsWith("5602")) {
                 return "经营";
             }
             if (code.startsWith("1601") || code.startsWith("1604") || code.startsWith("1606")) {
                 return "投资";
             }
-            if (code.startsWith("2001") || code.startsWith("2002") || code.startsWith("2241")) {
+            if (code.startsWith("2001") || code.startsWith("2501") || code.startsWith("2241")) {
                 return "筹资";
             }
         }

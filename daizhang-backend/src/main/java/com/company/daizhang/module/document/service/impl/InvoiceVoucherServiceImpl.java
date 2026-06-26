@@ -48,13 +48,13 @@ public class InvoiceVoucherServiceImpl implements InvoiceVoucherService {
 
     // 进项发票相关科目编码
     private static final String CODE_INVENTORY = "1405";          // 库存商品
-    private static final String CODE_INPUT_TAX = "2221.01.01";    // 应交税费-应交增值税-进项税额
+    private static final String CODE_INPUT_TAX = "2221";          // 应交税费
     private static final String CODE_ACCOUNTS_PAYABLE = "2202";  // 应付账款
 
     // 销项发票相关科目编码
     private static final String CODE_ACCOUNTS_RECEIVABLE = "1122"; // 应收账款
-    private static final String CODE_MAIN_REVENUE = "6001";         // 主营业务收入
-    private static final String CODE_OUTPUT_TAX = "2221.01.02";     // 应交税费-应交增值税-销项税额
+    private static final String CODE_MAIN_REVENUE = "5001";       // 主营业务收入
+    private static final String CODE_OUTPUT_TAX = "2221";          // 应交税费
 
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
@@ -331,6 +331,7 @@ public class InvoiceVoucherServiceImpl implements InvoiceVoucherService {
         wrapper.eq(Voucher::getAccountSetId, accountSetId)
                .eq(Voucher::getYear, year)
                .eq(Voucher::getMonth, month)
+               .notLike(Voucher::getVoucherNo, "TMP-%")
                .orderByDesc(Voucher::getVoucherNo)
                .last("LIMIT 1");
         Voucher lastVoucher = voucherMapper.selectOne(wrapper);

@@ -1,6 +1,7 @@
 package com.company.daizhang.module.period.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.company.daizhang.common.annotation.OperationLog;
 import com.company.daizhang.common.enums.PeriodStatus;
 import com.company.daizhang.common.enums.VoucherStatus;
@@ -207,10 +208,13 @@ public class PeriodServiceImpl implements PeriodService {
         }
 
         // 3. 更新会计期间状态为未结账，解锁本期数据
-        period.setStatus(PeriodStatus.OPEN.getCode());
-        period.setCloseBy(null);
-        period.setCloseTime(null);
-        accountPeriodMapper.updateById(period);
+        // 使用LambdaUpdateWrapper显式set null，避免MyBatis-Plus默认NOT_NULL策略不更新null字段
+        LambdaUpdateWrapper<AccountPeriod> updateWrapper = new LambdaUpdateWrapper<>();
+        updateWrapper.eq(AccountPeriod::getId, period.getId())
+                     .set(AccountPeriod::getStatus, PeriodStatus.OPEN.getCode())
+                     .set(AccountPeriod::getCloseBy, null)
+                     .set(AccountPeriod::getCloseTime, null);
+        accountPeriodMapper.update(null, updateWrapper);
 
         log.info("期末反结账成功，账套ID：{}，期间：{}-{}", accountSetId, year, month);
     }
@@ -223,22 +227,24 @@ public class PeriodServiceImpl implements PeriodService {
         // 1. 查询该期间
         AccountPeriod period = getPeriod(accountSetId, year, month);
 
-        // 2. 查询收入类科目（category = 'revenue'）
+        // 2. 查询收入类科目（损益类且贷方余额，balance_direction=2）
         LambdaQueryWrapper<Subject> revenueWrapper = new LambdaQueryWrapper<>();
         revenueWrapper.eq(Subject::getAccountSetId, accountSetId)
-                     .eq(Subject::getCategory, "revenue");
+                     .eq(Subject::getCategory, "损益")
+                     .eq(Subject::getBalanceDirection, 2);
         List<Subject> revenueSubjects = subjectMapper.selectList(revenueWrapper);
 
-        // 3. 查询费用类科目（category = 'expense'）
+        // 3. 查询费用类科目（损益类且借方余额，balance_direction=1）
         LambdaQueryWrapper<Subject> expenseWrapper = new LambdaQueryWrapper<>();
         expenseWrapper.eq(Subject::getAccountSetId, accountSetId)
-                     .eq(Subject::getCategory, "expense");
+                     .eq(Subject::getCategory, "损益")
+                     .eq(Subject::getBalanceDirection, 1);
         List<Subject> expenseSubjects = subjectMapper.selectList(expenseWrapper);
 
-        // 4. 查询本年利润科目
+        // 4. 查询本年利润科目（标准科目代码3103）
         LambdaQueryWrapper<Subject> profitWrapper = new LambdaQueryWrapper<>();
         profitWrapper.eq(Subject::getAccountSetId, accountSetId)
-                    .like(Subject::getCode, "3131");
+                    .eq(Subject::getCode, "3103");
         Subject profitSubject = subjectMapper.selectOne(profitWrapper);
         if (profitSubject == null) {
             throw new BusinessException(ErrorCode.PROFIT_SUBJECT_NOT_FOUND);
@@ -278,7 +284,8 @@ public class PeriodServiceImpl implements PeriodService {
         }
 
         // 8. 生成结转凭证
-        BigDecimal totalAmount = totalRevenue.add(totalExpense);
+        // 凭证总额 = max(收入总额, 费用总额)，保证借贷平衡
+        BigDecimal totalAmount = totalRevenue.max(totalExpense);
         BigDecimal profit = totalRevenue.subtract(totalExpense);
 
         Voucher voucher = new Voucher();
@@ -286,19 +293,25 @@ public class PeriodServiceImpl implements PeriodService {
         voucher.setVoucherDate(period.getEndDate());
         voucher.setYear(year);
         voucher.setMonth(month);
-        voucher.setStatus(VoucherStatus.UNAUDITED.getCode());
+        voucher.setStatus(VoucherStatus.POSTED.getCode());
         voucher.setSource(1); // 系统生成
         voucher.setTotalDebit(totalAmount);
         voucher.setTotalCredit(totalAmount);
         voucher.setAttachmentCount(0);
+        Long currentUserId = SecurityUtils.getCurrentUserId();
+        voucher.setAuditBy(currentUserId);
+        voucher.setAuditTime(LocalDateTime.now());
+        voucher.setPostBy(currentUserId);
+        voucher.setPostTime(LocalDateTime.now());
 
         // 生成凭证号
         LambdaQueryWrapper<Voucher> countWrapper = new LambdaQueryWrapper<>();
         countWrapper.eq(Voucher::getAccountSetId, accountSetId)
                    .eq(Voucher::getYear, year)
-                   .eq(Voucher::getMonth, month);
+                   .eq(Voucher::getMonth, month)
+                   .notLike(Voucher::getVoucherNo, "TMP-%");
         long count = voucherMapper.selectCount(countWrapper);
-        voucher.setVoucherNo(String.format("%04d", count + 1));
+        voucher.setVoucherNo(String.format("%d-%02d-%03d", year, month, count + 1));
 
         voucherMapper.insert(voucher);
 
@@ -309,7 +322,7 @@ public class PeriodServiceImpl implements PeriodService {
             if (balance != null && balance.getEndCredit() != null && balance.getEndCredit().compareTo(BigDecimal.ZERO) > 0) {
                 VoucherDetail detail = new VoucherDetail();
                 detail.setVoucherId(voucher.getId());
-                detail.setLineNo(lineNo++);
+                detail.setLineNo(lineNo);
                 detail.setSummary("结转收入");
                 detail.setSubjectId(subject.getId());
                 detail.setSubjectCode(subject.getCode());
@@ -318,6 +331,7 @@ public class PeriodServiceImpl implements PeriodService {
                 detail.setCredit(BigDecimal.ZERO);
                 detail.setSortOrder(lineNo);
                 voucherDetailMapper.insert(detail);
+                lineNo++;
             }
         }
 
@@ -327,7 +341,7 @@ public class PeriodServiceImpl implements PeriodService {
             if (balance != null && balance.getEndDebit() != null && balance.getEndDebit().compareTo(BigDecimal.ZERO) > 0) {
                 VoucherDetail detail = new VoucherDetail();
                 detail.setVoucherId(voucher.getId());
-                detail.setLineNo(lineNo++);
+                detail.setLineNo(lineNo);
                 detail.setSummary("结转费用");
                 detail.setSubjectId(subject.getId());
                 detail.setSubjectCode(subject.getCode());
@@ -336,6 +350,7 @@ public class PeriodServiceImpl implements PeriodService {
                 detail.setCredit(balance.getEndDebit());
                 detail.setSortOrder(lineNo);
                 voucherDetailMapper.insert(detail);
+                lineNo++;
             }
         }
 
@@ -359,10 +374,14 @@ public class PeriodServiceImpl implements PeriodService {
         profitDetail.setSortOrder(lineNo);
         voucherDetailMapper.insert(profitDetail);
 
-        // 12. 更新损益类科目余额为0
+        // 12. 更新损益类科目余额为0（同步更新本期发生额，保持余额等式）
         for (Subject subject : revenueSubjects) {
             AccountBalance balance = balanceMap.get(subject.getId());
             if (balance != null) {
+                BigDecimal carryAmount = balance.getEndCredit() != null ? balance.getEndCredit() : BigDecimal.ZERO;
+                // 结转凭证借记收入科目，累加本期借方发生额
+                BigDecimal newPeriodDebit = (balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO).add(carryAmount);
+                balance.setPeriodDebit(newPeriodDebit);
                 balance.setEndDebit(BigDecimal.ZERO);
                 balance.setEndCredit(BigDecimal.ZERO);
                 accountBalanceMapper.updateById(balance);
@@ -371,26 +390,48 @@ public class PeriodServiceImpl implements PeriodService {
         for (Subject subject : expenseSubjects) {
             AccountBalance balance = balanceMap.get(subject.getId());
             if (balance != null) {
+                BigDecimal carryAmount = balance.getEndDebit() != null ? balance.getEndDebit() : BigDecimal.ZERO;
+                // 结转凭证贷记费用科目，累加本期贷方发生额
+                BigDecimal newPeriodCredit = (balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO).add(carryAmount);
+                balance.setPeriodCredit(newPeriodCredit);
                 balance.setEndDebit(BigDecimal.ZERO);
                 balance.setEndCredit(BigDecimal.ZERO);
                 accountBalanceMapper.updateById(balance);
             }
         }
 
-        // 13. 更新本年利润科目余额
+        // 13. 更新本年利润科目余额（若不存在则创建）
         AccountBalance profitBalance = balanceMap.get(profitSubject.getId());
-        if (profitBalance != null) {
-            if (profit.compareTo(BigDecimal.ZERO) >= 0) {
-                // 盈利：增加贷方余额
-                BigDecimal currentCredit = profitBalance.getEndCredit() != null ? profitBalance.getEndCredit() : BigDecimal.ZERO;
-                profitBalance.setEndCredit(currentCredit.add(profit));
-            } else {
-                // 亏损：增加借方余额
-                BigDecimal currentDebit = profitBalance.getEndDebit() != null ? profitBalance.getEndDebit() : BigDecimal.ZERO;
-                profitBalance.setEndDebit(currentDebit.add(profit.abs()));
-            }
-            accountBalanceMapper.updateById(profitBalance);
+        if (profitBalance == null) {
+            profitBalance = new AccountBalance();
+            profitBalance.setAccountSetId(accountSetId);
+            profitBalance.setSubjectId(profitSubject.getId());
+            profitBalance.setYear(year);
+            profitBalance.setMonth(month);
+            profitBalance.setBeginDebit(BigDecimal.ZERO);
+            profitBalance.setBeginCredit(BigDecimal.ZERO);
+            profitBalance.setPeriodDebit(BigDecimal.ZERO);
+            profitBalance.setPeriodCredit(BigDecimal.ZERO);
+            profitBalance.setEndDebit(BigDecimal.ZERO);
+            profitBalance.setEndCredit(BigDecimal.ZERO);
+            profitBalance.setYearDebit(BigDecimal.ZERO);
+            profitBalance.setYearCredit(BigDecimal.ZERO);
+            accountBalanceMapper.insert(profitBalance);
         }
+        if (profit.compareTo(BigDecimal.ZERO) >= 0) {
+            // 盈利：贷记本年利润，累加本期贷方发生额
+            BigDecimal newPeriodCredit = (profitBalance.getPeriodCredit() != null ? profitBalance.getPeriodCredit() : BigDecimal.ZERO).add(profit);
+            profitBalance.setPeriodCredit(newPeriodCredit);
+            BigDecimal currentCredit = profitBalance.getEndCredit() != null ? profitBalance.getEndCredit() : BigDecimal.ZERO;
+            profitBalance.setEndCredit(currentCredit.add(profit));
+        } else {
+            // 亏损：借记本年利润，累加本期借方发生额
+            BigDecimal newPeriodDebit = (profitBalance.getPeriodDebit() != null ? profitBalance.getPeriodDebit() : BigDecimal.ZERO).add(profit.abs());
+            profitBalance.setPeriodDebit(newPeriodDebit);
+            BigDecimal currentDebit = profitBalance.getEndDebit() != null ? profitBalance.getEndDebit() : BigDecimal.ZERO;
+            profitBalance.setEndDebit(currentDebit.add(profit.abs()));
+        }
+        accountBalanceMapper.updateById(profitBalance);
 
         log.info("损益结转完成，账套ID：{}，期间：{}-{}，收入总额：{}，费用总额：{}，净利润：{}",
                 accountSetId, year, month, totalRevenue, totalExpense, profit);
@@ -606,9 +647,10 @@ public class PeriodServiceImpl implements PeriodService {
         LambdaQueryWrapper<Voucher> countWrapper = new LambdaQueryWrapper<>();
         countWrapper.eq(Voucher::getAccountSetId, accountSetId)
                 .eq(Voucher::getYear, year)
-                .eq(Voucher::getMonth, month);
+                .eq(Voucher::getMonth, month)
+                .notLike(Voucher::getVoucherNo, "TMP-%");
         Long voucherCount = voucherMapper.selectCount(countWrapper);
-        voucher.setVoucherNo(String.valueOf((voucherCount != null ? voucherCount.intValue() : 0) + 1));
+        voucher.setVoucherNo(String.format("%d-%02d-%03d", year, month, (voucherCount != null ? voucherCount.intValue() : 0) + 1));
 
         voucherMapper.insert(voucher);
 

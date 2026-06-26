@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.Collections;
@@ -67,11 +68,15 @@ public class VoucherPrintServiceImpl implements VoucherPrintService {
         sb.append("<title>凭证打印</title>");
         sb.append(buildPrintStyle());
         sb.append("</head><body>");
-        for (int i = 0; i < voucherIds.size(); i++) {
-            VoucherVO voucher = voucherService.getVoucherById(voucherIds.get(i));
-            sb.append(buildSingleVoucherBody(voucher));
-            if (i < voucherIds.size() - 1) {
-                sb.append("<div class=\"page-break\"></div>");
+        if (voucherIds == null || voucherIds.isEmpty()) {
+            sb.append("<div style=\"text-align:center;padding:60px;color:#999;font-size:16px;\">未选择要打印的凭证</div>");
+        } else {
+            for (int i = 0; i < voucherIds.size(); i++) {
+                VoucherVO voucher = voucherService.getVoucherById(voucherIds.get(i));
+                sb.append(buildSingleVoucherBody(voucher));
+                if (i < voucherIds.size() - 1) {
+                    sb.append("<div class=\"page-break\"></div>");
+                }
             }
         }
         sb.append("</body></html>");
@@ -85,6 +90,10 @@ public class VoucherPrintServiceImpl implements VoucherPrintService {
 
     @Override
     public byte[] exportPdfBatch(List<Long> voucherIds) throws IOException {
+        if (voucherIds == null || voucherIds.isEmpty()) {
+            throw new com.company.daizhang.common.exception.BusinessException(
+                    com.company.daizhang.common.exception.ErrorCode.PARAM_ERROR);
+        }
         String html = generatePrintHtmlBatch(voucherIds);
         try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
             PdfRendererBuilder builder = new PdfRendererBuilder();
@@ -103,6 +112,10 @@ public class VoucherPrintServiceImpl implements VoucherPrintService {
 
     @Override
     public byte[] exportExcel(List<Long> voucherIds) throws IOException {
+        if (voucherIds == null || voucherIds.isEmpty()) {
+            throw new com.company.daizhang.common.exception.BusinessException(
+                    com.company.daizhang.common.exception.ErrorCode.PARAM_ERROR);
+        }
         try (XSSFWorkbook workbook = new XSSFWorkbook();
              ByteArrayOutputStream os = new ByteArrayOutputStream()) {
             Sheet sheet = workbook.createSheet("会计凭证");
@@ -113,11 +126,13 @@ public class VoucherPrintServiceImpl implements VoucherPrintService {
             sheet.setColumnWidth(3, 4000);
 
             int rowIdx = 0;
-            for (Long id : voucherIds) {
-                VoucherVO voucher = voucherService.getVoucherById(id);
-                rowIdx = writeVoucherToSheet(workbook, sheet, voucher, rowIdx);
-                // 凭证间空行
-                rowIdx += 2;
+            if (voucherIds != null) {
+                for (Long id : voucherIds) {
+                    VoucherVO voucher = voucherService.getVoucherById(id);
+                    rowIdx = writeVoucherToSheet(workbook, sheet, voucher, rowIdx);
+                    // 凭证间空行
+                    rowIdx += 2;
+                }
             }
             workbook.write(os);
             return os.toByteArray();
@@ -346,14 +361,15 @@ public class VoucherPrintServiceImpl implements VoucherPrintService {
                 r.createCell(1).setCellValue(subject);
                 if (d.getDebit() != null && d.getDebit().compareTo(BigDecimal.ZERO) != 0) {
                     Cell dc = r.createCell(2);
-                    dc.setCellValue(d.getDebit().doubleValue());
+                    // 先 setScale(2) 保证两位小数精度，再转 double 写入（Excel金额格式 #,##0.00 会正确显示）
+                    dc.setCellValue(d.getDebit().setScale(2, RoundingMode.HALF_UP).doubleValue());
                     dc.setCellStyle(amountStyle);
                 } else {
                     r.createCell(2).setCellStyle(amountStyle);
                 }
                 if (d.getCredit() != null && d.getCredit().compareTo(BigDecimal.ZERO) != 0) {
                     Cell cc = r.createCell(3);
-                    cc.setCellValue(d.getCredit().doubleValue());
+                    cc.setCellValue(d.getCredit().setScale(2, RoundingMode.HALF_UP).doubleValue());
                     cc.setCellStyle(amountStyle);
                 } else {
                     r.createCell(3).setCellStyle(amountStyle);
@@ -379,10 +395,10 @@ public class VoucherPrintServiceImpl implements VoucherPrintService {
         totalText.setCellStyle(totalStyle);
         sheet.addMergedRegion(new CellRangeAddress(row - 1, row - 1, 0, 1));
         Cell td = totalRow.createCell(2);
-        td.setCellValue(totalDebit.doubleValue());
+        td.setCellValue(totalDebit.setScale(2, RoundingMode.HALF_UP).doubleValue());
         td.setCellStyle(totalStyle);
         Cell tc = totalRow.createCell(3);
-        tc.setCellValue(totalCredit.doubleValue());
+        tc.setCellValue(totalCredit.setScale(2, RoundingMode.HALF_UP).doubleValue());
         tc.setCellStyle(totalStyle);
 
         // 签字行
@@ -425,7 +441,7 @@ public class VoucherPrintServiceImpl implements VoucherPrintService {
         if (amount == null) {
             return "";
         }
-        return amount.setScale(2, BigDecimal.ROUND_HALF_UP).toPlainString();
+        return amount.setScale(2, RoundingMode.HALF_UP).toPlainString();
     }
 
     private String safe(String s) {

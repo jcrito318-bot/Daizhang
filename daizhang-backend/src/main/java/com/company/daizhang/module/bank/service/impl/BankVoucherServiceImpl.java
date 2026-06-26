@@ -46,13 +46,13 @@ public class BankVoucherServiceImpl implements BankVoucherService {
     private static final String CODE_BANK_DEPOSIT = "1002";          // 银行存款
     private static final String CODE_ACCOUNTS_PAYABLE = "2202";      // 应付账款
     private static final String CODE_INVENTORY = "1405";             // 库存商品
-    private static final String CODE_MAIN_REVENUE = "6001";          // 主营业务收入
+    private static final String CODE_MAIN_REVENUE = "5001";          // 主营业务收入
     private static final String CODE_SALARY_PAYABLE = "2211";        // 应付职工薪酬
     private static final String CODE_TAX_PAYABLE = "2221";           // 应交税费
-    private static final String CODE_MANAGEMENT_EXPENSE = "6602";    // 管理费用
-    private static final String CODE_FINANCE_EXPENSE = "6603";      // 财务费用
-    private static final String CODE_NON_OPERATING_INCOME = "6301";  // 营业外收入
-    private static final String CODE_NON_OPERATING_EXPENSE = "6711"; // 营业外支出
+    private static final String CODE_MANAGEMENT_EXPENSE = "5602";    // 管理费用
+    private static final String CODE_FINANCE_EXPENSE = "5603";       // 财务费用
+    private static final String CODE_NON_OPERATING_INCOME = "5301";  // 营业外收入
+    private static final String CODE_NON_OPERATING_EXPENSE = "5711"; // 营业外支出
 
     /**
      * 交易类型：收入
@@ -345,6 +345,7 @@ public class BankVoucherServiceImpl implements BankVoucherService {
         wrapper.eq(Voucher::getAccountSetId, accountSetId)
                .eq(Voucher::getYear, year)
                .eq(Voucher::getMonth, month)
+               .notLike(Voucher::getVoucherNo, "TMP-%")
                .orderByDesc(Voucher::getVoucherNo)
                .last("LIMIT 1");
         Voucher lastVoucher = voucherMapper.selectOne(wrapper);

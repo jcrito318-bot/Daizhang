@@ -96,6 +96,8 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
 
         ServiceContract contract = new ServiceContract();
         BeanUtil.copyProperties(request, contract);
+        // 从客户记录继承账套ID（表中account_set_id为NOT NULL）
+        contract.setAccountSetId(customer.getAccountSetId());
         if (contract.getStatus() == null) {
             contract.setStatus(0);
         }

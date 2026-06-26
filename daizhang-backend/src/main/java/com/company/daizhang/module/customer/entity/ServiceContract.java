@@ -17,6 +17,11 @@ import java.time.LocalDate;
 public class ServiceContract extends BaseEntity {
 
     /**
+     * 账套ID
+     */
+    private Long accountSetId;
+
+    /**
      * 合同编号
      */
     private String contractNo;

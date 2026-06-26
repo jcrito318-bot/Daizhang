@@ -1,6 +1,7 @@
 package com.company.daizhang.common.utils;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 /**
  * 中文大写金额转换工具类
@@ -37,7 +38,7 @@ public final class ChineseAmountUtils {
             return CN_UPPER_NUMBER[0] + CN_UNIT_YUAN + CN_FULL;
         }
         // 保留两位小数，四舍五入
-        BigDecimal scaled = amount.setScale(2, BigDecimal.ROUND_HALF_UP);
+        BigDecimal scaled = amount.setScale(2, RoundingMode.HALF_UP);
         boolean negative = scaled.compareTo(BigDecimal.ZERO) < 0;
         if (negative) {
             scaled = scaled.negate();
@@ -78,38 +79,59 @@ public final class ChineseAmountUtils {
     }
 
     /**
-     * 转换整数部分（元以上的部分），支持到千亿位
+     * 转换整数部分（元以上的部分），支持到 long 范围上限（约9.2亿亿元）
+     * 采用递归按4位一段处理（个、万、亿、万亿、...）
      */
     private static String convertIntegerPart(long yuan) {
         if (yuan == 0) {
             return "";
         }
-        StringBuilder sb = new StringBuilder();
-        // 分段处理：每4位一段（个、万、亿）
-        long yi = yuan / 100000000L;
-        long wan = (yuan % 100000000L) / 10000L;
-        long ge = yuan % 10000L;
+        // 按4位一段分组（低位在前），段单位依次为：""、"万"、"亿"、"万亿"...
+        // 递归处理高位段
+        return convertSegment(yuan, 0);
+    }
 
-        if (yi > 0) {
-            sb.append(convertFourDigits(yi)).append(CN_UNIT_YI);
-            if (wan == 0 && ge > 0) {
-                // 亿后无万，补零
-                sb.append(CN_UPPER_NUMBER[0]);
-            }
+    /**
+     * 递归处理整数段的中文转换
+     * @param num 当前剩余数值
+     * @param segmentLevel 段级别：0=个段,1=万段,2=亿段,3=万亿段...
+     * @return 中文大写
+     */
+    private static String convertSegment(long num, int segmentLevel) {
+        if (num == 0) {
+            return "";
         }
-        if (wan > 0) {
-            sb.append(convertFourDigits(wan)).append(CN_UNIT_WAN);
-            if (ge == 0) {
-                // 正好整万
-            } else if (ge < 1000) {
-                // 万后不足4位，补零
-                sb.append(CN_UPPER_NUMBER[0]);
-            }
+        // 当前段的4位
+        long currentSegment = num % 10000L;
+        // 高位剩余
+        long higher = num / 10000L;
+        String higherStr = convertSegment(higher, segmentLevel + 1);
+        if (currentSegment == 0) {
+            // 当前段为0，仅返回高位（万/亿单位由高位拼接时已含）
+            return higherStr;
         }
-        if (ge > 0) {
-            sb.append(convertFourDigits(ge));
+        StringBuilder sb = new StringBuilder();
+        sb.append(higherStr);
+        // 高位存在且当前段不足4位时，需要在单位后补零
+        if (!higherStr.isEmpty() && currentSegment < 1000) {
+            sb.append(CN_UPPER_NUMBER[0]);
         }
+        sb.append(convertFourDigits(currentSegment));
+        sb.append(segmentUnit(segmentLevel));
         return sb.toString();
+    }
+
+    /**
+     * 段单位
+     */
+    private static String segmentUnit(int segmentLevel) {
+        switch (segmentLevel) {
+            case 0: return "";
+            case 1: return CN_UNIT_WAN;
+            case 2: return CN_UNIT_YI;
+            case 3: return CN_UNIT_YI + CN_UNIT_WAN; // 万亿
+            default: return CN_UNIT_YI + CN_UNIT_WAN; // 万亿以上仍用"万亿"（实际不会触发）
+        }
     }
 
     /**

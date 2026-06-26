@@ -246,7 +246,9 @@ public class InventoryServiceImpl implements InventoryService {
             BigDecimal totalAmt = BigDecimal.ZERO;
             for (InventoryInCreateRequest.InDetailDTO d : request.getDetails()) {
                 InventoryItem item = itemMapper.selectById(d.getItemId());
-                if (item == null) continue;
+                if (item == null) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR, "商品不存在: " + d.getItemId());
+                }
                 BigDecimal amt = d.getQuantity().multiply(d.getUnitPrice());
                 totalQty = totalQty.add(d.getQuantity());
                 totalAmt = totalAmt.add(amt);
@@ -290,8 +292,11 @@ public class InventoryServiceImpl implements InventoryService {
         if (in == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "入库单不存在");
         }
-        if (in.getStatus() == 1) {
+        if (in.getStatus() != null && in.getStatus() == 1) {
             return;
+        }
+        if (in.getInDate() == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "入库日期不能为空");
         }
         in.setStatus(1);
         in.setUpdateTime(LocalDateTime.now());
@@ -379,7 +384,9 @@ public class InventoryServiceImpl implements InventoryService {
         if (request.getDetails() != null) {
             for (InventoryOutCreateRequest.OutDetailDTO d : request.getDetails()) {
                 InventoryItem item = itemMapper.selectById(d.getItemId());
-                if (item == null) continue;
+                if (item == null) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR, "商品不存在，ID: " + d.getItemId());
+                }
                 InventoryOutDetail detail = new InventoryOutDetail();
                 detail.setOutId(out.getId());
                 detail.setItemId(d.getItemId());
@@ -469,8 +476,11 @@ public class InventoryServiceImpl implements InventoryService {
         if (out == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "出库单不存在");
         }
-        if (out.getStatus() == 1) {
+        if (out.getStatus() != null && out.getStatus() == 1) {
             return;
+        }
+        if (out.getOutDate() == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "出库日期不能为空");
         }
 
         LambdaQueryWrapper<InventoryOutDetail> detailWrapper = new LambdaQueryWrapper<>();
@@ -483,6 +493,14 @@ public class InventoryServiceImpl implements InventoryService {
 
         for (InventoryOutDetail detail : details) {
             InventoryStock stock = getCurrentStock(out.getAccountSetId(), detail.getItemId(), year, month);
+            // 校验库存充足，避免负库存
+            BigDecimal availableQty = (stock != null && stock.getEndQuantity() != null)
+                    ? stock.getEndQuantity() : BigDecimal.ZERO;
+            if (availableQty.compareTo(detail.getQuantity()) < 0) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR,
+                        "商品库存不足，可用库存：" + availableQty + "，出库数量：" + detail.getQuantity());
+            }
+
             BigDecimal unitCost = BigDecimal.ZERO;
             BigDecimal costAmt = BigDecimal.ZERO;
 

@@ -49,9 +49,10 @@ public class AmortizationServiceImpl implements AmortizationService {
     private final AccountPeriodMapper accountPeriodMapper;
     private final VoucherWordMapper voucherWordMapper;
 
-    // 长期待摊费用对应科目编码（1801），管理费用（6602）
+    // 长期待摊费用对应科目编码（1801），管理费用（5602）
+    // 注意：SubjectServiceImpl.initDefaultSubjects 中 1801=长期待摊费用, 1901=待处理财产损溢
     private static final String CODE_LONG_TERM_PREPAID = "1801";
-    private static final String CODE_MANAGEMENT_EXPENSE = "6602";
+    private static final String CODE_MANAGEMENT_EXPENSE = "5602";
 
     @Override
     public PageResult<AmortizationVO> pageAmortizations(Long accountSetId, String amortizationName, Integer status, int pageNum, int pageSize) {
@@ -261,7 +262,7 @@ public class AmortizationServiceImpl implements AmortizationService {
         if (creditSubjectId == null) {
             creditSubjectId = getSubjectIdByCode(accountSetId, CODE_LONG_TERM_PREPAID, "长期待摊费用");
         }
-        // 借方=管理费用（按编码6602查询）
+        // 借方=管理费用（按编码5602查询）
         Long debitSubjectId = getSubjectIdByCode(accountSetId, CODE_MANAGEMENT_EXPENSE, "管理费用");
 
         String summary = "长期待摊费用摊销-" + (StrUtil.isBlank(amortization.getAmortizationName())
@@ -323,7 +324,8 @@ public class AmortizationServiceImpl implements AmortizationService {
     }
 
     private void checkPeriodNotClosed(AccountPeriod period) {
-        if (period.getStatus() != null && period.getStatus() == 2) {
+        // PeriodStatus.CLOSED=1，已结账期间不允许生成凭证
+        if (period.getStatus() != null && period.getStatus() == 1) {
             throw new BusinessException(ErrorCode.ACCOUNT_SET_PERIOD_ALREADY_CLOSED);
         }
     }
@@ -392,13 +394,14 @@ public class AmortizationServiceImpl implements AmortizationService {
     }
 
     private String generateVoucherNo(Long accountSetId, Integer year, Integer month) {
-        // 查询该期间已有凭证数+1
+        // 查询该期间已有凭证数+1，排除TMP-临时号，避免序号偏大
         LambdaQueryWrapper<Voucher> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Voucher::getAccountSetId, accountSetId)
                .eq(Voucher::getYear, year)
-               .eq(Voucher::getMonth, month);
+               .eq(Voucher::getMonth, month)
+               .notLike(Voucher::getVoucherNo, "TMP-%");
         Long count = voucherMapper.selectCount(wrapper);
-        return String.format("%04d%02d-%04d", year, month, count + 1);
+        return String.format("%d-%02d-%03d", year, month, count + 1);
     }
 
     private AmortizationVO convertToVO(Amortization amortization) {

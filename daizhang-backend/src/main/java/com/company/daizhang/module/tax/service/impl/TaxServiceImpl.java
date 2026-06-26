@@ -444,18 +444,26 @@ public class TaxServiceImpl implements TaxService {
     private TaxDeclarationFormVO generateVatForm(AccountSet accountSet, Integer year, Integer month) {
         TaxDeclarationFormVO vo = buildBaseForm(accountSet, year, month, "VAT", "增值税纳税申报表");
 
-        // 查询销项发票（销项税额）
+        // 计算该月份的起止日期，用于过滤发票
+        LocalDate monthStart = LocalDate.of(year, month, 1);
+        LocalDate monthEnd = monthStart.plusMonths(1).minusDays(1);
+
+        // 查询销项发票（销项税额）- 按期间过滤
         LambdaQueryWrapper<OutputInvoice> outputWrapper = new LambdaQueryWrapper<>();
-        outputWrapper.eq(OutputInvoice::getAccountSetId, accountSet.getId());
+        outputWrapper.eq(OutputInvoice::getAccountSetId, accountSet.getId())
+                     .ge(OutputInvoice::getInvoiceDate, monthStart)
+                     .le(OutputInvoice::getInvoiceDate, monthEnd);
         List<OutputInvoice> outputInvoices = outputInvoiceMapper.selectList(outputWrapper);
 
         BigDecimal outputTax = outputInvoices.stream()
                 .map(i -> i.getTaxAmount() != null ? i.getTaxAmount() : BigDecimal.ZERO)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        // 查询进项发票（进项税额）
+        // 查询进项发票（进项税额）- 按期间过滤
         LambdaQueryWrapper<InputInvoice> inputWrapper = new LambdaQueryWrapper<>();
-        inputWrapper.eq(InputInvoice::getAccountSetId, accountSet.getId());
+        inputWrapper.eq(InputInvoice::getAccountSetId, accountSet.getId())
+                    .ge(InputInvoice::getInvoiceDate, monthStart)
+                    .le(InputInvoice::getInvoiceDate, monthEnd);
         List<InputInvoice> inputInvoices = inputInvoiceMapper.selectList(inputWrapper);
 
         BigDecimal inputTax = inputInvoices.stream()
@@ -598,9 +606,15 @@ public class TaxServiceImpl implements TaxService {
     private TaxDeclarationFormVO generateSmallScaleVatForm(AccountSet accountSet, Integer year, Integer month) {
         TaxDeclarationFormVO vo = buildBaseForm(accountSet, year, month, "SmallScaleVAT", "增值税纳税申报表（小规模纳税人适用）");
 
-        // 查询销项发票（不含税销售额）
+        // 计算该月份的起止日期，用于过滤发票
+        LocalDate monthStart = LocalDate.of(year, month, 1);
+        LocalDate monthEnd = monthStart.plusMonths(1).minusDays(1);
+
+        // 查询销项发票（不含税销售额）- 按期间过滤
         LambdaQueryWrapper<OutputInvoice> outputWrapper = new LambdaQueryWrapper<>();
-        outputWrapper.eq(OutputInvoice::getAccountSetId, accountSet.getId());
+        outputWrapper.eq(OutputInvoice::getAccountSetId, accountSet.getId())
+                     .ge(OutputInvoice::getInvoiceDate, monthStart)
+                     .le(OutputInvoice::getInvoiceDate, monthEnd);
         List<OutputInvoice> outputInvoices = outputInvoiceMapper.selectList(outputWrapper);
 
         BigDecimal salesAmount = outputInvoices.stream()
