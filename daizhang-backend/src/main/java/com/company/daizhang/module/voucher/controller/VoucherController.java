@@ -7,6 +7,7 @@ import com.company.daizhang.module.voucher.dto.VoucherCreateRequest;
 import com.company.daizhang.module.voucher.dto.VoucherQueryRequest;
 import com.company.daizhang.module.voucher.dto.VoucherUpdateRequest;
 import com.company.daizhang.module.voucher.service.VoucherImportService;
+import com.company.daizhang.module.voucher.service.VoucherPrintService;
 import com.company.daizhang.module.voucher.service.VoucherService;
 import com.company.daizhang.module.voucher.vo.VoucherVO;
 import io.swagger.v3.oas.annotations.Operation;
@@ -22,6 +23,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 /**
  * 凭证管理控制器
@@ -35,6 +37,7 @@ public class VoucherController {
 
     private final VoucherService voucherService;
     private final VoucherImportService voucherImportService;
+    private final VoucherPrintService voucherPrintService;
 
     @Operation(summary = "分页查询凭证")
     @GetMapping("/page")
@@ -158,11 +161,70 @@ public class VoucherController {
         writeExcelResponse(response, data, "凭证导入模板.xlsx");
     }
 
+    // ==================== 凭证打印与导出（标准会计凭证格式）====================
+
+    @Operation(summary = "凭证打印预览HTML（标准会计凭证格式）")
+    @GetMapping("/{id}/print-html")
+    public void printHtml(@PathVariable Long id, HttpServletResponse response) throws IOException {
+        String html = voucherPrintService.generatePrintHtml(id);
+        response.setContentType("text/html;charset=UTF-8");
+        try (OutputStream os = response.getOutputStream()) {
+            os.write(html.getBytes(StandardCharsets.UTF_8));
+            os.flush();
+        }
+    }
+
+    @Operation(summary = "批量凭证打印预览HTML")
+    @GetMapping("/print-html-batch")
+    public void printHtmlBatch(@RequestParam List<Long> ids, HttpServletResponse response) throws IOException {
+        String html = voucherPrintService.generatePrintHtmlBatch(ids);
+        response.setContentType("text/html;charset=UTF-8");
+        try (OutputStream os = response.getOutputStream()) {
+            os.write(html.getBytes(StandardCharsets.UTF_8));
+            os.flush();
+        }
+    }
+
+    @Operation(summary = "导出凭证为PDF（标准会计凭证格式）")
+    @GetMapping("/{id}/export-pdf")
+    public void exportPdf(@PathVariable Long id, HttpServletResponse response) throws IOException {
+        byte[] data = voucherPrintService.exportPdf(id);
+        writePdfResponse(response, data, "凭证_" + id + ".pdf");
+    }
+
+    @Operation(summary = "批量导出凭证为PDF")
+    @GetMapping("/export-pdf-batch")
+    public void exportPdfBatch(@RequestParam List<Long> ids, HttpServletResponse response) throws IOException {
+        byte[] data = voucherPrintService.exportPdfBatch(ids);
+        writePdfResponse(response, data, "凭证.pdf");
+    }
+
+    @Operation(summary = "导出凭证为Excel（标准会计凭证格式）")
+    @GetMapping("/export-excel")
+    public void exportExcel(@RequestParam List<Long> ids, HttpServletResponse response) throws IOException {
+        byte[] data = voucherPrintService.exportExcel(ids);
+        writeExcelResponse(response, data, "会计凭证.xlsx");
+    }
+
     /**
      * 输出Excel文件到响应
      */
     private void writeExcelResponse(HttpServletResponse response, byte[] data, String fileName) throws IOException {
         response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setCharacterEncoding("utf-8");
+        String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replaceAll("\\+", "%20");
+        response.setHeader("Content-disposition", "attachment;filename*=utf-8''" + encodedFileName);
+        try (OutputStream os = response.getOutputStream()) {
+            os.write(data);
+            os.flush();
+        }
+    }
+
+    /**
+     * 输出PDF文件到响应
+     */
+    private void writePdfResponse(HttpServletResponse response, byte[] data, String fileName) throws IOException {
+        response.setContentType("application/pdf");
         response.setCharacterEncoding("utf-8");
         String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replaceAll("\\+", "%20");
         response.setHeader("Content-disposition", "attachment;filename*=utf-8''" + encodedFileName);
