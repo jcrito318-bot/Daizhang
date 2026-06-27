@@ -219,6 +219,15 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
         if (voucher == null) {
             throw new BusinessException("凭证不存在");
         }
+        // 凭证必须已过账(status=2)才能参与对账，与autoMatch/smartMatch保持一致，
+        // 防止草稿/未过账/已作废凭证被对账造成账务数据脱节
+        if (voucher.getStatus() == null || voucher.getStatus() != 2) {
+            throw new BusinessException("凭证未过账，不可对账");
+        }
+        // 校验凭证归属当前账套
+        if (!request.getAccountSetId().equals(voucher.getAccountSetId())) {
+            throw new BusinessException("凭证不属于当前账套");
+        }
 
         // 更新银行流水匹配状态
         List<BankTransaction> transactions = this.listByIds(request.getTransactionIds());

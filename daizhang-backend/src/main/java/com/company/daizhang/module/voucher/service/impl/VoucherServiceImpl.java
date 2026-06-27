@@ -507,12 +507,35 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             balance.setSubjectId(subjectId);
             balance.setYear(year);
             balance.setMonth(month);
-            balance.setBeginDebit(BigDecimal.ZERO);
-            balance.setBeginCredit(BigDecimal.ZERO);
+            // 期初余额从上一期间期末结转：跨年则取上年12月，否则取本年上月。
+            // 否则第2个月起期初恒为0，导致期末余额漏掉上月余额、试算不平衡、结账失败。
+            int lastYear = (month == 1) ? year - 1 : year;
+            int lastMonth = (month == 1) ? 12 : month - 1;
+            LambdaQueryWrapper<AccountBalance> lastWrapper = new LambdaQueryWrapper<>();
+            lastWrapper.eq(AccountBalance::getAccountSetId, accountSetId)
+                       .eq(AccountBalance::getSubjectId, subjectId)
+                       .eq(AccountBalance::getYear, lastYear)
+                       .eq(AccountBalance::getMonth, lastMonth);
+            AccountBalance lastBalance = accountBalanceMapper.selectOne(lastWrapper);
+            BigDecimal carriedBeginDebit = BigDecimal.ZERO;
+            BigDecimal carriedBeginCredit = BigDecimal.ZERO;
+            BigDecimal carriedYearDebit = BigDecimal.ZERO;
+            BigDecimal carriedYearCredit = BigDecimal.ZERO;
+            if (lastBalance != null) {
+                carriedBeginDebit = lastBalance.getEndDebit() != null ? lastBalance.getEndDebit() : BigDecimal.ZERO;
+                carriedBeginCredit = lastBalance.getEndCredit() != null ? lastBalance.getEndCredit() : BigDecimal.ZERO;
+                // 本年累计只在同一年内结转；1月（即上年12月结转）从0开始新一年累计
+                if (lastYear == year) {
+                    carriedYearDebit = lastBalance.getYearDebit() != null ? lastBalance.getYearDebit() : BigDecimal.ZERO;
+                    carriedYearCredit = lastBalance.getYearCredit() != null ? lastBalance.getYearCredit() : BigDecimal.ZERO;
+                }
+            }
+            balance.setBeginDebit(carriedBeginDebit);
+            balance.setBeginCredit(carriedBeginCredit);
             balance.setPeriodDebit(BigDecimal.ZERO);
             balance.setPeriodCredit(BigDecimal.ZERO);
-            balance.setYearDebit(BigDecimal.ZERO);
-            balance.setYearCredit(BigDecimal.ZERO);
+            balance.setYearDebit(carriedYearDebit);
+            balance.setYearCredit(carriedYearCredit);
             accountBalanceMapper.insert(balance);
         }
 

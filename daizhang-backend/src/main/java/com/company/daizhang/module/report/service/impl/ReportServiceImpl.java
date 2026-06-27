@@ -655,8 +655,10 @@ public class ReportServiceImpl implements ReportService {
     /**
      * 根据非现金科目编码判断现金流类别
      * 经营：5001主营收入/5051其他收入/5601销售费用/5602管理费用
+     *       1122应收账款/1221其他应收款/2202应付账款/2203预收账款
+     *       2211应付职工薪酬/2221应交税费/5401主营成本/5402其他业务成本/5403税金及附加
      * 投资：1601固定资产/1604在建工程/1606固定资产清理
-     * 筹资：2001短期借款/2501长期借款/2241其他应付款
+     * 筹资：2001短期借款/2501长期借款/2241其他应付款/5603财务费用(利息支出)
      */
     private String determineCashFlowCategory(List<VoucherDetail> nonCashLines) {
         for (VoucherDetail d : nonCashLines) {
@@ -665,13 +667,19 @@ public class ReportServiceImpl implements ReportService {
                 continue;
             }
             if (code.startsWith("5001") || code.startsWith("5051")
-                    || code.startsWith("5601") || code.startsWith("5602")) {
+                    || code.startsWith("5601") || code.startsWith("5602")
+                    || code.startsWith("1122") || code.startsWith("1221")
+                    || code.startsWith("2202") || code.startsWith("2203")
+                    || code.startsWith("2211") || code.startsWith("2221")
+                    || code.startsWith("5401") || code.startsWith("5402")
+                    || code.startsWith("5403")) {
                 return "经营";
             }
             if (code.startsWith("1601") || code.startsWith("1604") || code.startsWith("1606")) {
                 return "投资";
             }
-            if (code.startsWith("2001") || code.startsWith("2501") || code.startsWith("2241")) {
+            if (code.startsWith("2001") || code.startsWith("2501") || code.startsWith("2241")
+                    || code.startsWith("5603")) {
                 return "筹资";
             }
         }
