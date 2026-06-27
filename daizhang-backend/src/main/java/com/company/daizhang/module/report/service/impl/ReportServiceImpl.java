@@ -26,6 +26,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.util.HtmlUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -1047,7 +1048,7 @@ public class ReportServiceImpl implements ReportService {
         } else if ("subject-balance".equals(reportType)) {
             html.append(buildSubjectBalanceHtml(request, periodTitle, printDate));
         } else {
-            html.append("<div class=\"report-title\">不支持的报表类型: ").append(reportType).append("</div>");
+            html.append("<div class=\"report-title\">不支持的报表类型: ").append(esc(reportType)).append("</div>");
         }
 
         html.append("</body></html>");
@@ -1070,8 +1071,8 @@ public class ReportServiceImpl implements ReportService {
             for (BalanceSheetItem item : vo.getAssets()) {
                 sb.append("<tr>");
                 sb.append("<td>").append(item.getRowNo()).append("</td>");
-                sb.append("<td>").append(item.getName() != null ? item.getName() : "").append("</td>");
-                sb.append("<td>").append(item.getCode() != null ? item.getCode() : "").append("</td>");
+                sb.append("<td>").append(esc(item.getName())).append("</td>");
+                sb.append("<td>").append(esc(item.getCode())).append("</td>");
                 sb.append("<td class=\"num\">").append(formatAmount(item.getBeginningBalance())).append("</td>");
                 sb.append("<td class=\"num\">").append(formatAmount(item.getEndingBalance())).append("</td>");
                 sb.append("</tr>");
@@ -1086,8 +1087,8 @@ public class ReportServiceImpl implements ReportService {
             for (BalanceSheetItem item : vo.getLiabilities()) {
                 sb.append("<tr>");
                 sb.append("<td>").append(item.getRowNo()).append("</td>");
-                sb.append("<td>").append(item.getName() != null ? item.getName() : "").append("</td>");
-                sb.append("<td>").append(item.getCode() != null ? item.getCode() : "").append("</td>");
+                sb.append("<td>").append(esc(item.getName())).append("</td>");
+                sb.append("<td>").append(esc(item.getCode())).append("</td>");
                 sb.append("<td class=\"num\">").append(formatAmount(item.getBeginningBalance())).append("</td>");
                 sb.append("<td class=\"num\">").append(formatAmount(item.getEndingBalance())).append("</td>");
                 sb.append("</tr>");
@@ -1102,8 +1103,8 @@ public class ReportServiceImpl implements ReportService {
             for (BalanceSheetItem item : vo.getEquity()) {
                 sb.append("<tr>");
                 sb.append("<td>").append(item.getRowNo()).append("</td>");
-                sb.append("<td>").append(item.getName() != null ? item.getName() : "").append("</td>");
-                sb.append("<td>").append(item.getCode() != null ? item.getCode() : "").append("</td>");
+                sb.append("<td>").append(esc(item.getName())).append("</td>");
+                sb.append("<td>").append(esc(item.getCode())).append("</td>");
                 sb.append("<td class=\"num\">").append(formatAmount(item.getBeginningBalance())).append("</td>");
                 sb.append("<td class=\"num\">").append(formatAmount(item.getEndingBalance())).append("</td>");
                 sb.append("</tr>");
@@ -1136,8 +1137,8 @@ public class ReportServiceImpl implements ReportService {
             for (IncomeStatementItem item : vo.getItems()) {
                 sb.append("<tr>");
                 sb.append("<td>").append(item.getRowNo()).append("</td>");
-                sb.append("<td>").append(item.getName() != null ? item.getName() : "").append("</td>");
-                sb.append("<td>").append(item.getCode() != null ? item.getCode() : "").append("</td>");
+                sb.append("<td>").append(esc(item.getName())).append("</td>");
+                sb.append("<td>").append(esc(item.getCode())).append("</td>");
                 sb.append("<td class=\"num\">").append(formatAmount(item.getCurrentAmount())).append("</td>");
                 sb.append("<td class=\"num\">").append(formatAmount(item.getYearAmount())).append("</td>");
                 sb.append("</tr>");
@@ -1171,8 +1172,8 @@ public class ReportServiceImpl implements ReportService {
         if (vo.getItems() != null) {
             for (CashFlowItemVO item : vo.getItems()) {
                 sb.append("<tr>");
-                sb.append("<td>").append(item.getCategory() != null ? item.getCategory() : "").append("</td>");
-                sb.append("<td>").append(item.getItemName() != null ? item.getItemName() : "").append("</td>");
+                sb.append("<td>").append(esc(item.getCategory())).append("</td>");
+                sb.append("<td>").append(esc(item.getItemName())).append("</td>");
                 sb.append("<td class=\"num\">").append(formatAmount(item.getAmount())).append("</td>");
                 sb.append("</tr>");
             }
@@ -1219,8 +1220,8 @@ public class ReportServiceImpl implements ReportService {
         if (vo.getRows() != null) {
             for (SubjectBalanceRow row : vo.getRows()) {
                 sb.append("<tr>");
-                sb.append("<td>").append(row.getSubjectCode() != null ? row.getSubjectCode() : "").append("</td>");
-                sb.append("<td>").append(row.getSubjectName() != null ? row.getSubjectName() : "").append("</td>");
+                sb.append("<td>").append(esc(row.getSubjectCode())).append("</td>");
+                sb.append("<td>").append(esc(row.getSubjectName())).append("</td>");
                 sb.append("<td class=\"num\">").append(formatAmount(row.getBeginDebit())).append("</td>");
                 sb.append("<td class=\"num\">").append(formatAmount(row.getBeginCredit())).append("</td>");
                 sb.append("<td class=\"num\">").append(formatAmount(row.getPeriodDebit())).append("</td>");
@@ -1251,6 +1252,16 @@ public class ReportServiceImpl implements ReportService {
             return "0.00";
         }
         return amount.setScale(2, RoundingMode.HALF_UP).toPlainString();
+    }
+
+    /**
+     * HTML实体转义，防止XSS。null安全（返回空串）。
+     */
+    private String esc(String text) {
+        if (text == null) {
+            return "";
+        }
+        return HtmlUtils.htmlEscape(text);
     }
 
     /**

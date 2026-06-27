@@ -102,7 +102,7 @@ public class DataBackupServiceImpl implements DataBackupService {
 
     @Override
     public void restore(String fileName) {
-        Path backupPath = Paths.get(BACKUP_DIR, fileName);
+        Path backupPath = resolveSafeBackupPath(fileName);
         if (!Files.exists(backupPath)) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "备份文件不存在");
         }
@@ -119,7 +119,7 @@ public class DataBackupServiceImpl implements DataBackupService {
 
     @Override
     public void deleteBackup(String fileName) {
-        Path backupPath = Paths.get(BACKUP_DIR, fileName);
+        Path backupPath = resolveSafeBackupPath(fileName);
         if (!Files.exists(backupPath)) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "备份文件不存在");
         }
@@ -131,5 +131,25 @@ public class DataBackupServiceImpl implements DataBackupService {
             log.error("删除备份文件失败", e);
             throw new BusinessException(ErrorCode.INTERNAL_ERROR, "删除备份文件失败");
         }
+    }
+
+    /**
+     * 安全解析备份文件路径，防止路径穿越攻击（如 fileName 含 ../ 跳出备份目录）
+     */
+    private Path resolveSafeBackupPath(String fileName) {
+        if (fileName == null || fileName.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "文件名不能为空");
+        }
+        // 拒绝包含路径分隔符或父目录引用的文件名
+        if (fileName.contains("/") || fileName.contains("\\") || fileName.contains("..")) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "非法的文件名");
+        }
+        Path backupDir = Paths.get(BACKUP_DIR).toAbsolutePath().normalize();
+        Path backupPath = Paths.get(BACKUP_DIR, fileName).toAbsolutePath().normalize();
+        // 二次校验：解析后路径必须仍位于备份目录内
+        if (!backupPath.startsWith(backupDir)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "非法的文件名");
+        }
+        return backupPath;
     }
 }

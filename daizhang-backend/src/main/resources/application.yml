@@ -33,7 +33,8 @@ spring:
       enabled: true
       path: /h2-console
       settings:
-        web-allow-others: true
+        # 仅允许本机访问，防止远程未授权访问数据库控制台
+        web-allow-others: false
 
   # SQL 初始化 - 启动时自动创建表结构
   sql:
@@ -79,8 +80,9 @@ mybatis-plus:
 # JWT配置
 jwt:
   secret: daizhang-system-secret-key-2026-must-be-at-least-256-bits-long
-  expiration: 7200000  # 2小时
-  refresh-expiration: 604800000  # 7天
+  # 单位：秒。JwtUtils 中 expiration*1000 转毫秒，7200秒=2小时
+  expiration: 7200
+  refresh-expiration: 604800  # 7天(秒)
 
 # Knife4j配置
 knife4j:

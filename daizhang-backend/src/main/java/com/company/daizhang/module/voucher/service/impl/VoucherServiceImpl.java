@@ -615,6 +615,10 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
         }
 
+        // 校验目标期间存在且未结账（复制等同于在原期间新建凭证，须遵守期间约束）
+        AccountPeriod period = checkPeriodExists(original.getAccountSetId(), original.getYear(), original.getMonth());
+        checkPeriodNotClosed(period);
+
         // 查询原凭证明细
         LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
         detailWrapper.eq(VoucherDetail::getVoucherId, id)
@@ -672,6 +676,13 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         if (original == null) {
             throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
         }
+        // 红冲仅对已过账凭证有意义（status=2），未审核/未过账凭证不可红冲
+        if (original.getStatus() == null || original.getStatus() != 2) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "只有已过账的凭证才能红冲");
+        }
+        // 校验目标期间存在且未结账（红冲凭证生成在原期间，须遵守期间约束）
+        AccountPeriod period = checkPeriodExists(original.getAccountSetId(), original.getYear(), original.getMonth());
+        checkPeriodNotClosed(period);
 
         // 查询原凭证明细
         LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();

@@ -182,9 +182,13 @@ public class LedgerServiceImpl implements LedgerService {
             AccountBalance accountBalance = accountBalanceMapper.selectOne(balanceWrapper);
             if (accountBalance != null) {
                 if (balanceDirection == 1) {
-                    beginBalance = accountBalance.getBeginDebit().subtract(accountBalance.getBeginCredit());
+                    BigDecimal d = accountBalance.getBeginDebit() != null ? accountBalance.getBeginDebit() : BigDecimal.ZERO;
+                    BigDecimal c = accountBalance.getBeginCredit() != null ? accountBalance.getBeginCredit() : BigDecimal.ZERO;
+                    beginBalance = d.subtract(c);
                 } else {
-                    beginBalance = accountBalance.getBeginCredit().subtract(accountBalance.getBeginDebit());
+                    BigDecimal d = accountBalance.getBeginDebit() != null ? accountBalance.getBeginDebit() : BigDecimal.ZERO;
+                    BigDecimal c = accountBalance.getBeginCredit() != null ? accountBalance.getBeginCredit() : BigDecimal.ZERO;
+                    beginBalance = c.subtract(d);
                 }
             }
         }
@@ -402,8 +406,9 @@ public class LedgerServiceImpl implements LedgerService {
             } else {
                 existing.setPeriodDebit(existing.getPeriodDebit().add(balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO));
                 existing.setPeriodCredit(existing.getPeriodCredit().add(balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO));
-                existing.setYearDebit(existing.getYearDebit().add(balance.getYearDebit() != null ? balance.getYearDebit() : BigDecimal.ZERO));
-                existing.setYearCredit(existing.getYearCredit().add(balance.getYearCredit() != null ? balance.getYearCredit() : BigDecimal.ZERO));
+                // yearDebit/yearCredit为本年累计值(截至期末的累计),各月存在包含关系,不能累加,取查询范围最后一期
+                existing.setYearDebit(balance.getYearDebit() != null ? balance.getYearDebit() : BigDecimal.ZERO);
+                existing.setYearCredit(balance.getYearCredit() != null ? balance.getYearCredit() : BigDecimal.ZERO);
                 // 使用最后一期的期末余额
                 existing.setEndDebit(balance.getEndDebit() != null ? balance.getEndDebit() : BigDecimal.ZERO);
                 existing.setEndCredit(balance.getEndCredit() != null ? balance.getEndCredit() : BigDecimal.ZERO);
@@ -1353,7 +1358,15 @@ public class LedgerServiceImpl implements LedgerService {
 
         // 余额方向：应收为借方(1)，应付为贷方(2)
         int balanceDirection = subject.getBalanceDirection() != null ? subject.getBalanceDirection() : 1;
-        LocalDate currentDate = LocalDate.now();
+        // 账龄基准日取查询期间期末，保证同一查询结果可复现、可审计(避免用LocalDate.now()导致每日结果不同)
+        LocalDate currentDate;
+        if (month != null) {
+            // 期间期末：该月最后一天
+            currentDate = LocalDate.of(year, month, 1).plusMonths(1).minusDays(1);
+        } else {
+            // 未指定月份则取年末
+            currentDate = LocalDate.of(year, 12, 31);
+        }
 
         List<AgingAnalysisVO> result = new ArrayList<>();
         for (Map.Entry<Long, List<VoucherDetail>> entry : auxiliaryGroupMap.entrySet()) {
@@ -1840,9 +1853,13 @@ public class LedgerServiceImpl implements LedgerService {
             AccountBalance accountBalance = accountBalanceMapper.selectOne(balanceWrapper);
             if (accountBalance != null) {
                 if (balanceDirection == 1) {
-                    beginBalance = accountBalance.getBeginDebit().subtract(accountBalance.getBeginCredit());
+                    BigDecimal d = accountBalance.getBeginDebit() != null ? accountBalance.getBeginDebit() : BigDecimal.ZERO;
+                    BigDecimal c = accountBalance.getBeginCredit() != null ? accountBalance.getBeginCredit() : BigDecimal.ZERO;
+                    beginBalance = d.subtract(c);
                 } else {
-                    beginBalance = accountBalance.getBeginCredit().subtract(accountBalance.getBeginDebit());
+                    BigDecimal d = accountBalance.getBeginDebit() != null ? accountBalance.getBeginDebit() : BigDecimal.ZERO;
+                    BigDecimal c = accountBalance.getBeginCredit() != null ? accountBalance.getBeginCredit() : BigDecimal.ZERO;
+                    beginBalance = c.subtract(d);
                 }
             }
         }

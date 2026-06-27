@@ -716,8 +716,10 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
         BankReconciliationVO vo = new BankReconciliationVO();
         BeanUtil.copyProperties(reconciliation, vo);
 
-        // 差异 = 银行余额 - 账簿余额
-        vo.setDifference(reconciliation.getBankBalance().subtract(reconciliation.getBookBalance()));
+        // 差异 = 银行余额 - 账簿余额（null安全，历史/异常数据可能为null）
+        BigDecimal bankBalance = reconciliation.getBankBalance() != null ? reconciliation.getBankBalance() : BigDecimal.ZERO;
+        BigDecimal bookBalance = reconciliation.getBookBalance() != null ? reconciliation.getBookBalance() : BigDecimal.ZERO;
+        vo.setDifference(bankBalance.subtract(bookBalance));
 
         // 状态名称
         if (reconciliation.getStatus() != null) {

@@ -55,6 +55,35 @@ public class PeriodServiceImpl implements PeriodService {
     private final VoucherDetailMapper voucherDetailMapper;
     private final AccountSetMapper accountSetMapper;
 
+    /**
+     * 生成结转凭证号：格式 year-month-sequence，基于本期最大序号+1。
+     * 使用max+1而非count+1，避免期间存在断号时重号冲突（唯一索引报错导致结转失败）。
+     */
+    private String generateCarryVoucherNo(Long accountSetId, int year, int month) {
+        LambdaQueryWrapper<Voucher> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Voucher::getAccountSetId, accountSetId)
+               .eq(Voucher::getYear, year)
+               .eq(Voucher::getMonth, month)
+               .notLike(Voucher::getVoucherNo, "TMP-%")
+               .orderByDesc(Voucher::getVoucherNo)
+               .last("LIMIT 1");
+        List<Voucher> list = voucherMapper.selectList(wrapper);
+        int sequence = 1;
+        if (list != null && !list.isEmpty()) {
+            Voucher lastVoucher = list.get(0);
+            if (lastVoucher.getVoucherNo() != null && !lastVoucher.getVoucherNo().isEmpty()) {
+                String[] parts = lastVoucher.getVoucherNo().split("-");
+                if (parts.length == 3) {
+                    try {
+                        sequence = Integer.parseInt(parts[2]) + 1;
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+        }
+        return String.format("%d-%02d-%03d", year, month, sequence);
+    }
+
     @Override
     public TrialBalanceResultVO trialBalance(TrialBalanceRequest request) {
         Long accountSetId = request.getAccountSetId();
@@ -375,14 +404,8 @@ public class PeriodServiceImpl implements PeriodService {
         voucher.setPostBy(currentUserId);
         voucher.setPostTime(LocalDateTime.now());
 
-        // 生成凭证号
-        LambdaQueryWrapper<Voucher> countWrapper = new LambdaQueryWrapper<>();
-        countWrapper.eq(Voucher::getAccountSetId, accountSetId)
-                   .eq(Voucher::getYear, year)
-                   .eq(Voucher::getMonth, month)
-                   .notLike(Voucher::getVoucherNo, "TMP-%");
-        long count = voucherMapper.selectCount(countWrapper);
-        voucher.setVoucherNo(String.format("%d-%02d-%03d", year, month, count + 1));
+        // 生成凭证号（基于本期最大序号+1，避免断号时count+1导致重号冲突）
+        voucher.setVoucherNo(generateCarryVoucherNo(accountSetId, year, month));
 
         voucherMapper.insert(voucher);
 
@@ -751,13 +774,7 @@ public class PeriodServiceImpl implements PeriodService {
         voucher.setAttachmentCount(0);
         voucher.setVoucherWordId(1L);
 
-        LambdaQueryWrapper<Voucher> countWrapper = new LambdaQueryWrapper<>();
-        countWrapper.eq(Voucher::getAccountSetId, accountSetId)
-                .eq(Voucher::getYear, year)
-                .eq(Voucher::getMonth, month)
-                .notLike(Voucher::getVoucherNo, "TMP-%");
-        Long voucherCount = voucherMapper.selectCount(countWrapper);
-        voucher.setVoucherNo(String.format("%d-%02d-%03d", year, month, (voucherCount != null ? voucherCount.intValue() : 0) + 1));
+        voucher.setVoucherNo(generateCarryVoucherNo(accountSetId, year, month));
 
         voucherMapper.insert(voucher);
 
