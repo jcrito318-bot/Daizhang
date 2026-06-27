@@ -111,8 +111,12 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
         if (contract == null) {
             throw new BusinessException(404, "合同不存在");
         }
-
-        BeanUtil.copyProperties(request, contract);
+        // 保存原状态,防止copyProperties覆盖status绕过状态机(状态变更只能走专用接口)
+        Integer originalStatus = contract.getStatus();
+        // 使用ignoreNullValue避免Hutool默认拷贝null导致部分更新时字段被置空
+        BeanUtil.copyProperties(request, contract, cn.hutool.core.bean.copier.CopyOptions.create().ignoreNullValue());
+        contract.setId(id);
+        contract.setStatus(originalStatus);
         this.updateById(contract);
     }
 

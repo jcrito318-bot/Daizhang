@@ -454,6 +454,11 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             throw new BusinessException(ErrorCode.VOUCHER_NOT_AUDITED);
         }
 
+        // 校验凭证所属期间未结账,防止向已结账期间写入余额破坏结账快照
+        // (create/update/saveDraft/copy/reverse均做此校验,过账遗漏会导致已结账期间余额被改写)
+        AccountPeriod period = checkPeriodExists(voucher.getAccountSetId(), voucher.getYear(), voucher.getMonth());
+        checkPeriodNotClosed(period);
+
         // 查询凭证明细
         LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
         detailWrapper.eq(VoucherDetail::getVoucherId, id)
@@ -1013,10 +1018,13 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
      * 使用两步更新避免唯一索引冲突：先将所有凭证号改为临时号，再分配连续正式号
      */
     private void renumberVouchers(Long accountSetId, Integer year, Integer month) {
+        // 仅重编号未审核(status=0)的凭证,已审核(1)/已过账(2)凭证号已固化,不可篡改,
+        // 否则会破坏已打印/归档/对外引用的凭证号稳定性与审计轨迹
         LambdaQueryWrapper<Voucher> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Voucher::getAccountSetId, accountSetId)
                .eq(Voucher::getYear, year)
                .eq(Voucher::getMonth, month)
+               .eq(Voucher::getStatus, 0)
                .orderByAsc(Voucher::getVoucherDate, Voucher::getVoucherNo);
         List<Voucher> vouchers = this.list(wrapper);
 
@@ -1024,7 +1032,7 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             return;
         }
 
-        // 第一步：将所有凭证号改为临时号 TMP-{id}，避免唯一索引冲突
+        // 第一步：将未审核凭证号改为临时号 TMP-{id}，避免唯一索引冲突
         for (Voucher voucher : vouchers) {
             LambdaUpdateWrapper<Voucher> tempWrapper = new LambdaUpdateWrapper<>();
             tempWrapper.eq(Voucher::getId, voucher.getId())
@@ -1043,7 +1051,7 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             sequence++;
         }
 
-        log.info("重新编号凭证成功，账套ID: {}, 年度: {}, 月份: {}, 凭证数量: {}",
+        log.info("重新编号未审核凭证成功，账套ID: {}, 年度: {}, 月份: {}, 凭证数量: {}",
                 accountSetId, year, month, vouchers.size());
     }
 

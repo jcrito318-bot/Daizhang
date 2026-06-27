@@ -601,6 +601,11 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
      */
     private BigDecimal calculateMonthlyDepreciation(BigDecimal purchaseAmount, BigDecimal residualValue,
                                                      Integer usefulLife, String depreciationMethod) {
+        // 参数防御:避免usefulLife为null拆箱NPE、为0除零异常、原值/残值为null NPE
+        if (purchaseAmount == null || residualValue == null
+                || usefulLife == null || usefulLife <= 0) {
+            return BigDecimal.ZERO;
+        }
         if ("直线法".equals(depreciationMethod)) {
             // 直线法：月折旧额 = (原值 - 残值) / 使用年限 / 12
             return purchaseAmount.subtract(residualValue)

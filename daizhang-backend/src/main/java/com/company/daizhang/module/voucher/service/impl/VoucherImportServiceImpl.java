@@ -249,13 +249,16 @@ public class VoucherImportServiceImpl implements VoucherImportService {
 
     /**
      * 生成凭证号：格式 year-month-sequence，如 2026-06-001
+     * 基于本期最大序号+1,排除TMP-%临时号(否则字符串排序下TMP号排最前,parse失败导致重号)
      */
     private String generateVoucherNo(Long accountSetId, Integer year, Integer month) {
         LambdaQueryWrapper<Voucher> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Voucher::getAccountSetId, accountSetId)
                .eq(Voucher::getYear, year)
                .eq(Voucher::getMonth, month)
-               .orderByDesc(Voucher::getVoucherNo);
+               .notLike(Voucher::getVoucherNo, "TMP-%")
+               .orderByDesc(Voucher::getVoucherNo)
+               .last("LIMIT 1");
         List<Voucher> vouchers = voucherMapper.selectList(wrapper);
 
         int sequence = 1;

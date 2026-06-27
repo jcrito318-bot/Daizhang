@@ -599,14 +599,25 @@ public class InventoryServiceImpl implements InventoryService {
             stock.setItemId(itemId);
             stock.setYear(year);
             stock.setMonth(month);
-            stock.setBeginQuantity(BigDecimal.ZERO);
-            stock.setBeginAmount(BigDecimal.ZERO);
+            // 期初从上月期末结转:跨年取上年12月,否则取本年上月。
+            // 否则第2个月起期初恒为0,导致上月结余凭空消失、出库校验库存不足、月末报表失真。
+            int lastYear = (month == 1) ? year - 1 : year;
+            int lastMonth = (month == 1) ? 12 : month - 1;
+            InventoryStock lastStock = getCurrentStock(accountSetId, itemId, lastYear, lastMonth);
+            BigDecimal carriedBeginQty = BigDecimal.ZERO;
+            BigDecimal carriedBeginAmt = BigDecimal.ZERO;
+            if (lastStock != null) {
+                carriedBeginQty = nvl(lastStock.getEndQuantity());
+                carriedBeginAmt = nvl(lastStock.getEndAmount());
+            }
+            stock.setBeginQuantity(carriedBeginQty);
+            stock.setBeginAmount(carriedBeginAmt);
             stock.setInQuantity(BigDecimal.ZERO);
             stock.setInAmount(BigDecimal.ZERO);
             stock.setOutQuantity(BigDecimal.ZERO);
             stock.setOutAmount(BigDecimal.ZERO);
-            stock.setEndQuantity(BigDecimal.ZERO);
-            stock.setEndAmount(BigDecimal.ZERO);
+            stock.setEndQuantity(carriedBeginQty);
+            stock.setEndAmount(carriedBeginAmt);
             stock.setUnitCost(BigDecimal.ZERO);
         }
         return stock;

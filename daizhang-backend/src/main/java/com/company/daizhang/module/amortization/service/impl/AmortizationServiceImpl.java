@@ -377,10 +377,12 @@ public class AmortizationServiceImpl implements AmortizationService {
             return false;
         }
         List<Long> voucherIds = vouchers.stream().map(Voucher::getId).collect(Collectors.toList());
-        // 查询这些凭证的明细,判断是否存在摘要包含摊销名称且贷方科目为长期待摊费用的明细
+        // 查询这些凭证的明细,判断是否存在该摊销对象的摊销凭证(精确匹配"长期待摊费用摊销-{摊销对象名称}")
+        // 原like"长期待摊费用摊销-"会误判其他摊销对象为已存在,导致同期只能摊销一个对象
+        String exactSummary = "长期待摊费用摊销-" + amortization.getAmortizationName();
         LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
         detailWrapper.in(VoucherDetail::getVoucherId, voucherIds)
-                .like(VoucherDetail::getSummary, "长期待摊费用摊销-")
+                .eq(VoucherDetail::getSummary, exactSummary)
                 .gt(VoucherDetail::getCredit, BigDecimal.ZERO);
         Long count = voucherDetailMapper.selectCount(detailWrapper);
         return count != null && count > 0;

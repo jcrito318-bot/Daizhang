@@ -221,8 +221,13 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
             throw new BusinessException(ErrorCode.USER_NOT_FOUND);
         }
         
-        // 不能删除管理员
-        if (CommonConstant.SUPER_ADMIN.equals(user.getUsername())) {
+        // 不能删除管理员:按角色编码判断(大小写不敏感),同时保护id=1的种子管理员账户
+        // 原代码 CommonConstant.SUPER_ADMIN="ADMIN" 与种子用户名"admin"大小写不一致导致校验失效
+        if (id != null && id == 1L) {
+            throw new BusinessException(ErrorCode.USER_CANNOT_DELETE_ADMIN);
+        }
+        if (user.getUsername() != null
+                && CommonConstant.SUPER_ADMIN.equalsIgnoreCase(user.getUsername())) {
             throw new BusinessException(ErrorCode.USER_CANNOT_DELETE_ADMIN);
         }
         

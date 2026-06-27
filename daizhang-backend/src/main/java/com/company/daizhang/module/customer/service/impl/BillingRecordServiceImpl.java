@@ -113,14 +113,19 @@ public class BillingRecordServiceImpl implements BillingRecordService {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "已收款的开票记录不能更新");
         }
 
-        // 保存原状态,防止copyProperties覆盖status绕过状态机(状态变更只能走专用接口)
+        // 保存原状态和关联收款记录ID,防止copyProperties覆盖绕过状态机(状态/收款关联只能走专用接口)
         Integer originalStatus = record.getStatus();
-        BeanUtil.copyProperties(request, record);
+        Long originalPaymentRecordId = record.getPaymentRecordId();
+        BigDecimal originalAmount = record.getAmount();
+        // 使用ignoreNullValue避免Hutool默认拷贝null导致部分更新时字段被清零/置空
+        BeanUtil.copyProperties(request, record, cn.hutool.core.bean.copier.CopyOptions.create().ignoreNullValue());
+        record.setId(id);
         record.setStatus(originalStatus);
+        record.setPaymentRecordId(originalPaymentRecordId);
 
-        // 如果金额或税率变更，重新计算税额
+        // 如果金额或税率变更，重新计算税额(此时record.getAmount()保留原值,不会被null覆盖)
         if (request.getAmount() != null || request.getTaxRate() != null) {
-            BigDecimal amount = request.getAmount() != null ? request.getAmount() : record.getAmount();
+            BigDecimal amount = record.getAmount() != null ? record.getAmount() : originalAmount;
             BigDecimal taxRate = request.getTaxRate() != null ? request.getTaxRate() : record.getTaxRate();
             if (taxRate == null) {
                 taxRate = DEFAULT_TAX_RATE;

@@ -483,17 +483,60 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         List<VoucherDetailRequest> details = new ArrayList<>();
         int lineNo = 1;
 
-        // 借：应付职工薪酬 (应发工资总额)
         BigDecimal totalGrossSalary = totalBaseSalary.add(totalAllowance).add(totalBonus).subtract(totalDeduction);
+
+        // 费用科目(计提工资借方):优先用传入的expenseSubjectId,否则查找5602管理费用
+        Subject expenseSubject = null;
+        if (request.getExpenseSubjectId() != null) {
+            expenseSubject = subjectMapper.selectById(request.getExpenseSubjectId());
+        }
+        if (expenseSubject == null) {
+            // 查找编码5602(管理费用)作为默认费用科目
+            LambdaQueryWrapper<Subject> expenseWrapper = new LambdaQueryWrapper<>();
+            expenseWrapper.eq(Subject::getAccountSetId, request.getAccountSetId())
+                          .eq(Subject::getCode, "5602")
+                          .last("LIMIT 1");
+            expenseSubject = subjectMapper.selectOne(expenseWrapper);
+        }
+
+        // === 计提分录 ===
+        // 借：管理费用/费用科目 (应发工资总额)
+        if (expenseSubject != null) {
+            VoucherDetailRequest debitExpense = new VoucherDetailRequest();
+            debitExpense.setLineNo(lineNo++);
+            debitExpense.setSummary("计提" + request.getYear() + "年" + request.getMonth() + "月工资");
+            debitExpense.setSubjectId(expenseSubject.getId());
+            debitExpense.setSubjectCode(expenseSubject.getCode());
+            debitExpense.setSubjectName(expenseSubject.getName());
+            debitExpense.setDebit(totalGrossSalary);
+            debitExpense.setCredit(BigDecimal.ZERO);
+            debitExpense.setSortOrder(1);
+            details.add(debitExpense);
+        }
+
+        // 贷：应付职工薪酬 (应发工资总额) —— 负债科目在贷方,原代码错误地放在借方
+        VoucherDetailRequest creditPayable = new VoucherDetailRequest();
+        creditPayable.setLineNo(lineNo++);
+        creditPayable.setSummary("计提" + request.getYear() + "年" + request.getMonth() + "月工资");
+        creditPayable.setSubjectId(payableSubject.getId());
+        creditPayable.setSubjectCode(payableSubject.getCode());
+        creditPayable.setSubjectName(payableSubject.getName());
+        creditPayable.setDebit(BigDecimal.ZERO);
+        creditPayable.setCredit(totalGrossSalary);
+        creditPayable.setSortOrder(2);
+        details.add(creditPayable);
+
+        // === 发放分录 ===
+        // 借：应付职工薪酬 (应发工资总额,核销计提的负债)
         VoucherDetailRequest debitPayable = new VoucherDetailRequest();
         debitPayable.setLineNo(lineNo++);
-        debitPayable.setSummary("计提" + request.getYear() + "年" + request.getMonth() + "月工资");
+        debitPayable.setSummary("发放" + request.getYear() + "年" + request.getMonth() + "月工资");
         debitPayable.setSubjectId(payableSubject.getId());
         debitPayable.setSubjectCode(payableSubject.getCode());
         debitPayable.setSubjectName(payableSubject.getName());
         debitPayable.setDebit(totalGrossSalary);
         debitPayable.setCredit(BigDecimal.ZERO);
-        debitPayable.setSortOrder(1);
+        debitPayable.setSortOrder(3);
         details.add(debitPayable);
 
         // 贷：银行存款 (实发工资)
@@ -505,7 +548,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         creditBank.setSubjectName(bankSubject.getName());
         creditBank.setDebit(BigDecimal.ZERO);
         creditBank.setCredit(totalNetSalary);
-        creditBank.setSortOrder(2);
+        creditBank.setSortOrder(4);
         details.add(creditBank);
 
         // 贷：其他应付款-社保 (个人部分)
@@ -520,7 +563,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
                 creditSocialSecurity.setSubjectName(socialSecuritySubject.getName());
                 creditSocialSecurity.setDebit(BigDecimal.ZERO);
                 creditSocialSecurity.setCredit(totalSocialSecurity);
-                creditSocialSecurity.setSortOrder(3);
+                creditSocialSecurity.setSortOrder(5);
                 details.add(creditSocialSecurity);
             }
         }
@@ -537,7 +580,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
                 creditHousingFund.setSubjectName(housingFundSubject.getName());
                 creditHousingFund.setDebit(BigDecimal.ZERO);
                 creditHousingFund.setCredit(totalHousingFund);
-                creditHousingFund.setSortOrder(4);
+                creditHousingFund.setSortOrder(6);
                 details.add(creditHousingFund);
             }
         }
@@ -554,7 +597,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
                 creditIncomeTax.setSubjectName(incomeTaxSubject.getName());
                 creditIncomeTax.setDebit(BigDecimal.ZERO);
                 creditIncomeTax.setCredit(totalIncomeTax);
-                creditIncomeTax.setSortOrder(5);
+                creditIncomeTax.setSortOrder(7);
                 details.add(creditIncomeTax);
             }
         }

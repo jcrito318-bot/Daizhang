@@ -187,12 +187,14 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         for (ServiceContract contract : contracts) {
             if (contract.getStatus() != null && contract.getStatus() == 1) {
                 activeCount++;
+                // 合同金额仅统计执行中的合同(排除草稿/已完成/已终止)
+                if (contract.getAmount() != null) {
+                    totalContractAmount = totalContractAmount.add(contract.getAmount());
+                }
             }
-            if (contract.getAmount() != null) {
-                totalContractAmount = totalContractAmount.add(contract.getAmount());
-            }
-            // 即将到期合同(30天内)
-            if (contract.getEndDate() != null
+            // 即将到期合同(30天内,仅执行中)
+            if (contract.getStatus() != null && contract.getStatus() == 1
+                    && contract.getEndDate() != null
                     && !contract.getEndDate().isBefore(today)
                     && !contract.getEndDate().isAfter(expiringThreshold)) {
                 expiringCount++;
@@ -551,9 +553,10 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         vo.setCustomerId(customer.getId());
         vo.setCustomerName(customer.getCustomerName());
 
-        // 查询客户合同
+        // 查询客户合同(仅执行中,排除草稿0/已完成2/已终止3,避免虚增欠款)
         LambdaQueryWrapper<ServiceContract> contractWrapper = new LambdaQueryWrapper<>();
-        contractWrapper.eq(ServiceContract::getCustomerId, customer.getId());
+        contractWrapper.eq(ServiceContract::getCustomerId, customer.getId())
+                       .eq(ServiceContract::getStatus, 1);
         List<ServiceContract> contracts = serviceContractMapper.selectList(contractWrapper);
 
         BigDecimal totalContractAmount = BigDecimal.ZERO;

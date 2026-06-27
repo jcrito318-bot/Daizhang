@@ -42,14 +42,14 @@ public class IndustryCommerceServiceUpdateRequest {
     private LocalDate expectedCompleteDate;
 
     /**
-     * 成本金额
+     * 成本金额（更新时若未传则为null,由service层判空保留原值,避免默认ZERO清零）
      */
-    private BigDecimal costAmount = BigDecimal.ZERO;
+    private BigDecimal costAmount;
 
     /**
-     * 服务金额
+     * 服务金额（更新时若未传则为null,由service层判空保留原值）
      */
-    private BigDecimal serviceAmount = BigDecimal.ZERO;
+    private BigDecimal serviceAmount;
 
     /**
      * 备注

@@ -370,7 +370,8 @@ public class LedgerServiceImpl implements LedgerService {
         balanceWrapper.eq(AccountBalance::getAccountSetId, accountSetId)
                 .eq(AccountBalance::getYear, year)
                 .ge(AccountBalance::getMonth, startMonth)
-                .le(AccountBalance::getMonth, endMonth);
+                .le(AccountBalance::getMonth, endMonth)
+                .orderByAsc(AccountBalance::getMonth);
         List<AccountBalance> balances = accountBalanceMapper.selectList(balanceWrapper);
 
         // 查询科目信息
@@ -1033,7 +1034,7 @@ public class LedgerServiceImpl implements LedgerService {
             throw new BusinessException(ErrorCode.LEDGER_ACCOUNT_SET_NOT_FOUND);
         }
         Subject subject = subjectMapper.selectById(subjectId);
-        if (subject == null) {
+        if (subject == null || !accountSetId.equals(subject.getAccountSetId())) {
             throw new BusinessException(ErrorCode.LEDGER_SUBJECT_NOT_FOUND);
         }
 

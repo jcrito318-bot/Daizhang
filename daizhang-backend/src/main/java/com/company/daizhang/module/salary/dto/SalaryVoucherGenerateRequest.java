@@ -25,6 +25,12 @@ public class SalaryVoucherGenerateRequest {
     private Long payableSubjectId;
 
     /**
+     * 费用科目ID(如管理费用5602),用于计提工资的借方。
+     * 若为空则自动查找编码5602科目作为借方费用科目。
+     */
+    private Long expenseSubjectId;
+
+    /**
      * 银行存款科目ID
      */
     @NotNull(message = "银行存款科目ID不能为空")

@@ -28,17 +28,18 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)
-                .headers(headers -> headers.frameOptions(frame -> frame.disable()))
+                // 仅允许同源iframe,防止点击劫持(原全局disable过宽)
+                .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/auth/**",
                                 "/doc.html/**",
                                 "/swagger-resources/**",
-                                "/v3/api-docs/**",
-                                "/druid/**",
-                                "/h2-console/**"
+                                "/v3/api-docs/**"
                         ).permitAll()
+                        // 移除 /druid/** 和 /h2-console/** 的 permitAll:
+                        // H2控制台/Druid监控台含敏感信息且可执行SQL,未认证暴露会导致数据库被未授权访问
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
