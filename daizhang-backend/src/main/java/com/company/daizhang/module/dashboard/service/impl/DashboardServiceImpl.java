@@ -56,6 +56,7 @@ public class DashboardServiceImpl implements DashboardService {
                 .orderByDesc(ServiceTask::getCreateTime);
         List<ServiceTask> pendingTasks = serviceTaskMapper.selectList(taskWrapper);
         Map<Long, List<ServiceTask>> taskByAccountSet = pendingTasks.stream()
+                .filter(t -> t.getAccountSetId() != null)
                 .collect(Collectors.groupingBy(ServiceTask::getAccountSetId));
 
         // 已完成服务任务数（status==2）

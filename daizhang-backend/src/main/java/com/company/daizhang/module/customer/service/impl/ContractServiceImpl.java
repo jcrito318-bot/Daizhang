@@ -136,9 +136,10 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
         LocalDate today = LocalDate.now();
         LocalDate thresholdDate = today.plusDays(daysThreshold);
 
-        // 查询到期日在今天到阈值日期之间的合同（包含已过期的）
+        // 查询到期日在今天到阈值日期之间的执行中合同（包含已过期的）
         LambdaQueryWrapper<ServiceContract> wrapper = new LambdaQueryWrapper<>();
         wrapper.isNotNull(ServiceContract::getEndDate)
+               .eq(ServiceContract::getStatus, 1)
                .le(ServiceContract::getEndDate, thresholdDate)
                .orderByAsc(ServiceContract::getEndDate);
         List<ServiceContract> contracts = this.list(wrapper);

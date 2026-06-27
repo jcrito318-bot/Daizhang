@@ -74,8 +74,11 @@ public class IndustryCommerceTaskServiceImpl implements IndustryCommerceTaskServ
         if (entity == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "外勤任务不存在");
         }
+        // 保存原状态,防止copyProperties覆盖taskStatus绕过状态机(状态变更只能走assignTask/completeTask)
+        Integer originalStatus = entity.getTaskStatus();
         BeanUtil.copyProperties(request, entity);
         entity.setId(id);
+        entity.setTaskStatus(originalStatus);
         industryCommerceTaskMapper.updateById(entity);
         log.info("更新外勤任务成功，任务ID: {}", id);
     }

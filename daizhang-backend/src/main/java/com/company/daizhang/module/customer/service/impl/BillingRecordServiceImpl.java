@@ -109,8 +109,14 @@ public class BillingRecordServiceImpl implements BillingRecordService {
         if (record.getStatus() != null && record.getStatus() == 2) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "已作废的开票记录不能更新");
         }
+        if (record.getStatus() != null && record.getStatus() == 1) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "已收款的开票记录不能更新");
+        }
 
+        // 保存原状态,防止copyProperties覆盖status绕过状态机(状态变更只能走专用接口)
+        Integer originalStatus = record.getStatus();
         BeanUtil.copyProperties(request, record);
+        record.setStatus(originalStatus);
 
         // 如果金额或税率变更，重新计算税额
         if (request.getAmount() != null || request.getTaxRate() != null) {
@@ -151,6 +157,9 @@ public class BillingRecordServiceImpl implements BillingRecordService {
         }
         if (record.getStatus() != null && record.getStatus() == 2) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "开票记录已作废");
+        }
+        if (record.getStatus() != null && record.getStatus() == 1) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "已收款的开票记录不能作废，请先红冲或退款");
         }
         record.setStatus(2); // 已作废
         billingRecordMapper.updateById(record);

@@ -115,8 +115,11 @@ public class IndustryCommerceServiceServiceImpl implements IndustryCommerceServi
         if (entity == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "工商服务不存在");
         }
+        // 保存原状态,防止copyProperties覆盖serviceStatus绕过状态机(状态变更只能走assignService/completeService/cancelService)
+        Integer originalStatus = entity.getServiceStatus();
         BeanUtil.copyProperties(request, entity);
         entity.setId(id);
+        entity.setServiceStatus(originalStatus);
         industryCommerceServiceMapper.updateById(entity);
         log.info("更新工商服务成功，服务ID: {}", id);
     }
