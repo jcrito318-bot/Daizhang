@@ -171,14 +171,15 @@ public class LedgerServiceImpl implements LedgerService {
         int balanceDirection = (subject.getBalanceDirection() != null)
                 ? subject.getBalanceDirection() : 1;
 
-        // 获取期初余额
+        // 获取期初余额（month=null表示查全年,取1月期初作为年初余额）
         BigDecimal beginBalance = BigDecimal.ZERO;
-        if (month != null) {
+        Integer balanceMonth = (month != null) ? month : 1;
+        {
             LambdaQueryWrapper<AccountBalance> balanceWrapper = new LambdaQueryWrapper<>();
             balanceWrapper.eq(AccountBalance::getAccountSetId, accountSetId)
                     .eq(AccountBalance::getSubjectId, subjectId)
                     .eq(AccountBalance::getYear, year)
-                    .eq(AccountBalance::getMonth, month);
+                    .eq(AccountBalance::getMonth, balanceMonth);
             AccountBalance accountBalance = accountBalanceMapper.selectOne(balanceWrapper);
             if (accountBalance != null) {
                 if (balanceDirection == 1) {
@@ -663,15 +664,16 @@ public class LedgerServiceImpl implements LedgerService {
             columnItems = Arrays.asList(config.getColumnItems().split(","));
         }
 
-        // 获取期初余额
+        // 获取期初余额（month=null表示查全年,取1月期初作为年初余额）
         BigDecimal beginDebit = BigDecimal.ZERO;
         BigDecimal beginCredit = BigDecimal.ZERO;
-        if (month != null) {
+        Integer balanceMonth = (month != null) ? month : 1;
+        {
             LambdaQueryWrapper<AccountBalance> balanceWrapper = new LambdaQueryWrapper<>();
             balanceWrapper.eq(AccountBalance::getAccountSetId, accountSetId)
                     .eq(AccountBalance::getSubjectId, subjectId)
                     .eq(AccountBalance::getYear, year)
-                    .eq(AccountBalance::getMonth, month);
+                    .eq(AccountBalance::getMonth, balanceMonth);
             AccountBalance accountBalance = accountBalanceMapper.selectOne(balanceWrapper);
             if (accountBalance != null) {
                 beginDebit = accountBalance.getBeginDebit() != null ? accountBalance.getBeginDebit() : BigDecimal.ZERO;
@@ -1304,26 +1306,34 @@ public class LedgerServiceImpl implements LedgerService {
             throw new BusinessException(ErrorCode.LEDGER_ACCOUNT_SET_NOT_FOUND);
         }
 
-        // 应收账款: 1122, 应付账款: 2202
+        // 应收账款: 1122, 应付账款: 2202（用likeRight匹配下级科目,如112201/220202等）
         String subjectCode = "receivable".equals(subjectType) ? "1122" : "2202";
         LambdaQueryWrapper<Subject> subjectWrapper = new LambdaQueryWrapper<>();
         subjectWrapper.eq(Subject::getAccountSetId, accountSetId)
-                .eq(Subject::getCode, subjectCode);
-        Subject subject = subjectMapper.selectOne(subjectWrapper);
-        if (subject == null) {
+                .likeRight(Subject::getCode, subjectCode);
+        List<Subject> subjects = subjectMapper.selectList(subjectWrapper);
+        if (subjects.isEmpty()) {
             throw new BusinessException(ErrorCode.LEDGER_SUBJECT_NOT_FOUND,
                     "未找到科目编码 " + subjectCode);
         }
+        // 取编码最短的作为一级科目(用于展示名和余额方向)
+        Subject subject = subjects.get(0);
+        for (Subject s : subjects) {
+            if (s.getCode().length() < subject.getCode().length()) {
+                subject = s;
+            }
+        }
+        List<Long> subjectIds = subjects.stream().map(Subject::getId).collect(Collectors.toList());
 
         log.info("查询账龄分析，账套ID: {}, 年度: {}, 月份: {}, 科目类型: {}", accountSetId, year, month, subjectType);
 
-        // 查询已过账的凭证
+        // 查询已过账的凭证(年初至当月,累计历史余额;month=null查全年)
         LambdaQueryWrapper<Voucher> voucherWrapper = new LambdaQueryWrapper<>();
         voucherWrapper.eq(Voucher::getAccountSetId, accountSetId)
                 .eq(Voucher::getStatus, 2)
                 .eq(Voucher::getYear, year);
         if (month != null) {
-            voucherWrapper.eq(Voucher::getMonth, month);
+            voucherWrapper.le(Voucher::getMonth, month);
         }
         voucherWrapper.orderByAsc(Voucher::getVoucherDate, Voucher::getVoucherNo);
         List<Voucher> vouchers = voucherMapper.selectList(voucherWrapper);
@@ -1337,10 +1347,10 @@ public class LedgerServiceImpl implements LedgerService {
                 .collect(Collectors.toMap(Voucher::getId, v -> v));
         List<Long> voucherIds = vouchers.stream().map(Voucher::getId).collect(Collectors.toList());
 
-        // 查询该科目下所有带辅助核算的凭证明细
+        // 查询该科目(含下级)下所有带辅助核算的凭证明细
         LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
         detailWrapper.in(VoucherDetail::getVoucherId, voucherIds)
-                .eq(VoucherDetail::getSubjectId, subject.getId())
+                .in(VoucherDetail::getSubjectId, subjectIds)
                 .isNotNull(VoucherDetail::getAuxiliaryId);
         detailWrapper.orderByAsc(VoucherDetail::getSortOrder);
         List<VoucherDetail> details = voucherDetailMapper.selectList(detailWrapper);
@@ -1476,13 +1486,13 @@ public class LedgerServiceImpl implements LedgerService {
         log.info("查询往来对账，账套ID: {}, 科目ID: {}, 辅助核算ID: {}, 年度: {}, 月份: {}",
                 accountSetId, subjectId, auxiliaryId, year, month);
 
-        // 查询已过账的凭证
+        // 查询已过账的凭证(年初至当月,累计历史余额;month=null查全年)
         LambdaQueryWrapper<Voucher> voucherWrapper = new LambdaQueryWrapper<>();
         voucherWrapper.eq(Voucher::getAccountSetId, accountSetId)
                 .eq(Voucher::getStatus, 2)
                 .eq(Voucher::getYear, year);
         if (month != null) {
-            voucherWrapper.eq(Voucher::getMonth, month);
+            voucherWrapper.le(Voucher::getMonth, month);
         }
         voucherWrapper.orderByAsc(Voucher::getVoucherDate, Voucher::getVoucherNo);
         List<Voucher> vouchers = voucherMapper.selectList(voucherWrapper);
@@ -1528,8 +1538,11 @@ public class LedgerServiceImpl implements LedgerService {
             detailList.add(detailVO);
         }
 
-        // 账面余额 = 借方累计 - 贷方累计
-        BigDecimal bookBalance = totalDebit.subtract(totalCredit);
+        // 账面余额:借方科目(资产类)=借方累计-贷方累计;贷方科目(负债类)=贷方累计-借方累计
+        int balanceDirection = subject.getBalanceDirection() != null ? subject.getBalanceDirection() : 1;
+        BigDecimal bookBalance = (balanceDirection == 1)
+                ? totalDebit.subtract(totalCredit)
+                : totalCredit.subtract(totalDebit);
         // 对方余额暂时设为0（无外部数据源）
         BigDecimal counterpartBalance = BigDecimal.ZERO;
         BigDecimal difference = bookBalance.subtract(counterpartBalance);
@@ -1841,27 +1854,26 @@ public class LedgerServiceImpl implements LedgerService {
     }
 
     /**
-     * 获取期初余额
+     * 获取期初余额（month=null表示查全年,取1月期初作为年初余额）
      */
     private BigDecimal getBeginBalance(Long accountSetId, Long subjectId, Integer year, Integer month, int balanceDirection) {
         BigDecimal beginBalance = BigDecimal.ZERO;
-        if (month != null) {
-            LambdaQueryWrapper<AccountBalance> balanceWrapper = new LambdaQueryWrapper<>();
-            balanceWrapper.eq(AccountBalance::getAccountSetId, accountSetId)
-                    .eq(AccountBalance::getSubjectId, subjectId)
-                    .eq(AccountBalance::getYear, year)
-                    .eq(AccountBalance::getMonth, month);
-            AccountBalance accountBalance = accountBalanceMapper.selectOne(balanceWrapper);
-            if (accountBalance != null) {
-                if (balanceDirection == 1) {
-                    BigDecimal d = accountBalance.getBeginDebit() != null ? accountBalance.getBeginDebit() : BigDecimal.ZERO;
-                    BigDecimal c = accountBalance.getBeginCredit() != null ? accountBalance.getBeginCredit() : BigDecimal.ZERO;
-                    beginBalance = d.subtract(c);
-                } else {
-                    BigDecimal d = accountBalance.getBeginDebit() != null ? accountBalance.getBeginDebit() : BigDecimal.ZERO;
-                    BigDecimal c = accountBalance.getBeginCredit() != null ? accountBalance.getBeginCredit() : BigDecimal.ZERO;
-                    beginBalance = c.subtract(d);
-                }
+        Integer balanceMonth = (month != null) ? month : 1;
+        LambdaQueryWrapper<AccountBalance> balanceWrapper = new LambdaQueryWrapper<>();
+        balanceWrapper.eq(AccountBalance::getAccountSetId, accountSetId)
+                .eq(AccountBalance::getSubjectId, subjectId)
+                .eq(AccountBalance::getYear, year)
+                .eq(AccountBalance::getMonth, balanceMonth);
+        AccountBalance accountBalance = accountBalanceMapper.selectOne(balanceWrapper);
+        if (accountBalance != null) {
+            if (balanceDirection == 1) {
+                BigDecimal d = accountBalance.getBeginDebit() != null ? accountBalance.getBeginDebit() : BigDecimal.ZERO;
+                BigDecimal c = accountBalance.getBeginCredit() != null ? accountBalance.getBeginCredit() : BigDecimal.ZERO;
+                beginBalance = d.subtract(c);
+            } else {
+                BigDecimal d = accountBalance.getBeginDebit() != null ? accountBalance.getBeginDebit() : BigDecimal.ZERO;
+                BigDecimal c = accountBalance.getBeginCredit() != null ? accountBalance.getBeginCredit() : BigDecimal.ZERO;
+                beginBalance = c.subtract(d);
             }
         }
         return beginBalance;

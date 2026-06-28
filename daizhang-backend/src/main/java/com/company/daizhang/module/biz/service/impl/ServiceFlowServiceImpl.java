@@ -174,6 +174,10 @@ public class ServiceFlowServiceImpl extends ServiceImpl<ServiceFlowNodeMapper, S
         if (existing == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "服务任务不存在");
         }
+        // 保护状态字段:updateTask不允许直接修改taskStatus和完成时间,
+        // 状态变更必须走 assignTask/completeTask 专用方法,否则可绕过状态机任意穿越状态
+        entity.setTaskStatus(existing.getTaskStatus());
+        entity.setCompleteTime(existing.getCompleteTime());
         // 如果更新了节点，同步更新节点名称
         if (entity.getNodeId() != null && !entity.getNodeId().equals(existing.getNodeId())) {
             ServiceFlowNode node = this.getById(entity.getNodeId());
@@ -287,6 +291,7 @@ public class ServiceFlowServiceImpl extends ServiceImpl<ServiceFlowNodeMapper, S
             int inProgress = 0;
             int completed = 0;
             int overdue = 0;
+            int overdueCompleted = 0; // 已完成但耗时超过阈值(影响按时完成率)
             long totalCompleteHours = 0;
             int completedWithTime = 0;
 
@@ -310,6 +315,10 @@ public class ServiceFlowServiceImpl extends ServiceImpl<ServiceFlowNodeMapper, S
                     long hours = Duration.between(t.getCreateTime(), t.getCompleteTime()).toHours();
                     totalCompleteHours += hours;
                     completedWithTime++;
+                    // 已完成但耗时超过7天阈值,计为逾期完成(影响按时完成率)
+                    if (hours > 7 * 24) {
+                        overdueCompleted++;
+                    }
                 }
             }
 
@@ -319,9 +328,10 @@ public class ServiceFlowServiceImpl extends ServiceImpl<ServiceFlowNodeMapper, S
             vo.setCompletedTaskCount(completed);
             vo.setOverdueTaskCount(overdue);
 
-            // 按时完成率：非逾期完成数 / 完成总数
+            // 按时完成率 = (已完成 - 逾期完成) / 已完成 * 100
+            // 原公式用overdue(仅含未完成逾期),导致overdue<=pending+inProgress恒成立,Math.max恒为0,onTimeRate恒100%
             if (completed > 0) {
-                double onTimeRate = (double) (completed - Math.max(0, overdue - pending - inProgress)) / completed * 100;
+                double onTimeRate = (double) (completed - overdueCompleted) / completed * 100;
                 vo.setOnTimeRate(Math.max(0, Math.round(onTimeRate * 100) / 100.0));
             } else {
                 vo.setOnTimeRate(0.0);

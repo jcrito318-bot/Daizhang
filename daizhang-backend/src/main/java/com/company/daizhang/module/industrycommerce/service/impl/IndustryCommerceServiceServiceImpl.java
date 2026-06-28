@@ -145,6 +145,10 @@ public class IndustryCommerceServiceServiceImpl implements IndustryCommerceServi
         if (assigneeId == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "经办人ID不能为空");
         }
+        // 仅"待派工(0)"可派工,防止已完成/已取消的任务被重新激活
+        if (entity.getServiceStatus() == null || entity.getServiceStatus() != 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "当前状态不允许派工，仅待派工状态可派工");
+        }
         entity.setAssigneeId(assigneeId);
         // 派工后状态置为进行中
         entity.setServiceStatus(1);
@@ -159,9 +163,9 @@ public class IndustryCommerceServiceServiceImpl implements IndustryCommerceServi
         if (entity == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "工商服务不存在");
         }
-        // 不能重复完成
-        if (entity.getServiceStatus() != null && entity.getServiceStatus() == 2) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "工商服务已完成，不能重复完成");
+        // 必须为"进行中(1)"才能完成,防止从待派工/已取消直接跳到完成绕过派工流程
+        if (entity.getServiceStatus() == null || entity.getServiceStatus() != 1) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "当前状态不允许完成，仅进行中状态可完成");
         }
         entity.setServiceStatus(2);
         entity.setActualCompleteDate(LocalDate.now());
@@ -175,6 +179,12 @@ public class IndustryCommerceServiceServiceImpl implements IndustryCommerceServi
         IndustryCommerceService entity = industryCommerceServiceMapper.selectById(id);
         if (entity == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "工商服务不存在");
+        }
+        // 仅"待派工(0)/进行中(1)"可取消,已完成或已取消不允许
+        if (entity.getServiceStatus() == null
+                || entity.getServiceStatus() == 2
+                || entity.getServiceStatus() == 3) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "当前状态不允许取消");
         }
         entity.setServiceStatus(3);
         industryCommerceServiceMapper.updateById(entity);

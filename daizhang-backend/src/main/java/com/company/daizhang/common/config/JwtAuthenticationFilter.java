@@ -41,11 +41,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 String username = jwtUtils.getUsername(token);
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
-                UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                        userDetails, null, userDetails.getAuthorities());
-                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-
-                SecurityContextHolder.getContext().setAuthentication(authentication);
+                // 校验用户状态:被禁用/删除的用户即使持有有效token也不允许访问
+                // (JWT无状态,需在filter层主动校验isEnabled,否则禁用用户的token仍可用)
+                if (!userDetails.isEnabled()) {
+                    log.warn("用户{}已被禁用,token访问被拒绝", username);
+                } else {
+                    UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                            userDetails, null, userDetails.getAuthorities());
+                    authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                }
             } catch (Exception e) {
                 log.error("JWT认证失败: {}", e.getMessage());
             }

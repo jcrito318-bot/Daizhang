@@ -108,9 +108,8 @@ public class TaxDeclarationServiceImpl implements TaxDeclarationService {
         if (request.getActualAmount() != null) {
             declaration.setActualAmount(request.getActualAmount());
         }
-        if (request.getStatus() != null) {
-            declaration.setStatus(request.getStatus());
-        }
+        // 禁止通过通用更新接口修改status,状态变更必须走 declare()/pay() 专用方法,
+        // 否则可绕过状态机直接把"未申报(0)"改为"已缴纳(2)",漏设申报/缴纳日期
         if (request.getDeclarationDate() != null) {
             declaration.setDeclarationDate(request.getDeclarationDate());
         }

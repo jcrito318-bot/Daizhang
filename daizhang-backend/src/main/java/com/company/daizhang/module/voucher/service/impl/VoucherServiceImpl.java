@@ -596,21 +596,47 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             throw new BusinessException(ErrorCode.VOUCHER_MONTH_INVALID);
         }
 
-        // 查询该账套该期间所有凭证，按凭证日期和创建时间排序
+        // 仅重排未审核(status=0)凭证,已审核(1)/已过账(2)凭证号已固化,不可篡改,
+        // 否则会破坏已打印/归档/对外引用的凭证号稳定性与审计轨迹
         LambdaQueryWrapper<Voucher> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Voucher::getAccountSetId, accountSetId)
                .eq(Voucher::getYear, year)
                .eq(Voucher::getMonth, month)
+               .eq(Voucher::getStatus, 0)
                .orderByAsc(Voucher::getVoucherDate)
                .orderByAsc(Voucher::getCreateTime);
         List<Voucher> vouchers = this.list(wrapper);
 
         if (vouchers.isEmpty()) {
-            log.info("凭证整理（断号重编）无凭证可整理，账套ID: {}, 年度: {}, 月份: {}", accountSetId, year, month);
+            log.info("凭证整理（断号重编）无未审核凭证可整理，账套ID: {}, 年度: {}, 月份: {}", accountSetId, year, month);
             return;
         }
 
-        // 第一步：先把所有凭证号改成临时号（避免唯一索引冲突）
+        // 查询已审核/已过账凭证的最大序号,未审核凭证从maxSeq+1开始编号,避免与已固化号冲突
+        LambdaQueryWrapper<Voucher> fixedWrapper = new LambdaQueryWrapper<>();
+        fixedWrapper.eq(Voucher::getAccountSetId, accountSetId)
+                    .eq(Voucher::getYear, year)
+                    .eq(Voucher::getMonth, month)
+                    .ne(Voucher::getStatus, 0)
+                    .notLike(Voucher::getVoucherNo, "TMP-%")
+                    .orderByDesc(Voucher::getVoucherNo)
+                    .last("LIMIT 1");
+        List<Voucher> fixedVouchers = this.list(fixedWrapper);
+        int sequence = 1;
+        if (!fixedVouchers.isEmpty()) {
+            String maxFixedNo = fixedVouchers.get(0).getVoucherNo();
+            if (StrUtil.isNotBlank(maxFixedNo)) {
+                String[] parts = maxFixedNo.split("-");
+                if (parts.length == 3) {
+                    try {
+                        sequence = Integer.parseInt(parts[2]) + 1;
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+        }
+
+        // 第一步：把未审核凭证号改成临时号（避免唯一索引冲突）
         // 格式: TMP-{原ID}，保证全局唯一不会冲突
         for (Voucher voucher : vouchers) {
             Voucher update = new Voucher();
@@ -620,7 +646,6 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         }
 
         // 第二步：重新生成连续的凭证号（格式: year-month-seq，如 2026-01-001）
-        int sequence = 1;
         for (Voucher voucher : vouchers) {
             String newVoucherNo = String.format("%d-%02d-%03d", year, month, sequence);
             Voucher update = new Voucher();
@@ -630,7 +655,7 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             sequence++;
         }
 
-        log.info("凭证整理（断号重编）成功，账套ID: {}, 年度: {}, 月份: {}, 凭证数量: {}",
+        log.info("凭证整理（断号重编）成功，账套ID: {}, 年度: {}, 月份: {}, 未审核凭证数量: {}",
                 accountSetId, year, month, vouchers.size());
     }
 

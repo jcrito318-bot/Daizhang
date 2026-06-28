@@ -262,10 +262,15 @@ public class AssetStocktakeServiceImpl implements AssetStocktakeService {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "盘点单未完成，无法生成调账凭证");
         }
 
-        // 校验是否已生成过调账凭证,避免重复生成(通过盘点名称匹配摘要)
+        // 校验是否已生成过调账凭证,避免重复生成
+        // 用eq精确匹配完整摘要(原like模糊匹配会导致子串误判,如"月度盘点"误匹配"月度盘点-补充")
+        String lossSummary = "资产盘亏转入待处理-" + stocktake.getStocktakeName();
+        String gainSummary = "资产盘盈增加固定资产-" + stocktake.getStocktakeName();
         LambdaQueryWrapper<com.company.daizhang.module.voucher.entity.VoucherDetail> existWrapper = new LambdaQueryWrapper<>();
-        existWrapper.like(com.company.daizhang.module.voucher.entity.VoucherDetail::getSummary,
-                "-" + stocktake.getStocktakeName());
+        existWrapper.and(w -> w
+                .eq(com.company.daizhang.module.voucher.entity.VoucherDetail::getSummary, lossSummary)
+                .or()
+                .eq(com.company.daizhang.module.voucher.entity.VoucherDetail::getSummary, gainSummary));
         Long existCount = voucherDetailMapper.selectCount(existWrapper);
         if (existCount != null && existCount > 0) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "该盘点单已生成调账凭证,不能重复生成");
@@ -350,10 +355,12 @@ public class AssetStocktakeServiceImpl implements AssetStocktakeService {
         voucherRequest.setDetails(voucherDetails);
         voucherService.createVoucher(voucherRequest);
 
-        // 查询刚创建的凭证ID(通过摘要匹配盘点名称)
+        // 查询刚创建的凭证ID(用eq精确匹配摘要,避免like子串误匹配其他凭证)
         LambdaQueryWrapper<com.company.daizhang.module.voucher.entity.VoucherDetail> createdWrapper = new LambdaQueryWrapper<>();
-        createdWrapper.like(com.company.daizhang.module.voucher.entity.VoucherDetail::getSummary,
-                "-" + stocktake.getStocktakeName())
+        createdWrapper.and(w -> w
+                .eq(com.company.daizhang.module.voucher.entity.VoucherDetail::getSummary, lossSummary)
+                .or()
+                .eq(com.company.daizhang.module.voucher.entity.VoucherDetail::getSummary, gainSummary))
                 .orderByDesc(com.company.daizhang.module.voucher.entity.VoucherDetail::getVoucherId)
                 .last("LIMIT 1");
         com.company.daizhang.module.voucher.entity.VoucherDetail createdDetail = voucherDetailMapper.selectOne(createdWrapper);

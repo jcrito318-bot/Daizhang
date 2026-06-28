@@ -154,12 +154,13 @@ public class ReportServiceImpl implements ReportService {
                 .collect(Collectors.toMap(AccountBalance::getSubjectId, b -> b));
 
         // 按科目类别分组：收入、费用
+        // 注意: balanceDirection为Integer,用equals避免null自动拆箱NPE
         List<Subject> revenueSubjects = subjects.stream()
-                .filter(s -> "损益".equals(s.getCategory()) && s.getBalanceDirection() == 2)
+                .filter(s -> "损益".equals(s.getCategory()) && Integer.valueOf(2).equals(s.getBalanceDirection()))
                 .sorted(Comparator.comparing(Subject::getCode))
                 .collect(Collectors.toList());
         List<Subject> expenseSubjects = subjects.stream()
-                .filter(s -> "损益".equals(s.getCategory()) && s.getBalanceDirection() == 1)
+                .filter(s -> "损益".equals(s.getCategory()) && Integer.valueOf(1).equals(s.getBalanceDirection()))
                 .sorted(Comparator.comparing(Subject::getCode))
                 .collect(Collectors.toList());
 
@@ -646,18 +647,19 @@ public class ReportServiceImpl implements ReportService {
     }
 
     /**
-     * 判断是否为现金科目（1001库存现金、1002银行存款）
+     * 判断是否为现金科目（1001库存现金、1002银行存款、1012其他货币资金）
      */
     private boolean isCashSubject(String code) {
-        return code != null && (code.startsWith("1001") || code.startsWith("1002"));
+        return code != null && (code.startsWith("1001") || code.startsWith("1002") || code.startsWith("1012"));
     }
 
     /**
      * 根据非现金科目编码判断现金流类别
      * 经营：5001主营收入/5051其他收入/5601销售费用/5602管理费用
-     *       1122应收账款/1221其他应收款/2202应付账款/2203预收账款
+     *       1122应收账款/1123预付账款/1221其他应收款/2202应付账款/2203预收账款
      *       2211应付职工薪酬/2221应交税费/5401主营成本/5402其他业务成本/5403税金及附加
-     * 投资：1601固定资产/1604在建工程/1606固定资产清理
+     *       1401材料采购/1403原材料/1405库存商品(存货增减归属经营活动)
+     * 投资：1601固定资产/1602累计折旧/1604在建工程/1606固定资产清理/1701无形资产
      * 筹资：2001短期借款/2501长期借款/2241其他应付款/5603财务费用(利息支出)
      */
     private String determineCashFlowCategory(List<VoucherDetail> nonCashLines) {
@@ -668,14 +670,17 @@ public class ReportServiceImpl implements ReportService {
             }
             if (code.startsWith("5001") || code.startsWith("5051")
                     || code.startsWith("5601") || code.startsWith("5602")
-                    || code.startsWith("1122") || code.startsWith("1221")
+                    || code.startsWith("1122") || code.startsWith("1123")
+                    || code.startsWith("1221")
                     || code.startsWith("2202") || code.startsWith("2203")
                     || code.startsWith("2211") || code.startsWith("2221")
                     || code.startsWith("5401") || code.startsWith("5402")
-                    || code.startsWith("5403")) {
+                    || code.startsWith("5403")
+                    || code.startsWith("1401") || code.startsWith("1403") || code.startsWith("1405")) {
                 return "经营";
             }
-            if (code.startsWith("1601") || code.startsWith("1604") || code.startsWith("1606")) {
+            if (code.startsWith("1601") || code.startsWith("1602") || code.startsWith("1604")
+                    || code.startsWith("1606") || code.startsWith("1701")) {
                 return "投资";
             }
             if (code.startsWith("2001") || code.startsWith("2501") || code.startsWith("2241")
@@ -1510,7 +1515,7 @@ public class ReportServiceImpl implements ReportService {
         List<Long> voucherIds = voucherMapper.selectList(voucherWrapper).stream()
                 .map(Voucher::getId).collect(Collectors.toList());
 
-        Map<Long, BigDecimal> deptAmountMap = new HashMap<>(); // 部门辅助核算ID -> 借方合计
+        Map<Long, BigDecimal> deptAmountMap = new HashMap<>(); // 部门辅助核算ID -> 当月借方合计
         BigDecimal totalExpense = BigDecimal.ZERO;
 
         if (!voucherIds.isEmpty() && !deptItemMap.isEmpty()) {
@@ -1529,6 +1534,32 @@ public class ReportServiceImpl implements ReportService {
             }
         }
 
+        // 4.1 查询年初至本月(1~month)的已过账凭证,用于计算年累计金额
+        Map<Long, BigDecimal> deptYearAmountMap = new HashMap<>();
+        if (!deptItemMap.isEmpty()) {
+            LambdaQueryWrapper<Voucher> yearVoucherWrapper = new LambdaQueryWrapper<>();
+            yearVoucherWrapper.eq(Voucher::getAccountSetId, accountSetId)
+                    .eq(Voucher::getYear, year)
+                    .le(Voucher::getMonth, month)
+                    .eq(Voucher::getStatus, 2)
+                    .select(Voucher::getId);
+            List<Long> yearVoucherIds = voucherMapper.selectList(yearVoucherWrapper).stream()
+                    .map(Voucher::getId).collect(Collectors.toList());
+            if (!yearVoucherIds.isEmpty()) {
+                LambdaQueryWrapper<VoucherDetail> yearDetailWrapper = new LambdaQueryWrapper<>();
+                yearDetailWrapper.in(VoucherDetail::getVoucherId, yearVoucherIds)
+                        .in(VoucherDetail::getAuxiliaryId, deptItemMap.keySet());
+                List<VoucherDetail> yearDetails = voucherDetailMapper.selectList(yearDetailWrapper);
+                for (VoucherDetail d : yearDetails) {
+                    if (!expenseSubjectIds.contains(d.getSubjectId())) {
+                        continue;
+                    }
+                    BigDecimal debit = d.getDebit() != null ? d.getDebit() : BigDecimal.ZERO;
+                    deptYearAmountMap.merge(d.getAuxiliaryId(), debit, BigDecimal::add);
+                }
+            }
+        }
+
         // 5. 构建返回列表
         List<DepartmentExpenseItem> items = new ArrayList<>();
         for (AuxiliaryItem dept : deptItems) {
@@ -1538,7 +1569,8 @@ public class ReportServiceImpl implements ReportService {
             item.setDepartmentName(dept.getItemName());
             BigDecimal periodAmount = deptAmountMap.getOrDefault(dept.getId(), BigDecimal.ZERO);
             item.setPeriodAmount(periodAmount);
-            item.setYearAmount(periodAmount); // 简化：年累计=本期（实际应累计1~month）
+            // 年累计=年初至本月(1~month)的借方合计,而非简单等于本期金额
+            item.setYearAmount(deptYearAmountMap.getOrDefault(dept.getId(), BigDecimal.ZERO));
             if (totalExpense.compareTo(BigDecimal.ZERO) > 0) {
                 BigDecimal pct = periodAmount.multiply(new BigDecimal("100"))
                         .divide(totalExpense, 2, RoundingMode.HALF_UP);

@@ -68,9 +68,12 @@ public class OperationLogAspect {
                 }
             }
             
-            // 获取IP
-            HttpServletRequest request = ((ServletRequestAttributes) RequestContextHolder.getRequestAttributes()).getRequest();
-            operationLog.setIp(getIpAddress(request));
+            // 获取IP（非HTTP上下文如定时任务/异步调用时RequestAttributes为null,需防御）
+            ServletRequestAttributes attrs = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+            if (attrs != null) {
+                HttpServletRequest request = attrs.getRequest();
+                operationLog.setIp(getIpAddress(request));
+            }
             
             // 执行方法
             Object result = joinPoint.proceed();

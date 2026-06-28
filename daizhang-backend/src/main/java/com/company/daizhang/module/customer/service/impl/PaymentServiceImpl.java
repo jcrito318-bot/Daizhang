@@ -97,11 +97,16 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
             throw new BusinessException(404, "客户不存在");
         }
 
-        // 如果指定了合同，检查合同是否存在
+        // 如果指定了合同，检查合同是否存在且归属于该客户
         if (request.getContractId() != null) {
             ServiceContract contract = contractMapper.selectById(request.getContractId());
             if (contract == null) {
                 throw new BusinessException(404, "合同不存在");
+            }
+            // 校验合同归属,防止为任意客户关联任意合同(越权)
+            if (contract.getCustomerId() == null
+                    || !contract.getCustomerId().equals(request.getCustomerId())) {
+                throw new BusinessException(403, "合同不属于该客户，不能关联");
             }
         }
 

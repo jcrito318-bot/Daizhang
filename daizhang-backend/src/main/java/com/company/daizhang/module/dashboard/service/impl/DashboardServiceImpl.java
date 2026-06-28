@@ -45,37 +45,41 @@ public class DashboardServiceImpl implements DashboardService {
     public DashboardVO getDashboard() {
         DashboardVO vo = new DashboardVO();
 
-        // 1. 查询所有账套（客户）
+        // 1. 查询账套（限量500防止全量加载OOM）
         LambdaQueryWrapper<AccountSet> asWrapper = new LambdaQueryWrapper<>();
-        asWrapper.orderByDesc(AccountSet::getUpdateTime);
+        asWrapper.orderByDesc(AccountSet::getUpdateTime)
+                 .last("LIMIT 500");
         List<AccountSet> accountSets = accountSetMapper.selectList(asWrapper);
 
-        // 2. 查询所有待办服务任务（taskStatus < 2）
+        // 2. 查询待办服务任务（taskStatus < 2,限量500防止OOM）
         LambdaQueryWrapper<ServiceTask> taskWrapper = new LambdaQueryWrapper<>();
         taskWrapper.lt(ServiceTask::getTaskStatus, 2)
-                .orderByDesc(ServiceTask::getCreateTime);
+                .orderByDesc(ServiceTask::getCreateTime)
+                .last("LIMIT 500");
         List<ServiceTask> pendingTasks = serviceTaskMapper.selectList(taskWrapper);
         Map<Long, List<ServiceTask>> taskByAccountSet = pendingTasks.stream()
                 .filter(t -> t.getAccountSetId() != null)
                 .collect(Collectors.groupingBy(ServiceTask::getAccountSetId));
 
-        // 已完成服务任务数（status==2）
+        // 已完成服务任务数（status==2）用count统计,不加载明细
         long completedTaskCount = serviceTaskMapper.selectCount(new LambdaQueryWrapper<ServiceTask>()
                 .eq(ServiceTask::getTaskStatus, 2));
 
-        // 3. 查询所有未审核凭证（status=0）
+        // 3. 查询未审核凭证（status=0,限量500防止OOM）
         LambdaQueryWrapper<Voucher> voucherWrapper = new LambdaQueryWrapper<>();
         voucherWrapper.eq(Voucher::getStatus, 0)
-                .orderByDesc(Voucher::getCreateTime);
+                .orderByDesc(Voucher::getCreateTime)
+                .last("LIMIT 500");
         List<Voucher> unauditedVouchers = voucherMapper.selectList(voucherWrapper);
         Map<Long, List<Voucher>> voucherByAccountSet = unauditedVouchers.stream()
                 .filter(v -> v.getAccountSetId() != null)
                 .collect(Collectors.groupingBy(Voucher::getAccountSetId));
 
-        // 4. 查询所有未申报税务（status=0）
+        // 4. 查询未申报税务（status=0,限量500防止OOM）
         LambdaQueryWrapper<TaxDeclaration> taxWrapper = new LambdaQueryWrapper<>();
         taxWrapper.eq(TaxDeclaration::getStatus, 0)
-                .orderByDesc(TaxDeclaration::getCreateTime);
+                .orderByDesc(TaxDeclaration::getCreateTime)
+                .last("LIMIT 500");
         List<TaxDeclaration> undeclaredTaxes = taxDeclarationMapper.selectList(taxWrapper);
         Map<Long, List<TaxDeclaration>> taxByAccountSet = undeclaredTaxes.stream()
                 .filter(t -> t.getAccountSetId() != null)

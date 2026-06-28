@@ -257,6 +257,11 @@ public class PeriodServiceImpl implements PeriodService {
         // 1. 查询该期间
         AccountPeriod period = getPeriod(accountSetId, year, month);
 
+        // 1.0 期间状态校验:已结账期间余额已固化,不允许再执行损益结转
+        if (PeriodStatus.CLOSED.getCode().equals(period.getStatus())) {
+            throw new BusinessException(ErrorCode.PERIOD_ALREADY_CLOSED);
+        }
+
         // 1.1 幂等校验:检查本期是否已存在系统生成的损益结转凭证,避免重复结转
         LambdaQueryWrapper<Voucher> existWrapper = new LambdaQueryWrapper<>();
         existWrapper.eq(Voucher::getAccountSetId, accountSetId)
@@ -494,13 +499,17 @@ public class PeriodServiceImpl implements PeriodService {
             if (balance != null) {
                 BigDecimal carryAmount = netAmount.abs();
                 if (netAmount.compareTo(BigDecimal.ZERO) > 0) {
-                    // 贷方净余额:结转凭证借记,累加本期借方发生额
+                    // 贷方净余额:结转凭证借记,累加本期借方发生额+本年累计借方
                     BigDecimal newPeriodDebit = (balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO).add(carryAmount);
                     balance.setPeriodDebit(newPeriodDebit);
+                    BigDecimal newYearDebit = (balance.getYearDebit() != null ? balance.getYearDebit() : BigDecimal.ZERO).add(carryAmount);
+                    balance.setYearDebit(newYearDebit);
                 } else {
-                    // 借方净余额:结转凭证贷记,累加本期贷方发生额
+                    // 借方净余额:结转凭证贷记,累加本期贷方发生额+本年累计贷方
                     BigDecimal newPeriodCredit = (balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO).add(carryAmount);
                     balance.setPeriodCredit(newPeriodCredit);
+                    BigDecimal newYearCredit = (balance.getYearCredit() != null ? balance.getYearCredit() : BigDecimal.ZERO).add(carryAmount);
+                    balance.setYearCredit(newYearCredit);
                 }
                 balance.setEndDebit(BigDecimal.ZERO);
                 balance.setEndCredit(BigDecimal.ZERO);
@@ -516,13 +525,17 @@ public class PeriodServiceImpl implements PeriodService {
             if (balance != null) {
                 BigDecimal carryAmount = netAmount.abs();
                 if (netAmount.compareTo(BigDecimal.ZERO) > 0) {
-                    // 借方净余额:结转凭证贷记,累加本期贷方发生额
+                    // 借方净余额:结转凭证贷记,累加本期贷方发生额+本年累计贷方
                     BigDecimal newPeriodCredit = (balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO).add(carryAmount);
                     balance.setPeriodCredit(newPeriodCredit);
+                    BigDecimal newYearCredit = (balance.getYearCredit() != null ? balance.getYearCredit() : BigDecimal.ZERO).add(carryAmount);
+                    balance.setYearCredit(newYearCredit);
                 } else {
-                    // 贷方净余额:结转凭证借记,累加本期借方发生额
+                    // 贷方净余额:结转凭证借记,累加本期借方发生额+本年累计借方
                     BigDecimal newPeriodDebit = (balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO).add(carryAmount);
                     balance.setPeriodDebit(newPeriodDebit);
+                    BigDecimal newYearDebit = (balance.getYearDebit() != null ? balance.getYearDebit() : BigDecimal.ZERO).add(carryAmount);
+                    balance.setYearDebit(newYearDebit);
                 }
                 balance.setEndDebit(BigDecimal.ZERO);
                 balance.setEndCredit(BigDecimal.ZERO);
@@ -549,15 +562,19 @@ public class PeriodServiceImpl implements PeriodService {
             accountBalanceMapper.insert(profitBalance);
         }
         if (profit.compareTo(BigDecimal.ZERO) >= 0) {
-            // 盈利：贷记本年利润，累加本期贷方发生额
+            // 盈利：贷记本年利润，累加本期贷方发生额+本年累计贷方
             BigDecimal newPeriodCredit = (profitBalance.getPeriodCredit() != null ? profitBalance.getPeriodCredit() : BigDecimal.ZERO).add(profit);
             profitBalance.setPeriodCredit(newPeriodCredit);
+            BigDecimal newYearCredit = (profitBalance.getYearCredit() != null ? profitBalance.getYearCredit() : BigDecimal.ZERO).add(profit);
+            profitBalance.setYearCredit(newYearCredit);
             BigDecimal currentCredit = profitBalance.getEndCredit() != null ? profitBalance.getEndCredit() : BigDecimal.ZERO;
             profitBalance.setEndCredit(currentCredit.add(profit));
         } else {
-            // 亏损：借记本年利润，累加本期借方发生额
+            // 亏损：借记本年利润，累加本期借方发生额+本年累计借方
             BigDecimal newPeriodDebit = (profitBalance.getPeriodDebit() != null ? profitBalance.getPeriodDebit() : BigDecimal.ZERO).add(profit.abs());
             profitBalance.setPeriodDebit(newPeriodDebit);
+            BigDecimal newYearDebit = (profitBalance.getYearDebit() != null ? profitBalance.getYearDebit() : BigDecimal.ZERO).add(profit.abs());
+            profitBalance.setYearDebit(newYearDebit);
             BigDecimal currentDebit = profitBalance.getEndDebit() != null ? profitBalance.getEndDebit() : BigDecimal.ZERO;
             profitBalance.setEndDebit(currentDebit.add(profit.abs()));
         }
@@ -675,25 +692,24 @@ public class PeriodServiceImpl implements PeriodService {
                 beginCredit = decBalance.getEndCredit() != null ? decBalance.getEndCredit() : BigDecimal.ZERO;
             }
 
-            // 创建下一年1月的科目余额（年初余额 = 上年年末余额）
-            for (int month = 1; month <= 12; month++) {
-                AccountBalance newBalance = new AccountBalance();
-                newBalance.setAccountSetId(accountSetId);
-                newBalance.setSubjectId(subject.getId());
-                newBalance.setYear(toYear);
-                newBalance.setMonth(month);
-                newBalance.setBeginDebit(beginDebit);
-                newBalance.setBeginCredit(beginCredit);
-                newBalance.setPeriodDebit(BigDecimal.ZERO);
-                newBalance.setPeriodCredit(BigDecimal.ZERO);
-                newBalance.setEndDebit(beginDebit);
-                newBalance.setEndCredit(beginCredit);
-                newBalance.setYearDebit(BigDecimal.ZERO);
-                newBalance.setYearCredit(BigDecimal.ZERO);
-                accountBalanceMapper.insert(newBalance);
-            }
+            // 只为下一年1月创建余额记录(年初余额=上年年末余额)
+            // 2-12月余额记录由凭证过账时懒生成,避免预建破坏月度连续结转(每月期初=上月期末)
+            AccountBalance newBalance = new AccountBalance();
+            newBalance.setAccountSetId(accountSetId);
+            newBalance.setSubjectId(subject.getId());
+            newBalance.setYear(toYear);
+            newBalance.setMonth(1);
+            newBalance.setBeginDebit(beginDebit);
+            newBalance.setBeginCredit(beginCredit);
+            newBalance.setPeriodDebit(BigDecimal.ZERO);
+            newBalance.setPeriodCredit(BigDecimal.ZERO);
+            newBalance.setEndDebit(beginDebit);
+            newBalance.setEndCredit(beginCredit);
+            newBalance.setYearDebit(BigDecimal.ZERO);
+            newBalance.setYearCredit(BigDecimal.ZERO);
+            accountBalanceMapper.insert(newBalance);
         }
-        log.info("结转{}年度年末余额至{}年度年初余额完成，共{}个科目", fromYear, toYear, subjects.size());
+        log.info("结转{}年度年末余额至{}年度1月年初余额完成，共{}个科目", fromYear, toYear, subjects.size());
 
         // 5. 标记年度结转完成
         log.info("年度结转完成，账套ID：{}，从{}年度结转至{}年度", accountSetId, fromYear, toYear);
@@ -772,7 +788,8 @@ public class PeriodServiceImpl implements PeriodService {
         voucher.setTotalDebit(costAmount);
         voucher.setTotalCredit(costAmount);
         voucher.setAttachmentCount(0);
-        voucher.setVoucherWordId(1L);
+        // 凭证字不硬编码,由账套默认凭证字决定(避免不同账套凭证字ID不一致)
+        voucher.setVoucherWordId(null);
 
         voucher.setVoucherNo(generateCarryVoucherNo(accountSetId, year, month));
 
