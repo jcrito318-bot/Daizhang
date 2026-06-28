@@ -78,8 +78,9 @@ mybatis-plus:
       logic-not-delete-value: 0
 
 # JWT配置
+# 生产环境必须通过环境变量 JWT_SECRET 注入不少于32字节的随机密钥,启动时会校验并拒绝已知弱密钥
 jwt:
-  secret: daizhang-system-secret-key-2026-must-be-at-least-256-bits-long
+  secret: ${JWT_SECRET:daizhang-system-secret-key-2026-must-be-at-least-256-bits-long}
   # 单位：秒。JwtUtils 中 expiration*1000 转毫秒，7200秒=2小时
   expiration: 7200
   refresh-expiration: 604800  # 7天(秒)

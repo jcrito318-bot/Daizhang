@@ -65,8 +65,8 @@ public class PeriodServiceImpl implements PeriodService {
                .eq(Voucher::getYear, year)
                .eq(Voucher::getMonth, month)
                .notLike(Voucher::getVoucherNo, "TMP-%")
-               .orderByDesc(Voucher::getVoucherNo)
-               .last("LIMIT 1");
+               // 按序号数值排序,而非字符串排序:序号超999时"999"按字符串大于"1000",会取错最大号导致重号
+               .last("ORDER BY CAST(SUBSTRING_INDEX(voucher_no, '-', -1) AS UNSIGNED) DESC LIMIT 1");
         List<Voucher> list = voucherMapper.selectList(wrapper);
         int sequence = 1;
         if (list != null && !list.isEmpty()) {

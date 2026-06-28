@@ -12,8 +12,10 @@ import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.utils.SecurityUtils;
 import com.company.daizhang.module.accountset.entity.AccountBalance;
 import com.company.daizhang.module.accountset.entity.AccountPeriod;
+import com.company.daizhang.module.accountset.entity.SubjectBalance;
 import com.company.daizhang.module.accountset.mapper.AccountBalanceMapper;
 import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
+import com.company.daizhang.module.accountset.mapper.SubjectBalanceMapper;
 import com.company.daizhang.module.subject.entity.Subject;
 import com.company.daizhang.module.subject.mapper.SubjectMapper;
 import com.company.daizhang.module.system.entity.SysUser;
@@ -56,6 +58,7 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     private final AccountBalanceMapper accountBalanceMapper;
     private final SysUserMapper sysUserMapper;
     private final SubjectMapper subjectMapper;
+    private final SubjectBalanceMapper subjectBalanceMapper;
 
     @Override
     public PageResult<VoucherVO> pageVouchers(VoucherQueryRequest request) {
@@ -534,6 +537,20 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                     carriedYearDebit = lastBalance.getYearDebit() != null ? lastBalance.getYearDebit() : BigDecimal.ZERO;
                     carriedYearCredit = lastBalance.getYearCredit() != null ? lastBalance.getYearCredit() : BigDecimal.ZERO;
                 }
+            } else if (month == 1) {
+                // 1月且无上年12月期末余额:从用户录入的期初余额(SubjectBalance)取值。
+                // 否则用户在期初余额界面录入的数据不会进入 AccountBalance,
+                // 导致月度余额表/资产负债表/试算平衡(走 AccountBalance 的路径)期初恒为0,
+                // 首次过账即试算不平衡。
+                SubjectBalance subjectBegin = subjectBalanceMapper.selectOne(new LambdaQueryWrapper<SubjectBalance>()
+                        .eq(SubjectBalance::getAccountSetId, accountSetId)
+                        .eq(SubjectBalance::getSubjectId, subjectId)
+                        .eq(SubjectBalance::getYear, year)
+                        .eq(SubjectBalance::getPeriod, 1));
+                if (subjectBegin != null) {
+                    carriedBeginDebit = subjectBegin.getBeginDebit() != null ? subjectBegin.getBeginDebit() : BigDecimal.ZERO;
+                    carriedBeginCredit = subjectBegin.getBeginCredit() != null ? subjectBegin.getBeginCredit() : BigDecimal.ZERO;
+                }
             }
             balance.setBeginDebit(carriedBeginDebit);
             balance.setBeginCredit(carriedBeginCredit);
@@ -619,8 +636,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                     .eq(Voucher::getMonth, month)
                     .ne(Voucher::getStatus, 0)
                     .notLike(Voucher::getVoucherNo, "TMP-%")
-                    .orderByDesc(Voucher::getVoucherNo)
-                    .last("LIMIT 1");
+                    // 按序号数值排序:序号超999时字符串排序会取错最大号,导致未审核凭证从错误序号开始编号
+                    .last("ORDER BY CAST(SUBSTRING_INDEX(voucher_no, '-', -1) AS UNSIGNED) DESC LIMIT 1");
         List<Voucher> fixedVouchers = this.list(fixedWrapper);
         int sequence = 1;
         if (!fixedVouchers.isEmpty()) {
@@ -1019,8 +1036,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                .eq(Voucher::getYear, year)
                .eq(Voucher::getMonth, month)
                .notLike(Voucher::getVoucherNo, "TMP-%")
-               .orderByDesc(Voucher::getVoucherNo)
-               .last("LIMIT 1");
+               // 按序号数值排序,而非字符串排序:序号超999时"999"按字符串大于"1000",会取错最大号导致重号
+               .last("ORDER BY CAST(SUBSTRING_INDEX(voucher_no, '-', -1) AS UNSIGNED) DESC LIMIT 1");
         Voucher lastVoucher = this.getOne(wrapper);
 
         int sequence = 1;
@@ -1050,7 +1067,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                .eq(Voucher::getYear, year)
                .eq(Voucher::getMonth, month)
                .eq(Voucher::getStatus, 0)
-               .orderByAsc(Voucher::getVoucherDate, Voucher::getVoucherNo);
+               // 按凭证日期、序号数值排序:序号超999时字符串排序会乱序,导致重新编号后凭证号顺序与日期错乱
+               .last("ORDER BY voucher_date ASC, CAST(SUBSTRING_INDEX(voucher_no, '-', -1) AS UNSIGNED) ASC");
         List<Voucher> vouchers = this.list(wrapper);
 
         if (vouchers.isEmpty()) {

@@ -30,6 +30,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     @Autowired
     private UserDetailsServiceImpl userDetailsService;
 
+    @Autowired
+    private TokenBlacklist tokenBlacklist;
+
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
@@ -37,22 +40,28 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String token = extractToken(request);
 
         if (StringUtils.hasText(token) && !jwtUtils.isTokenExpired(token)) {
-            try {
-                String username = jwtUtils.getUsername(token);
-                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+            // 黑名单校验:登出时 token 会被加入黑名单,此处拒绝已登出的 token
+            // (JWT 无状态,否则登出后 token 在过期前仍可正常访问所有受保护接口)
+            if (tokenBlacklist.contains(token)) {
+                log.warn("token 已登出(在黑名单中),访问被拒绝");
+            } else {
+                try {
+                    String username = jwtUtils.getUsername(token);
+                    UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
-                // 校验用户状态:被禁用/删除的用户即使持有有效token也不允许访问
-                // (JWT无状态,需在filter层主动校验isEnabled,否则禁用用户的token仍可用)
-                if (!userDetails.isEnabled()) {
-                    log.warn("用户{}已被禁用,token访问被拒绝", username);
-                } else {
-                    UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                            userDetails, null, userDetails.getAuthorities());
-                    authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                    // 校验用户状态:被禁用/删除的用户即使持有有效token也不允许访问
+                    // (JWT无状态,需在filter层主动校验isEnabled,否则禁用用户的token仍可用)
+                    if (!userDetails.isEnabled()) {
+                        log.warn("用户{}已被禁用,token访问被拒绝", username);
+                    } else {
+                        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                                userDetails, null, userDetails.getAuthorities());
+                        authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                        SecurityContextHolder.getContext().setAuthentication(authentication);
+                    }
+                } catch (Exception e) {
+                    log.error("JWT认证失败: {}", e.getMessage());
                 }
-            } catch (Exception e) {
-                log.error("JWT认证失败: {}", e.getMessage());
             }
         }
 

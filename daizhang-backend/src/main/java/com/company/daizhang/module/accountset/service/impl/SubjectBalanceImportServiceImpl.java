@@ -5,7 +5,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.utils.ExcelImportUtil;
 import com.company.daizhang.common.vo.ImportResultVO;
+import com.company.daizhang.module.accountset.entity.AccountBalance;
 import com.company.daizhang.module.accountset.entity.SubjectBalance;
+import com.company.daizhang.module.accountset.mapper.AccountBalanceMapper;
 import com.company.daizhang.module.accountset.mapper.SubjectBalanceMapper;
 import com.company.daizhang.module.accountset.service.SubjectBalanceImportService;
 import com.company.daizhang.module.subject.entity.Subject;
@@ -35,6 +37,7 @@ public class SubjectBalanceImportServiceImpl implements SubjectBalanceImportServ
 
     private final SubjectBalanceMapper subjectBalanceMapper;
     private final SubjectMapper subjectMapper;
+    private final AccountBalanceMapper accountBalanceMapper;
 
     /**
      * 期次：期初
@@ -143,7 +146,79 @@ public class SubjectBalanceImportServiceImpl implements SubjectBalanceImportServ
             subjectBalanceMapper.insert(balance);
         }
 
+        // 同步到 AccountBalance(year, month=1):与 SubjectBalanceServiceImpl.saveBatch 保持一致,
+        // 否则导入的期初余额不会进入月度余额表/资产负债表(这些报表读 AccountBalance)。
+        syncAccountBalanceBegin(accountSetId, year, subject.getId(), beginDebit, beginCredit, subject.getBalanceDirection());
+
         return 1;
+    }
+
+    /**
+     * 同步期初余额到 AccountBalance(year, month=1)。
+     * 仅更新 beginDebit/beginCredit 并重算 endDebit/endCredit,保留已过账凭证产生的 period/year 累计。
+     */
+    private void syncAccountBalanceBegin(Long accountSetId, Integer year, Long subjectId,
+                                         BigDecimal beginDebit, BigDecimal beginCredit, Integer balanceDirectionRaw) {
+        if (subjectId == null) {
+            return;
+        }
+        BigDecimal bd = beginDebit != null ? beginDebit : BigDecimal.ZERO;
+        BigDecimal bc = beginCredit != null ? beginCredit : BigDecimal.ZERO;
+        int balanceDirection = balanceDirectionRaw != null ? balanceDirectionRaw : 1;
+
+        LambdaQueryWrapper<AccountBalance> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(AccountBalance::getAccountSetId, accountSetId)
+               .eq(AccountBalance::getSubjectId, subjectId)
+               .eq(AccountBalance::getYear, year)
+               .eq(AccountBalance::getMonth, 1);
+        AccountBalance ab = accountBalanceMapper.selectOne(wrapper);
+
+        if (ab == null) {
+            ab = new AccountBalance();
+            ab.setAccountSetId(accountSetId);
+            ab.setSubjectId(subjectId);
+            ab.setYear(year);
+            ab.setMonth(1);
+            ab.setBeginDebit(bd);
+            ab.setBeginCredit(bc);
+            ab.setPeriodDebit(BigDecimal.ZERO);
+            ab.setPeriodCredit(BigDecimal.ZERO);
+            ab.setYearDebit(BigDecimal.ZERO);
+            ab.setYearCredit(BigDecimal.ZERO);
+            applyEndBalance(ab, balanceDirection);
+            accountBalanceMapper.insert(ab);
+        } else {
+            ab.setBeginDebit(bd);
+            ab.setBeginCredit(bc);
+            applyEndBalance(ab, balanceDirection);
+            accountBalanceMapper.updateById(ab);
+        }
+    }
+
+    private void applyEndBalance(AccountBalance ab, int balanceDirection) {
+        BigDecimal beginD = ab.getBeginDebit() != null ? ab.getBeginDebit() : BigDecimal.ZERO;
+        BigDecimal beginC = ab.getBeginCredit() != null ? ab.getBeginCredit() : BigDecimal.ZERO;
+        BigDecimal periodD = ab.getPeriodDebit() != null ? ab.getPeriodDebit() : BigDecimal.ZERO;
+        BigDecimal periodC = ab.getPeriodCredit() != null ? ab.getPeriodCredit() : BigDecimal.ZERO;
+        if (balanceDirection == 2) {
+            BigDecimal net = beginC.add(periodC).subtract(periodD);
+            if (net.compareTo(BigDecimal.ZERO) >= 0) {
+                ab.setEndCredit(net);
+                ab.setEndDebit(BigDecimal.ZERO);
+            } else {
+                ab.setEndCredit(BigDecimal.ZERO);
+                ab.setEndDebit(net.abs());
+            }
+        } else {
+            BigDecimal net = beginD.add(periodD).subtract(periodC);
+            if (net.compareTo(BigDecimal.ZERO) >= 0) {
+                ab.setEndDebit(net);
+                ab.setEndCredit(BigDecimal.ZERO);
+            } else {
+                ab.setEndDebit(BigDecimal.ZERO);
+                ab.setEndCredit(net.abs());
+            }
+        }
     }
 
     @Override

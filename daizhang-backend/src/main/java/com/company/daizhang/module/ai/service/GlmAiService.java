@@ -9,6 +9,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.URL;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
@@ -127,6 +129,10 @@ public class GlmAiService {
      * @return 图片字节数组
      */
     public byte[] downloadImageFromUrl(String imageUrl) throws IOException {
+        // SSRF防护:校验协议白名单 + 禁止访问内网/保留地址段
+        // 原实现直接用用户输入URL发起请求,可探测内网/读取云元数据(169.254.169.254)
+        validateImageUrl(imageUrl);
+
         Request request = new Request.Builder()
                 .url(imageUrl)
                 .build();
@@ -139,7 +145,50 @@ public class GlmAiService {
             if (body == null) {
                 throw new IOException("下载图片失败，响应体为空");
             }
+            // 限制响应体大小(20MB),防止用SSRF做盲打放大攻击
+            long contentLength = body.contentLength();
+            if (contentLength > 20L * 1024 * 1024) {
+                throw new IOException("图片体积超过限制(20MB)");
+            }
             return body.bytes();
+        }
+    }
+
+    /**
+     * 校验图片URL,防止SSRF
+     * - 仅允许http/https协议
+     * - 拒绝内网/保留/环回/链路本地地址
+     */
+    private void validateImageUrl(String imageUrl) throws IOException {
+        URL url;
+        try {
+            url = new URL(imageUrl);
+        } catch (java.net.MalformedURLException e) {
+            throw new IOException("URL格式不合法: " + e.getMessage());
+        }
+        String protocol = url.getProtocol();
+        if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) {
+            throw new IOException("仅支持http/https协议,拒绝: " + protocol);
+        }
+        String host = url.getHost();
+        if (host == null || host.isEmpty()) {
+            throw new IOException("URL缺少主机名");
+        }
+        // 解析所有IP并逐一校验,防止多IP中混入内网地址
+        InetAddress[] addrs = InetAddress.getAllByName(host);
+        for (InetAddress addr : addrs) {
+            if (addr.isAnyLocalAddress()
+                    || addr.isLoopbackAddress()
+                    || addr.isSiteLocalAddress()
+                    || addr.isLinkLocalAddress()
+                    || addr.isMulticastAddress()) {
+                throw new IOException("禁止访问内网/保留地址: " + addr.getHostAddress());
+            }
+            // 显式拦截云元数据服务地址(169.254.169.254等链路本地,部分JVM实现未归入isLinkLocalAddress)
+            String ip = addr.getHostAddress();
+            if (ip.startsWith("169.254.") || ip.startsWith("0.")) {
+                throw new IOException("禁止访问保留地址段: " + ip);
+            }
         }
     }
 
