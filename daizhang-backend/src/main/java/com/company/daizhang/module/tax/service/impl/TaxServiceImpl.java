@@ -535,7 +535,16 @@ public class TaxServiceImpl implements TaxService {
 
         BigDecimal operatingRevenue = sumBySubjectPrefix(subjects, balanceMap, "5001", true, false);
         BigDecimal operatingCost = sumBySubjectPrefix(subjects, balanceMap, "5401", false, true);
-        BigDecimal totalProfit = operatingRevenue.subtract(operatingCost);
+        // 利润总额应扣除期间费用与税金及附加,与利润表口径一致
+        // 否则利润总额虚高,应纳税额偏高,与同文件generateBusinessIncomeTaxForm口径不一致
+        // 5403税金及附加 5601销售费用 5602管理费用 5603财务费用
+        BigDecimal taxSurcharge = sumBySubjectPrefix(subjects, balanceMap, "5403", false, true);
+        BigDecimal sellingExpense = sumBySubjectPrefix(subjects, balanceMap, "5601", false, true);
+        BigDecimal adminExpense = sumBySubjectPrefix(subjects, balanceMap, "5602", false, true);
+        BigDecimal financialExpense = sumBySubjectPrefix(subjects, balanceMap, "5603", false, true);
+        BigDecimal totalExpense = operatingCost.add(taxSurcharge).add(sellingExpense)
+                .add(adminExpense).add(financialExpense);
+        BigDecimal totalProfit = operatingRevenue.subtract(totalExpense);
 
         // 应纳税额 = 利润总额 × 25%（假设为25%税率）
         BigDecimal taxRate = new BigDecimal("0.25");
@@ -547,9 +556,13 @@ public class TaxServiceImpl implements TaxService {
         List<TaxDeclarationFormItemVO> items = new ArrayList<>();
         items.add(buildItem(1, "营业收入", "主营业务收入+其他业务收入", operatingRevenue));
         items.add(buildItem(2, "营业成本", "主营业务成本+其他业务成本", operatingCost));
-        items.add(buildItem(3, "利润总额", "营业收入-营业成本", totalProfit));
-        items.add(buildItem(4, "适用税率", "企业所得税税率25%", taxRate.multiply(new BigDecimal("100"))));
-        items.add(buildItem(5, "应纳所得税额", "利润总额×25%", taxAmount));
+        items.add(buildItem(3, "税金及附加", "5403", taxSurcharge));
+        items.add(buildItem(4, "销售费用", "5601", sellingExpense));
+        items.add(buildItem(5, "管理费用", "5602", adminExpense));
+        items.add(buildItem(6, "财务费用", "5603", financialExpense));
+        items.add(buildItem(7, "利润总额", "营业收入-营业成本-税金及附加-期间费用", totalProfit));
+        items.add(buildItem(8, "适用税率", "企业所得税税率25%", taxRate.multiply(new BigDecimal("100"))));
+        items.add(buildItem(9, "应纳所得税额", "利润总额×25%", taxAmount));
 
         vo.setTaxableIncome(totalProfit);
         vo.setTaxRate(taxRate);
@@ -572,8 +585,17 @@ public class TaxServiceImpl implements TaxService {
                 .eq(SalarySheet::getMonth, month);
         List<SalarySheet> salarySheets = salarySheetMapper.selectList(salaryWrapper);
 
+        // 应发工资 = 基本工资 + 津贴 + 奖金 - 扣款
+        // 原实现误用netSalary(实发工资),实发工资已扣个税/社保/公积金,
+        // 导致"应发工资合计"偏低,与个税申报口径不符
         BigDecimal totalSalary = salarySheets.stream()
-                .map(s -> s.getNetSalary() != null ? s.getNetSalary() : BigDecimal.ZERO)
+                .map(s -> {
+                    BigDecimal base = s.getBaseSalary() != null ? s.getBaseSalary() : BigDecimal.ZERO;
+                    BigDecimal allowance = s.getAllowance() != null ? s.getAllowance() : BigDecimal.ZERO;
+                    BigDecimal bonus = s.getBonus() != null ? s.getBonus() : BigDecimal.ZERO;
+                    BigDecimal deduction = s.getDeduction() != null ? s.getDeduction() : BigDecimal.ZERO;
+                    return base.add(allowance).add(bonus).subtract(deduction);
+                })
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         BigDecimal totalTaxableIncome = salarySheets.stream()
@@ -802,18 +824,27 @@ public class TaxServiceImpl implements TaxService {
     private TaxDeclarationFormVO generateBusinessIncomeTaxForm(AccountSet accountSet, Integer year, Integer month) {
         TaxDeclarationFormVO vo = buildBaseForm(accountSet, year, month, "BusinessIncomeTax", "经营所得个人所得税纳税申报表（A表）");
 
-        Map<Long, AccountBalance> balanceMap = queryBalanceMap(accountSet.getId(), year, month);
+        // 经营所得按年计算分月预缴,五级超额累进税率表为年税率表
+        // 原实现仅用单月数据套用年税率表,导致累计税额偏低,汇算清缴时大额补税
+        // 正确做法:累计1~month各月收入/成本/费用,投资者减除费用按月数累计
         List<Subject> subjects = querySubjects(accountSet.getId());
+        BigDecimal operatingRevenue = BigDecimal.ZERO;
+        BigDecimal operatingCost = BigDecimal.ZERO;
+        BigDecimal adminExpense = BigDecimal.ZERO;
+        BigDecimal sellingExpense = BigDecimal.ZERO;
+        BigDecimal financialExpense = BigDecimal.ZERO;
+        for (int m = 1; m <= month; m++) {
+            Map<Long, AccountBalance> balanceMap = queryBalanceMap(accountSet.getId(), year, m);
+            operatingRevenue = operatingRevenue.add(sumBySubjectPrefix(subjects, balanceMap, "5001", true, false));
+            operatingCost = operatingCost.add(sumBySubjectPrefix(subjects, balanceMap, "5401", false, true));
+            adminExpense = adminExpense.add(sumBySubjectPrefix(subjects, balanceMap, "5602", false, true));
+            sellingExpense = sellingExpense.add(sumBySubjectPrefix(subjects, balanceMap, "5601", false, true));
+            financialExpense = financialExpense.add(sumBySubjectPrefix(subjects, balanceMap, "5603", false, true));
+        }
 
-        BigDecimal operatingRevenue = sumBySubjectPrefix(subjects, balanceMap, "5001", true, false);
-        BigDecimal operatingCost = sumBySubjectPrefix(subjects, balanceMap, "5401", false, true);
-        BigDecimal adminExpense = sumBySubjectPrefix(subjects, balanceMap, "5602", false, true);
-        BigDecimal sellingExpense = sumBySubjectPrefix(subjects, balanceMap, "5601", false, true);
-        BigDecimal financialExpense = sumBySubjectPrefix(subjects, balanceMap, "5603", false, true);
-
-        // 应纳税所得额 = 收入 - 成本 - 费用 - 投资者减除费用（每月5000）
+        // 应纳税所得额 = 累计收入 - 累计成本费用 - 投资者减除费用(每月5000,按累计月数)
         BigDecimal totalExpense = operatingCost.add(adminExpense).add(sellingExpense).add(financialExpense);
-        BigDecimal investorDeduction = new BigDecimal("5000");
+        BigDecimal investorDeduction = new BigDecimal("5000").multiply(new BigDecimal(month));
         BigDecimal taxableIncome = operatingRevenue.subtract(totalExpense).subtract(investorDeduction);
         if (taxableIncome.compareTo(BigDecimal.ZERO) < 0) {
             taxableIncome = BigDecimal.ZERO;
@@ -847,11 +878,11 @@ public class TaxServiceImpl implements TaxService {
         taxAmount = taxAmount.setScale(2, RoundingMode.HALF_UP);
 
         List<TaxDeclarationFormItemVO> items = new ArrayList<>();
-        items.add(buildItem(1, "收入总额", "主营业务收入", operatingRevenue));
-        items.add(buildItem(2, "成本费用", "营业成本+期间费用", totalExpense));
-        items.add(buildItem(3, "投资者减除费用", "每月5000元", investorDeduction));
-        items.add(buildItem(4, "应纳税所得额", "收入-成本-减除费用", taxableIncome));
-        items.add(buildItem(5, "适用税率", "五级超额累进税率", taxRate));
+        items.add(buildItem(1, "收入总额", "累计1~本月主营业务收入", operatingRevenue));
+        items.add(buildItem(2, "成本费用", "累计营业成本+期间费用", totalExpense));
+        items.add(buildItem(3, "投资者减除费用", "每月5000元×" + month + "月累计", investorDeduction));
+        items.add(buildItem(4, "应纳税所得额", "累计收入-累计成本-累计减除费用", taxableIncome));
+        items.add(buildItem(5, "适用税率", "五级超额累进税率(年)", taxRate));
         items.add(buildItem(6, "速算扣除数", "", quickDeduction));
         items.add(buildItem(7, "应纳税额", "应纳税所得额×税率-速算扣除数", taxAmount));
 

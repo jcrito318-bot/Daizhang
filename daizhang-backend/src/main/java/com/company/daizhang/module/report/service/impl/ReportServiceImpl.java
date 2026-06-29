@@ -436,6 +436,13 @@ public class ReportServiceImpl implements ReportService {
         vo.setTotalExpense(operatingCost.add(businessTax).add(sellingExpense).add(adminExpense)
                 .add(financeExpense).add(nonOperatingExpense).add(incomeTax));
         vo.setNetProfit(netProfit);
+        // 补充本年累计字段:netProfitYear等已计算但未set,导致前端无法展示本年累计净利润
+        vo.setTotalRevenueYear(operatingRevenueYear);
+        vo.setTotalExpenseYear(operatingCostYear.add(businessTaxYear).add(sellingExpenseYear).add(adminExpenseYear)
+                .add(financeExpenseYear).add(nonOperatingExpenseYear).add(incomeTaxYear));
+        vo.setTotalProfit(totalProfit);
+        vo.setTotalProfitYear(totalProfitYear);
+        vo.setNetProfitYear(netProfitYear);
 
         return vo;
     }
@@ -833,25 +840,29 @@ public class ReportServiceImpl implements ReportService {
             item.setAmount(diff);
             items.add(item);
 
-            // 根据类别和调整方向（正数为流入增加/流出增加，负数为减少）调整对应类别合计
+            // 调整方向约定:original/adjusted带符号,正数=流入,负数=流出(绝对值为流出金额)
+            // 采用"替换式"计算:先从原归属方向扣除original,再把adjusted加到对应方向
+            // 原实现仅按diff正负判定方向,对流出项的"调减"会出错:
+            //   例如 original=-100, adjusted=-80(流出从100调减为80), diff=20
+            //   原逻辑:diff>0 → inflow += 20(错误,虚增流入)
+            //   正确:outflow应从100变为80,即outflow -= 20
+            BigDecimal originalInflow = original.compareTo(BigDecimal.ZERO) > 0 ? original : BigDecimal.ZERO;
+            BigDecimal originalOutflow = original.compareTo(BigDecimal.ZERO) < 0 ? original.negate() : BigDecimal.ZERO;
+            BigDecimal adjustedInflow = adjusted.compareTo(BigDecimal.ZERO) > 0 ? adjusted : BigDecimal.ZERO;
+            BigDecimal adjustedOutflow = adjusted.compareTo(BigDecimal.ZERO) < 0 ? adjusted.negate() : BigDecimal.ZERO;
+
+            BigDecimal inflowDelta = adjustedInflow.subtract(originalInflow);
+            BigDecimal outflowDelta = adjustedOutflow.subtract(originalOutflow);
+
             if ("经营".equals(category)) {
-                if (diff.compareTo(BigDecimal.ZERO) >= 0) {
-                    operatingInflow = operatingInflow.add(diff);
-                } else {
-                    operatingOutflow = operatingOutflow.add(diff.negate());
-                }
+                operatingInflow = operatingInflow.add(inflowDelta);
+                operatingOutflow = operatingOutflow.add(outflowDelta);
             } else if ("投资".equals(category)) {
-                if (diff.compareTo(BigDecimal.ZERO) >= 0) {
-                    investingInflow = investingInflow.add(diff);
-                } else {
-                    investingOutflow = investingOutflow.add(diff.negate());
-                }
+                investingInflow = investingInflow.add(inflowDelta);
+                investingOutflow = investingOutflow.add(outflowDelta);
             } else if ("筹资".equals(category)) {
-                if (diff.compareTo(BigDecimal.ZERO) >= 0) {
-                    financingInflow = financingInflow.add(diff);
-                } else {
-                    financingOutflow = financingOutflow.add(diff.negate());
-                }
+                financingInflow = financingInflow.add(inflowDelta);
+                financingOutflow = financingOutflow.add(outflowDelta);
             }
         }
 

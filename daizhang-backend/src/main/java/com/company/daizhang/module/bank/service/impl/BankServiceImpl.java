@@ -235,6 +235,10 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
             if (!transaction.getAccountSetId().equals(request.getAccountSetId())) {
                 throw new BusinessException("银行流水不属于当前账套");
             }
+            // 已勾对的流水不可重复勾对,否则原voucherId被静默覆盖,丢失原勾对关系且无审计痕迹
+            if (transaction.getMatchedStatus() != null && transaction.getMatchedStatus() == 1) {
+                throw new BusinessException("流水" + transaction.getTransactionNo() + "已勾对，请先取消匹配");
+            }
             transaction.setMatchedStatus(1);
             transaction.setVoucherId(request.getVoucherId());
             this.updateById(transaction);
@@ -260,6 +264,50 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
                      .set(BankTransaction::getMatchedStatus, 0)
                      .set(BankTransaction::getVoucherId, null);
         this.update(updateWrapper);
+
+        // 同步更新对应月份对账单(BankReconciliation)的未对账项数与状态
+        // 否则取消勾对后,流水未匹配数已增加,但对账单仍显示已对账(status=1),造成账实不符
+        syncReconciliationAfterCancel(transaction);
+    }
+
+    /**
+     * 取消匹配后同步更新对应月份对账单的未对账项数与状态
+     */
+    private void syncReconciliationAfterCancel(BankTransaction transaction) {
+        if (transaction.getTransactionDate() == null) {
+            return;
+        }
+        int year = transaction.getTransactionDate().getYear();
+        int month = transaction.getTransactionDate().getMonthValue();
+
+        LambdaQueryWrapper<BankReconciliation> reconWrapper = new LambdaQueryWrapper<>();
+        reconWrapper.eq(BankReconciliation::getAccountSetId, transaction.getAccountSetId())
+                    .eq(BankReconciliation::getBankAccount, transaction.getBankAccount())
+                    .eq(BankReconciliation::getYear, year)
+                    .eq(BankReconciliation::getMonth, month);
+        BankReconciliation reconciliation = bankReconciliationMapper.selectOne(reconWrapper);
+        if (reconciliation == null) {
+            // 当月未生成对账单,无需同步
+            return;
+        }
+
+        // 重新统计当月未匹配流水数
+        LocalDate startDate = LocalDate.of(year, month, 1);
+        LocalDate endDate = startDate.plusMonths(1).minusDays(1);
+        LambdaQueryWrapper<BankTransaction> txWrapper = new LambdaQueryWrapper<>();
+        txWrapper.eq(BankTransaction::getAccountSetId, transaction.getAccountSetId())
+                 .eq(BankTransaction::getBankAccount, transaction.getBankAccount())
+                 .ge(BankTransaction::getTransactionDate, startDate)
+                 .le(BankTransaction::getTransactionDate, endDate);
+        List<BankTransaction> monthTransactions = this.list(txWrapper);
+        long unreconciledCount = monthTransactions.stream()
+                .filter(t -> t.getMatchedStatus() == null || t.getMatchedStatus() == 0)
+                .count();
+
+        reconciliation.setUnreconciledItems((int) unreconciledCount);
+        // 存在未匹配项时状态置为未对账(0),全部匹配时为已对账(1)
+        reconciliation.setStatus(unreconciledCount == 0 ? 1 : 0);
+        bankReconciliationMapper.updateById(reconciliation);
     }
 
     @Override

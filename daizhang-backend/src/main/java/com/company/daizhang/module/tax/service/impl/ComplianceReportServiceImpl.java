@@ -295,8 +295,10 @@ public class ComplianceReportServiceImpl implements ComplianceReportService {
             inputOutputRatio = inputTax.divide(outputTax, 4, RoundingMode.HALF_UP)
                     .multiply(new BigDecimal("100"));
         }
-        String ioStatus = inputOutputRatio.compareTo(new BigDecimal("90")) > 0
-                && inputOutputRatio.compareTo(new BigDecimal("110")) < 0 ? "WARNING" : "NORMAL";
+        // 偏离过大预警:比例在90%~110%之外为正常,超出此范围为预警
+        // (原逻辑反了:在90~110内报警,比例正常时反而WARNING,严重失衡时却NORMAL)
+        String ioStatus = inputOutputRatio.compareTo(new BigDecimal("90")) < 0
+                || inputOutputRatio.compareTo(new BigDecimal("110")) > 0 ? "WARNING" : "NORMAL";
         indicators.add(buildIndicator("INPUT_OUTPUT_RATIO", "进销项税额比", inputOutputRatio, "%",
                 "偏离过大预警", ioStatus, "进项税额/销项税额比例"));
 

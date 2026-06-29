@@ -84,6 +84,17 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createDocument(DocumentCreateRequest request) {
+        // 发票号唯一性校验:同账套下invoiceCode+invoiceNumber不可重复,否则重复入账/重复抵扣
+        if (StrUtil.isNotBlank(request.getInvoiceCode()) && StrUtil.isNotBlank(request.getInvoiceNumber())) {
+            LambdaQueryWrapper<Document> dupWrapper = new LambdaQueryWrapper<>();
+            dupWrapper.eq(Document::getAccountSetId, request.getAccountSetId())
+                    .eq(Document::getInvoiceCode, request.getInvoiceCode())
+                    .eq(Document::getInvoiceNumber, request.getInvoiceNumber());
+            if (this.count(dupWrapper) > 0) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "发票号已存在，不可重复录入");
+            }
+        }
+
         Document document = new Document();
         BeanUtil.copyProperties(request, document);
 
@@ -135,6 +146,11 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
         Document document = this.getById(id);
         if (document == null) {
             throw new BusinessException(ErrorCode.DOCUMENT_NOT_FOUND);
+        }
+
+        // 已关联凭证的票据不可重复关联,否则原voucherId被覆盖,丢失原关联且无审计痕迹
+        if (document.getStatus() != null && document.getStatus() == 1) {
+            throw new BusinessException(ErrorCode.DOCUMENT_ALREADY_LINKED);
         }
 
         Voucher voucher = voucherMapper.selectById(voucherId);

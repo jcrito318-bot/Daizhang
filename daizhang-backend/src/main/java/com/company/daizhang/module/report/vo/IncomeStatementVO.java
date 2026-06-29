@@ -18,4 +18,16 @@ public class IncomeStatementVO {
     private BigDecimal totalExpense;
 
     private BigDecimal netProfit;
+
+    // 本年累计金额(1月~当前月份)
+    // 原实现仅计算未输出,导致前端无法展示本年累计净利润等关键指标
+    private BigDecimal totalRevenueYear;
+
+    private BigDecimal totalExpenseYear;
+
+    private BigDecimal totalProfit;
+
+    private BigDecimal totalProfitYear;
+
+    private BigDecimal netProfitYear;
 }

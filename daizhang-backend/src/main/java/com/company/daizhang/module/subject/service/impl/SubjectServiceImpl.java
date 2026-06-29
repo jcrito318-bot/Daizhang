@@ -246,9 +246,21 @@ public class SubjectServiceImpl extends ServiceImpl<SubjectMapper, Subject> impl
             throw new BusinessException(ErrorCode.SUBJECT_NAME_BLANK);
         }
         // 业务校验：科目余额方向必须是1或2
-        if (request.getBalanceDirection() != null && 
+        if (request.getBalanceDirection() != null &&
             request.getBalanceDirection() != 1 && request.getBalanceDirection() != 2) {
             throw new BusinessException(ErrorCode.SUBJECT_BALANCE_DIRECTION_INVALID);
+        }
+
+        // 业务校验：已被凭证引用的科目不允许修改余额方向
+        // 否则会破坏已记账凭证的借贷语义,导致余额计算方向反转(资产变负债/收入变费用)
+        if (request.getBalanceDirection() != null
+                && !request.getBalanceDirection().equals(subject.getBalanceDirection())) {
+            LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
+            detailWrapper.eq(VoucherDetail::getSubjectId, id);
+            if (voucherDetailMapper.selectCount(detailWrapper) > 0) {
+                throw new BusinessException(ErrorCode.SUBJECT_HAS_VOUCHERS.getCode(),
+                        "科目已被凭证引用，余额方向不可修改");
+            }
         }
         
         BeanUtil.copyProperties(request, subject);
