@@ -91,11 +91,23 @@ public interface VoucherService extends IService<Voucher> {
 
     /**
      * 红冲凭证（生成一张金额取负的红字凭证，用于冲销原凭证）
+     * 红冲凭证在原凭证所在期间生成。
      *
      * @param id 原凭证ID
      * @return 新凭证ID
      */
     Long reverseVoucher(Long id);
+
+    /**
+     * 红冲凭证（支持跨期红冲）。
+     * 当原凭证所在期间已结账时，可指定 targetYear/targetMonth 在当前期间生成红冲凭证。
+     *
+     * @param id           原凭证ID
+     * @param targetYear   红冲凭证目标年度，为null时取原凭证年度
+     * @param targetMonth  红冲凭证目标月份，为null时取原凭证月份
+     * @return 新凭证ID
+     */
+    Long reverseVoucher(Long id, Integer targetYear, Integer targetMonth);
 
     /**
      * 保存草稿（创建凭证但status=0, draftStatus=1，不校验借贷平衡）

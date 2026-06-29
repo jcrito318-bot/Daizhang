@@ -118,8 +118,10 @@ public class VoucherController {
 
     @Operation(summary = "红冲凭证")
     @PostMapping("/{id}/reverse")
-    public Result<Long> reverse(@PathVariable Long id) {
-        Long newId = voucherService.reverseVoucher(id);
+    public Result<Long> reverse(@PathVariable Long id,
+                                @RequestParam(required = false) Integer targetYear,
+                                @RequestParam(required = false) Integer targetMonth) {
+        Long newId = voucherService.reverseVoucher(id, targetYear, targetMonth);
         return Result.success(newId);
     }
 

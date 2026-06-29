@@ -741,6 +741,12 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long reverseVoucher(Long id) {
+        return reverseVoucher(id, null, null);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Long reverseVoucher(Long id, Integer targetYear, Integer targetMonth) {
         // 查询原凭证
         Voucher original = this.getById(id);
         if (original == null) {
@@ -750,8 +756,17 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         if (original.getStatus() == null || original.getStatus() != 2) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "只有已过账的凭证才能红冲");
         }
-        // 校验目标期间存在且未结账（红冲凭证生成在原期间，须遵守期间约束）
-        AccountPeriod period = checkPeriodExists(original.getAccountSetId(), original.getYear(), original.getMonth());
+
+        // 确定红冲凭证的目标期间：未指定时默认取原凭证期间
+        int revYear = targetYear != null ? targetYear : original.getYear();
+        int revMonth = targetMonth != null ? targetMonth : original.getMonth();
+        if (revMonth < 1 || revMonth > 12) {
+            throw new BusinessException(ErrorCode.VOUCHER_MONTH_INVALID);
+        }
+
+        // 校验目标期间存在且未结账
+        // (原实现固定用原期间,原期间结账后红冲彻底无法执行,缺少"跨期红冲"退路)
+        AccountPeriod period = checkPeriodExists(original.getAccountSetId(), revYear, revMonth);
         checkPeriodNotClosed(period);
 
         // 查询原凭证明细
@@ -760,22 +775,31 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                      .orderByAsc(VoucherDetail::getSortOrder);
         List<VoucherDetail> originalDetails = voucherDetailMapper.selectList(detailWrapper);
 
-        // 生成新凭证号
-        String newVoucherNo = generateVoucherNo(original.getAccountSetId(), original.getYear(), original.getMonth());
+        // 生成新凭证号（基于目标期间）
+        String newVoucherNo = generateVoucherNo(original.getAccountSetId(), revYear, revMonth);
 
-        // 创建新凭证（红冲凭证：借贷方金额互换，相当于取负）
+        // 创建红冲凭证：借贷方金额互换，相当于取负
         // 互换后：新借方合计 = 原贷方合计，新贷方合计 = 原借方合计
         Voucher newVoucher = new Voucher();
         newVoucher.setAccountSetId(original.getAccountSetId());
         newVoucher.setVoucherWordId(original.getVoucherWordId());
         newVoucher.setVoucherNo(newVoucherNo);
-        newVoucher.setVoucherDate(original.getVoucherDate());
-        newVoucher.setYear(original.getYear());
-        newVoucher.setMonth(original.getMonth());
+        // 跨期红冲时凭证日期调整为目标期间首日，避免凭证日期与期间不一致
+        newVoucher.setVoucherDate(LocalDate.of(revYear, revMonth, 1));
+        newVoucher.setYear(revYear);
+        newVoucher.setMonth(revMonth);
         newVoucher.setTotalDebit(original.getTotalCredit() != null ? original.getTotalCredit() : BigDecimal.ZERO);
         newVoucher.setTotalCredit(original.getTotalDebit() != null ? original.getTotalDebit() : BigDecimal.ZERO);
         newVoucher.setAttachmentCount(original.getAttachmentCount());
-        newVoucher.setStatus(0);
+        // 红冲凭证直接设为已过账(status=2)，使余额立即抵消。
+        // 原实现只生成status=0凭证，不调用updateAccountBalance，原凭证余额原封不动，
+        // 抵消依赖用户事后手动审核+过账，极易被遗漏导致余额持续错误且无告警。
+        Long currentUserId = SecurityUtils.getCurrentUserId();
+        newVoucher.setStatus(2);
+        newVoucher.setAuditBy(currentUserId);
+        newVoucher.setAuditTime(LocalDateTime.now());
+        newVoucher.setPostBy(currentUserId);
+        newVoucher.setPostTime(LocalDateTime.now());
         newVoucher.setSource(0);
         this.save(newVoucher);
 
@@ -804,8 +828,19 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             voucherDetailMapper.insert(newDetail);
         }
 
-        log.info("红冲凭证成功，原凭证ID: {}, 原凭证号: {}, 新凭证ID: {}, 新凭证号: {}",
-                id, original.getVoucherNo(), newVoucher.getId(), newVoucherNo);
+        // 立即更新各科目余额，使红冲立即抵消原凭证的发生额
+        for (VoucherDetail detail : originalDetails) {
+            VoucherDetail reversedDetail = new VoucherDetail();
+            reversedDetail.setSubjectId(detail.getSubjectId());
+            BigDecimal origDebit = detail.getDebit() != null ? detail.getDebit() : BigDecimal.ZERO;
+            BigDecimal origCredit = detail.getCredit() != null ? detail.getCredit() : BigDecimal.ZERO;
+            reversedDetail.setDebit(origCredit);   // 借贷互换
+            reversedDetail.setCredit(origDebit);
+            updateAccountBalance(newVoucher, reversedDetail);
+        }
+
+        log.info("红冲凭证成功（自动过账），原凭证ID: {}, 原凭证号: {}, 新凭证ID: {}, 新凭证号: {}, 目标期间: {}-{}",
+                id, original.getVoucherNo(), newVoucher.getId(), newVoucherNo, revYear, revMonth);
 
         return newVoucher.getId();
     }
