@@ -138,7 +138,8 @@ public class AccountSetServiceImpl extends ServiceImpl<AccountSetMapper, Account
             throw new BusinessException(ErrorCode.ACCOUNT_SET_NOT_FOUND);
         }
         
-        BeanUtil.copyProperties(request, accountSet);
+        // 排除status:账套启用/停用须走专用方法(含业务校验),不可通过通用更新绕过
+        BeanUtil.copyProperties(request, accountSet, "status");
         this.updateById(accountSet);
         
         log.info("更新账套成功，账套ID: {}", id);

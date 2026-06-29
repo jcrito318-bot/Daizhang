@@ -117,7 +117,9 @@ public class BankAccountServiceImpl implements BankAccountService {
                 throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "银行账号已存在");
             }
         }
-        BeanUtil.copyProperties(request, account);
+        // 排除状态与归属字段:status变更须走updateStatus专用方法,
+        // accountSetId不可通过通用更新修改(防止银行账户被移到其他账套)
+        BeanUtil.copyProperties(request, account, "id", "accountSetId", "status");
         bankAccountMapper.updateById(account);
         log.info("更新银行账户成功，ID: {}", id);
     }

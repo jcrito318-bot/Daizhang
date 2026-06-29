@@ -77,7 +77,7 @@ public class AccountPeriodServiceImpl implements AccountPeriodService {
     public void closePeriod(Long accountSetId, int year, int month) {
         AccountPeriod period = getPeriod(accountSetId, year, month);
 
-        if (period.getStatus() == 1) {
+        if (Integer.valueOf(1).equals(period.getStatus())) {
             throw new BusinessException(400, "该期间已结账");
         }
 
@@ -117,7 +117,7 @@ public class AccountPeriodServiceImpl implements AccountPeriodService {
     public void reopenPeriod(Long accountSetId, int year, int month) {
         AccountPeriod period = getPeriod(accountSetId, year, month);
 
-        if (period.getStatus() == 0) {
+        if (Integer.valueOf(0).equals(period.getStatus())) {
             throw new BusinessException(400, "该期间未结账");
         }
 

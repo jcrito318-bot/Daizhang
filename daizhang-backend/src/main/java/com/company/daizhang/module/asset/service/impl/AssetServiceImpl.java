@@ -243,7 +243,9 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
             asset.setCategoryName(category.getCategoryName());
         }
 
-        BeanUtil.copyProperties(request, asset);
+        // 排除categoryName:上面按categoryId查库写入的正确分类名会被copyProperties覆盖为null;
+        // 同时排除status/accountSetId,状态变更走changeAssetStatus专用方法,accountSetId不可改
+        BeanUtil.copyProperties(request, asset, "categoryName", "status", "accountSetId", "id");
 
         // 如果修改了折旧相关参数，重新计算月折旧额
         if (request.getDepreciationMethod() != null || request.getUsefulLife() != null || request.getResidualValue() != null) {
@@ -348,15 +350,22 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
             }
 
             // 计算本次折旧
+            // 批量折旧遍历账套所有在用资产,任一字段为null会导致整个批次NPE中断。
+            // 与calculateMonthlyDepreciation保持一致的null防御。
             BigDecimal depreciationAmount = asset.getMonthlyDepreciation();
-            BigDecimal accumulatedDepreciation = asset.getAccumulatedDeprecation().add(depreciationAmount);
-            BigDecimal netValue = asset.getNetValue().subtract(depreciationAmount);
+            if (depreciationAmount == null) {
+                continue; // 月折旧额为空,数据不完整,跳过
+            }
+            BigDecimal accumulatedDepreciation = (asset.getAccumulatedDeprecation() != null ? asset.getAccumulatedDeprecation() : BigDecimal.ZERO).add(depreciationAmount);
+            BigDecimal netValue = (asset.getNetValue() != null ? asset.getNetValue() : BigDecimal.ZERO).subtract(depreciationAmount);
+            BigDecimal residualValue = asset.getResidualValue() != null ? asset.getResidualValue() : BigDecimal.ZERO;
 
             // 如果净值小于残值，则调整折旧额
-            if (netValue.compareTo(asset.getResidualValue()) < 0) {
-                depreciationAmount = asset.getNetValue().subtract(asset.getResidualValue());
-                accumulatedDepreciation = asset.getAccumulatedDeprecation().add(depreciationAmount);
-                netValue = asset.getResidualValue();
+            if (netValue.compareTo(residualValue) < 0) {
+                BigDecimal assetNetValue = asset.getNetValue() != null ? asset.getNetValue() : BigDecimal.ZERO;
+                depreciationAmount = assetNetValue.subtract(residualValue);
+                accumulatedDepreciation = (asset.getAccumulatedDeprecation() != null ? asset.getAccumulatedDeprecation() : BigDecimal.ZERO).add(depreciationAmount);
+                netValue = residualValue;
             }
 
             // 创建折旧记录

@@ -129,7 +129,9 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
             throw new BusinessException(404, "客户不存在");
         }
 
-        BeanUtil.copyProperties(request, customer);
+        // 排除状态字段:customerStatus/status变更必须走专用方法updateCustomerStatus,
+        // 否则通用更新可绕过状态机前置校验直接改写业务状态
+        BeanUtil.copyProperties(request, customer, "customerStatus", "status");
         this.updateById(customer);
     }
 
