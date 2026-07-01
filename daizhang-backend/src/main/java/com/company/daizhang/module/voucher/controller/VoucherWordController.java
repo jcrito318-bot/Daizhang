@@ -1,6 +1,7 @@
 package com.company.daizhang.module.voucher.controller;
 
 import cn.hutool.core.bean.BeanUtil;
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.voucher.entity.VoucherWord;
 import com.company.daizhang.module.voucher.service.VoucherWordService;
@@ -27,6 +28,7 @@ public class VoucherWordController {
 
     @Operation(summary = "根据账套ID查询凭证字列表")
     @GetMapping("/list")
+    @RequireAccountSetAccess
     public Result<List<VoucherWordVO>> list(@RequestParam Long accountSetId) {
         List<VoucherWord> list = voucherWordService.listByAccountSetId(accountSetId);
         List<VoucherWordVO> voList = list.stream()

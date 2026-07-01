@@ -1,5 +1,6 @@
 package com.company.daizhang.module.tax.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.tax.service.TaxCalculateService;
 import com.company.daizhang.module.tax.vo.TaxCalculationResultVO;
@@ -29,6 +30,7 @@ public class TaxCalculateController {
 
     @Operation(summary = "计算所有税种（增值税/附加税/企业所得税/个人所得税）")
     @GetMapping("/all")
+    @RequireAccountSetAccess
     public Result<List<TaxCalculationResultVO>> calculateAllTaxes(@RequestParam Long accountSetId,
                                                                    @RequestParam Integer year,
                                                                    @RequestParam Integer month) {
@@ -38,6 +40,7 @@ public class TaxCalculateController {
 
     @Operation(summary = "计算增值税")
     @GetMapping("/vat")
+    @RequireAccountSetAccess
     public Result<TaxCalculationResultVO> calculateVAT(@RequestParam Long accountSetId,
                                                         @RequestParam Integer year,
                                                         @RequestParam Integer month) {
@@ -47,6 +50,7 @@ public class TaxCalculateController {
 
     @Operation(summary = "计算附加税（城建税/教育附加/地方教育附加）")
     @GetMapping("/surcharge")
+    @RequireAccountSetAccess
     public Result<TaxCalculationResultVO> calculateSurchargeTax(@RequestParam Long accountSetId,
                                                                 @RequestParam Integer year,
                                                                 @RequestParam Integer month) {
@@ -56,6 +60,7 @@ public class TaxCalculateController {
 
     @Operation(summary = "计算企业所得税（季度预缴）")
     @GetMapping("/income-tax")
+    @RequireAccountSetAccess
     public Result<TaxCalculationResultVO> calculateCorporateIncomeTax(@RequestParam Long accountSetId,
                                                                       @RequestParam Integer year,
                                                                       @RequestParam Integer month) {
@@ -65,6 +70,7 @@ public class TaxCalculateController {
 
     @Operation(summary = "计算个人所得税（独立计算接口）")
     @GetMapping("/personal-income-tax")
+    @RequireAccountSetAccess
     public Result<TaxCalculationResultVO> calculatePersonalIncomeTax(@RequestParam Long accountSetId,
                                                                      @RequestParam Integer year,
                                                                      @RequestParam Integer month) {

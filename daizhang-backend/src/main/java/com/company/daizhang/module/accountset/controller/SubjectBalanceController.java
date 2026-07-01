@@ -1,5 +1,6 @@
 package com.company.daizhang.module.accountset.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.common.vo.ImportResultVO;
 import com.company.daizhang.module.accountset.dto.SubjectBalanceRequest;
@@ -36,6 +37,7 @@ public class SubjectBalanceController {
 
     @Operation(summary = "查询期初余额列表")
     @GetMapping("/list")
+    @RequireAccountSetAccess
     public Result<List<SubjectBalanceVO>> list(@RequestParam Long accountSetId,
                                                 @RequestParam Integer year) {
         List<SubjectBalanceVO> list = subjectBalanceService.listByAccountSetAndYear(accountSetId, year);
@@ -44,6 +46,7 @@ public class SubjectBalanceController {
 
     @Operation(summary = "批量保存期初余额")
     @PostMapping("/batch")
+    @RequireAccountSetAccess
     public Result<Void> batchSave(@RequestParam Long accountSetId,
                                   @RequestParam Integer year,
                                   @RequestBody List<SubjectBalanceRequest> requests) {
@@ -53,6 +56,7 @@ public class SubjectBalanceController {
 
     @Operation(summary = "试算平衡")
     @GetMapping("/trial-balance")
+    @RequireAccountSetAccess
     public Result<Map<String, Object>> trialBalance(@RequestParam Long accountSetId,
                                                      @RequestParam Integer year) {
         Map<String, Object> result = subjectBalanceService.trialBalance(accountSetId, year);
@@ -61,6 +65,7 @@ public class SubjectBalanceController {
 
     @Operation(summary = "批量导入期初余额")
     @PostMapping("/import")
+    @RequireAccountSetAccess
     public Result<ImportResultVO> importBalances(@RequestParam Long accountSetId,
                                                 @RequestParam Integer year,
                                                 @RequestParam("file") MultipartFile file) {

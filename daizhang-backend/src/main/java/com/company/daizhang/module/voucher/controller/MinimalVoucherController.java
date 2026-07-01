@@ -1,5 +1,6 @@
 package com.company.daizhang.module.voucher.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.voucher.service.MinimalVoucherService;
 import com.company.daizhang.module.voucher.vo.MinimalAccountSetVO;
@@ -33,6 +34,7 @@ public class MinimalVoucherController {
 
     @Operation(summary = "批量生成极简凭证（工资/水电/租金）")
     @PostMapping("/batch-generate")
+    @RequireAccountSetAccess
     public Result<MinimalVoucherBatchResultVO> batchGenerate(
             @RequestParam List<Long> accountSetIds,
             @RequestParam Integer year,
@@ -45,6 +47,7 @@ public class MinimalVoucherController {
 
     @Operation(summary = "批量审核极简凭证")
     @PostMapping("/batch-audit")
+    @RequireAccountSetAccess
     public Result<Integer> batchAudit(
             @RequestParam List<Long> accountSetIds,
             @RequestParam Integer year,

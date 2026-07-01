@@ -1,5 +1,6 @@
 package com.company.daizhang.module.accountset.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.accountset.service.AccountPeriodService;
 import com.company.daizhang.module.accountset.vo.AccountPeriodVO;
@@ -23,6 +24,7 @@ public class AccountPeriodController {
     
     @Operation(summary = "查询会计期间列表")
     @GetMapping("/list")
+    @RequireAccountSetAccess
     public Result<List<AccountPeriodVO>> list(@RequestParam Long accountSetId) {
         List<AccountPeriodVO> periods = accountPeriodService.listPeriods(accountSetId);
         return Result.success(periods);
@@ -30,6 +32,7 @@ public class AccountPeriodController {
     
     @Operation(summary = "初始化会计期间")
     @PostMapping("/init")
+    @RequireAccountSetAccess
     public Result<Void> init(@RequestParam Long accountSetId, @RequestParam int year) {
         accountPeriodService.createPeriod(accountSetId, year);
         return Result.success();
@@ -37,6 +40,7 @@ public class AccountPeriodController {
     
     @Operation(summary = "结账")
     @PostMapping("/{accountSetId}/close")
+    @RequireAccountSetAccess
     public Result<Void> close(@PathVariable Long accountSetId,
                               @RequestParam int year,
                               @RequestParam int month) {
@@ -46,6 +50,7 @@ public class AccountPeriodController {
     
     @Operation(summary = "反结账")
     @PostMapping("/{accountSetId}/reopen")
+    @RequireAccountSetAccess
     public Result<Void> reopen(@PathVariable Long accountSetId,
                                @RequestParam int year,
                                @RequestParam int month) {

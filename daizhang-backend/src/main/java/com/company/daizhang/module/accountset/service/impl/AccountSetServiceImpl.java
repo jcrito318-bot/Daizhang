@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.common.utils.SecurityUtils;
 import com.company.daizhang.module.accountset.dto.AccountSetCreateRequest;
 import com.company.daizhang.module.accountset.dto.AccountSetQueryRequest;
 import com.company.daizhang.module.accountset.dto.AccountSetUpdateRequest;
@@ -15,6 +16,7 @@ import com.company.daizhang.module.accountset.entity.AccountPeriod;
 import com.company.daizhang.module.accountset.entity.AccountSet;
 import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
 import com.company.daizhang.module.accountset.mapper.AccountSetMapper;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.accountset.service.AccountSetService;
 import com.company.daizhang.module.accountset.vo.AccountSetVO;
 import com.company.daizhang.module.subject.entity.Subject;
@@ -30,7 +32,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -46,30 +50,52 @@ public class AccountSetServiceImpl extends ServiceImpl<AccountSetMapper, Account
     private final SubjectService subjectService;
     private final VoucherMapper voucherMapper;
     private final VoucherWordMapper voucherWordMapper;
+    private final AccountSetAccessService accountSetAccessService;
     
     @Override
     public PageResult<AccountSetVO> pageAccountSets(AccountSetQueryRequest request) {
         Page<AccountSet> page = new Page<>(request.getPageNum(), request.getPageSize());
-        
+
         LambdaQueryWrapper<AccountSet> wrapper = new LambdaQueryWrapper<>();
         wrapper.like(StrUtil.isNotBlank(request.getCode()), AccountSet::getCode, request.getCode())
                .like(StrUtil.isNotBlank(request.getName()), AccountSet::getName, request.getName())
                .like(StrUtil.isNotBlank(request.getCompanyName()), AccountSet::getCompanyName, request.getCompanyName())
                .eq(request.getStatus() != null, AccountSet::getStatus, request.getStatus())
                .orderByDesc(AccountSet::getCreateTime);
-        
+
+        // IDOR治理:仅返回当前用户有权限访问的账套(超级管理员返回null表示不限制)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds != null) {
+            if (accessibleIds.isEmpty()) {
+                return new PageResult<>(Collections.emptyList(), 0L, request.getPageNum(), request.getPageSize());
+            }
+            wrapper.in(AccountSet::getId, accessibleIds);
+        }
+
         Page<AccountSet> result = this.page(page, wrapper);
-        
+
         List<AccountSetVO> voList = result.getRecords().stream()
                 .map(this::convertToVO)
                 .collect(Collectors.toList());
-        
+
         return new PageResult<>(voList, result.getTotal(), request.getPageNum(), request.getPageSize());
     }
-    
+
     @Override
     public List<AccountSetVO> listAllAccountSets() {
-        List<AccountSet> list = this.list();
+        // IDOR治理:仅返回当前用户有权限访问的账套(超级管理员返回null表示不限制)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds != null && accessibleIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        LambdaQueryWrapper<AccountSet> wrapper = new LambdaQueryWrapper<>();
+        wrapper.orderByDesc(AccountSet::getCreateTime);
+        if (accessibleIds != null) {
+            wrapper.in(AccountSet::getId, accessibleIds);
+        }
+
+        List<AccountSet> list = this.list(wrapper);
         return list.stream()
                 .map(this::convertToVO)
                 .collect(Collectors.toList());
@@ -81,6 +107,8 @@ public class AccountSetServiceImpl extends ServiceImpl<AccountSetMapper, Account
         if (accountSet == null) {
             throw new BusinessException(ErrorCode.ACCOUNT_SET_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该账套的访问权
+        accountSetAccessService.checkAccess(id);
         return convertToVO(accountSet);
     }
     
@@ -123,9 +151,12 @@ public class AccountSetServiceImpl extends ServiceImpl<AccountSetMapper, Account
             accountSet.setStatus(1);
         }
         this.save(accountSet);
-        
+
+        // IDOR治理:创建账套时自动绑定创建者为OWNER
+        accountSetAccessService.bindOwner(accountSet.getId(), SecurityUtils.getCurrentUserId());
+
         log.info("创建账套成功，账套编码: {}, 账套名称: {}", accountSet.getCode(), accountSet.getName());
-        
+
         // 自动初始化账套
         initAccountSet(accountSet.getId());
     }
@@ -137,11 +168,13 @@ public class AccountSetServiceImpl extends ServiceImpl<AccountSetMapper, Account
         if (accountSet == null) {
             throw new BusinessException(ErrorCode.ACCOUNT_SET_NOT_FOUND);
         }
-        
+        // IDOR治理:校验当前用户对该账套的访问权
+        accountSetAccessService.checkAccess(id);
+
         // 排除status:账套启用/停用须走专用方法(含业务校验),不可通过通用更新绕过
         BeanUtil.copyProperties(request, accountSet, "status");
         this.updateById(accountSet);
-        
+
         log.info("更新账套成功，账套ID: {}", id);
     }
     
@@ -152,7 +185,9 @@ public class AccountSetServiceImpl extends ServiceImpl<AccountSetMapper, Account
         if (accountSet == null) {
             throw new BusinessException(ErrorCode.ACCOUNT_SET_NOT_FOUND);
         }
-        
+        // IDOR治理:删除账套须所有者权限
+        accountSetAccessService.checkOwner(id);
+
         // 业务校验：检查账套下是否存在凭证，存在则不允许删除
         LambdaQueryWrapper<Voucher> voucherWrapper = new LambdaQueryWrapper<>();
         voucherWrapper.eq(Voucher::getAccountSetId, id);
@@ -182,7 +217,9 @@ public class AccountSetServiceImpl extends ServiceImpl<AccountSetMapper, Account
         if (accountSet == null) {
             throw new BusinessException(ErrorCode.ACCOUNT_SET_NOT_FOUND);
         }
-        
+        // IDOR治理:初始化账套须所有者权限
+        accountSetAccessService.checkOwner(id);
+
         // 业务校验：检查是否已经初始化过（是否已有会计期间）
         LambdaQueryWrapper<AccountPeriod> checkWrapper = new LambdaQueryWrapper<>();
         checkWrapper.eq(AccountPeriod::getAccountSetId, id);

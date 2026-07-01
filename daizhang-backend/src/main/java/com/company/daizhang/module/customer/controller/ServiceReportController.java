@@ -1,5 +1,6 @@
 package com.company.daizhang.module.customer.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.customer.dto.ServiceReportRequest;
@@ -24,6 +25,7 @@ public class ServiceReportController {
 
     @Operation(summary = "分页查询服务报告")
     @GetMapping("/page")
+    @RequireAccountSetAccess
     public Result<PageResult<ServiceReportVO>> page(@RequestParam(required = false) Long accountSetId,
                                                      @RequestParam(required = false) Long customerId,
                                                      @RequestParam(required = false) Integer reportYear,
@@ -72,6 +74,7 @@ public class ServiceReportController {
 
     @Operation(summary = "自动生成服务报告")
     @PostMapping("/generate")
+    @RequireAccountSetAccess
     public Result<ServiceReportVO> generate(@RequestParam Long accountSetId,
                                             @RequestParam(required = false) Long customerId,
                                             @RequestParam Integer year,

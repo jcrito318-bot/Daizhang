@@ -1,5 +1,6 @@
 package com.company.daizhang.module.tax.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.tax.dto.TaxRiskWarningRequest;
@@ -24,6 +25,7 @@ public class TaxRiskWarningController {
 
     @Operation(summary = "分页查询风险预警")
     @GetMapping("/page")
+    @RequireAccountSetAccess
     public Result<PageResult<TaxRiskWarningVO>> pageWarnings(
             @RequestParam Long accountSetId,
             @RequestParam(required = false) Integer year,
@@ -59,6 +61,7 @@ public class TaxRiskWarningController {
 
     @Operation(summary = "扫描生成风险预警")
     @PostMapping("/scan")
+    @RequireAccountSetAccess
     public Result<Void> scan(
             @RequestParam Long accountSetId,
             @RequestParam Integer year,

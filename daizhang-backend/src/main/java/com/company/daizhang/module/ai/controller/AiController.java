@@ -1,5 +1,6 @@
 package com.company.daizhang.module.ai.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.ai.dto.AccountingSuggestRequest;
 import com.company.daizhang.module.ai.dto.InvoiceRecognizeRequest;
@@ -142,6 +143,7 @@ public class AiController {
      */
     @PostMapping("/recognize/invoice-and-save")
     @Operation(summary = "票据OCR识别并保存", description = "识别票据图片后自动创建票据(Document)和进项发票(InputInvoice)记录")
+    @RequireAccountSetAccess
     public Result<DocumentVO> recognizeInvoiceAndSave(@RequestParam Long accountSetId,
                                                       @RequestParam("file") MultipartFile file) {
         try {

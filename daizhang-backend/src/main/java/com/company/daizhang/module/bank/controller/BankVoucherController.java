@@ -1,5 +1,6 @@
 package com.company.daizhang.module.bank.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.bank.service.BankVoucherService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -31,6 +32,7 @@ public class BankVoucherController {
 
     @Operation(summary = "批量生成银行流水凭证")
     @PostMapping("/batch-generate")
+    @RequireAccountSetAccess
     public Result<List<Long>> batchGenerateVouchers(@RequestParam Long accountSetId) {
         List<Long> voucherIds = bankVoucherService.batchGenerateVouchers(accountSetId);
         return Result.success(voucherIds);

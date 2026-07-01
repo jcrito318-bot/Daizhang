@@ -1,5 +1,6 @@
 package com.company.daizhang.module.voucher.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.common.vo.ImportResultVO;
@@ -141,6 +142,7 @@ public class VoucherController {
 
     @Operation(summary = "凭证整理（断号重编）")
     @PostMapping("/rearrange")
+    @RequireAccountSetAccess
     public Result<Void> rearrange(@RequestParam Long accountSetId,
                                   @RequestParam Integer year,
                                   @RequestParam Integer month) {
@@ -150,6 +152,7 @@ public class VoucherController {
 
     @Operation(summary = "批量导入凭证")
     @PostMapping("/import")
+    @RequireAccountSetAccess
     public Result<ImportResultVO> importVouchers(@RequestParam Long accountSetId,
                                                   @RequestParam("file") MultipartFile file) {
         ImportResultVO result = voucherImportService.importVouchers(accountSetId, file);

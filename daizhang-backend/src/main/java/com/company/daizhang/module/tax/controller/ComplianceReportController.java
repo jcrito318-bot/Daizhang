@@ -1,5 +1,6 @@
 package com.company.daizhang.module.tax.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.tax.service.ComplianceReportService;
 import com.company.daizhang.module.tax.vo.ComplianceReportVO;
@@ -21,6 +22,7 @@ public class ComplianceReportController {
 
     @Operation(summary = "生成财税合规评估报告（5大维度/30+指标）")
     @GetMapping("/report")
+    @RequireAccountSetAccess
     public Result<ComplianceReportVO> generateReport(@RequestParam Long accountSetId,
                                                       @RequestParam Integer year,
                                                       @RequestParam Integer month) {

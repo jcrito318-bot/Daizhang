@@ -1,5 +1,6 @@
 package com.company.daizhang.module.asset.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.asset.dto.AssetChangeRecordRequest;
@@ -26,6 +27,7 @@ public class AssetChangeRecordController {
 
     @Operation(summary = "分页查询资产变动记录")
     @GetMapping("/page")
+    @RequireAccountSetAccess
     public Result<PageResult<AssetChangeRecordVO>> page(
             @RequestParam(required = false) Long accountSetId,
             @RequestParam(required = false) Long assetId,

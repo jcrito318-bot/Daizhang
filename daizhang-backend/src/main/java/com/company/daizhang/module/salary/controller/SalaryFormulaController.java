@@ -1,5 +1,6 @@
 package com.company.daizhang.module.salary.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.salary.dto.SalaryFormulaRequest;
 import com.company.daizhang.module.salary.service.SalaryFormulaService;
@@ -27,6 +28,7 @@ public class SalaryFormulaController {
 
     @Operation(summary = "查询薪资公式列表")
     @GetMapping("/list")
+    @RequireAccountSetAccess
     public Result<List<SalaryFormulaVO>> list(@RequestParam Long accountSetId) {
         List<SalaryFormulaVO> list = salaryFormulaService.listFormulas(accountSetId);
         return Result.success(list);

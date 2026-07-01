@@ -1,5 +1,6 @@
 package com.company.daizhang.module.bank.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.bank.dto.BankAccountQueryRequest;
@@ -44,6 +45,7 @@ public class BankAccountController {
 
     @Operation(summary = "查询账套下所有银行账户")
     @GetMapping("/list")
+    @RequireAccountSetAccess
     public Result<List<BankAccountVO>> list(@RequestParam Long accountSetId) {
         List<BankAccountVO> list = bankAccountService.listByAccountSetId(accountSetId);
         return Result.success(list);

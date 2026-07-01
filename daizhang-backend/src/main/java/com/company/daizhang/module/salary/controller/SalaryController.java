@@ -1,5 +1,6 @@
 package com.company.daizhang.module.salary.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.salary.dto.*;
@@ -170,6 +171,7 @@ public class SalaryController {
 
     @Operation(summary = "导出银行代发工资文件（Excel）")
     @GetMapping("/export/bank-disbursement")
+    @RequireAccountSetAccess
     public void exportBankDisbursementFile(@RequestParam Long accountSetId,
                                            @RequestParam Integer year,
                                            @RequestParam Integer month,
@@ -179,6 +181,7 @@ public class SalaryController {
 
     @Operation(summary = "导出工资条（Excel）")
     @GetMapping("/export/payslip")
+    @RequireAccountSetAccess
     public void exportPayslips(@RequestParam Long accountSetId,
                                @RequestParam Integer year,
                                @RequestParam Integer month,

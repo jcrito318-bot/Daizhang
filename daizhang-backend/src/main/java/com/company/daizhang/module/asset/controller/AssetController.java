@@ -1,5 +1,6 @@
 package com.company.daizhang.module.asset.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.asset.dto.*;
@@ -35,6 +36,7 @@ public class AssetController {
 
     @Operation(summary = "查询资产分类树")
     @GetMapping("/category/tree")
+    @RequireAccountSetAccess
     public Result<List<AssetCategoryVO>> listCategoryTree(@RequestParam Long accountSetId) {
         List<AssetCategoryVO> tree = assetService.listCategoryTree(accountSetId);
         return Result.success(tree);
@@ -151,6 +153,7 @@ public class AssetController {
 
     @Operation(summary = "获取资产报表")
     @GetMapping("/report")
+    @RequireAccountSetAccess
     public Result<AssetReportVO> report(@RequestParam Long accountSetId,
                                         @RequestParam Integer year) {
         AssetReportVO report = assetService.getAssetReport(accountSetId, year);

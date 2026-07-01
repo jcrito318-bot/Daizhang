@@ -1,5 +1,6 @@
 package com.company.daizhang.module.report.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.report.dto.ReportQueryRequest;
 import com.company.daizhang.module.report.service.ReportService;
@@ -61,6 +62,7 @@ public class ReportController {
 
     @Operation(summary = "现金流量表")
     @GetMapping("/cash-flow-statement")
+    @RequireAccountSetAccess
     public Result<CashFlowStatementVO> cashFlowStatement(@RequestParam Long accountSetId,
                                                          @RequestParam Integer year,
                                                          @RequestParam Integer month) {
@@ -70,6 +72,7 @@ public class ReportController {
 
     @Operation(summary = "导出现金流量表Excel")
     @GetMapping("/cash-flow-statement/export")
+    @RequireAccountSetAccess
     public void exportCashFlowStatement(@RequestParam Long accountSetId,
                                          @RequestParam Integer year,
                                          @RequestParam Integer month,
@@ -97,6 +100,7 @@ public class ReportController {
 
     @Operation(summary = "查询现金流量表调整项列表")
     @GetMapping("/cash-flow-adjustment/list")
+    @RequireAccountSetAccess
     public Result<List<CashFlowAdjustmentVO>> listAdjustments(@RequestParam Long accountSetId,
                                                               @RequestParam Integer year,
                                                               @RequestParam Integer month) {
@@ -120,6 +124,7 @@ public class ReportController {
 
     @Operation(summary = "带调整的现金流量表")
     @GetMapping("/cash-flow-statement/adjusted")
+    @RequireAccountSetAccess
     public Result<CashFlowStatementVO> cashFlowStatementWithAdjustment(@RequestParam Long accountSetId,
                                                                        @RequestParam Integer year,
                                                                        @RequestParam Integer month) {
@@ -129,6 +134,7 @@ public class ReportController {
 
     @Operation(summary = "同比环比分析")
     @GetMapping("/year-on-year")
+    @RequireAccountSetAccess
     public Result<List<YearOnYearVO>> yearOnYearAnalysis(@RequestParam Long accountSetId,
                                                           @RequestParam Integer year,
                                                           @RequestParam Integer month) {
@@ -138,6 +144,7 @@ public class ReportController {
 
     @Operation(summary = "生成报表打印HTML")
     @GetMapping(value = "/print", produces = MediaType.TEXT_HTML_VALUE)
+    @RequireAccountSetAccess
     public String generatePrintHtml(@RequestParam Long accountSetId,
                                     @RequestParam Integer year,
                                     @RequestParam Integer month,
@@ -147,6 +154,7 @@ public class ReportController {
 
     @Operation(summary = "所有者权益变动表")
     @GetMapping("/equity-change-statement")
+    @RequireAccountSetAccess
     public Result<EquityChangeStatementVO> equityChangeStatement(@RequestParam Long accountSetId,
                                                                    @RequestParam Integer year,
                                                                    @RequestParam Integer month) {
@@ -156,6 +164,7 @@ public class ReportController {
 
     @Operation(summary = "部门费用分析报表（按部门辅助核算归集费用类科目发生额）")
     @GetMapping("/department-expense")
+    @RequireAccountSetAccess
     public Result<DepartmentExpenseReportVO> departmentExpenseReport(@RequestParam Long accountSetId,
                                                                        @RequestParam Integer year,
                                                                        @RequestParam Integer month) {

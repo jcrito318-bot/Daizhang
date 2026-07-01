@@ -1,6 +1,7 @@
 package com.company.daizhang.module.period.controller;
 
 import com.company.daizhang.common.annotation.OperationLog;
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.period.dto.TrialBalanceRequest;
 import com.company.daizhang.module.period.service.PeriodService;
@@ -35,6 +36,7 @@ public class PeriodController {
     @Operation(summary = "结账")
     @PostMapping("/close")
     @OperationLog("期末结账")
+    @RequireAccountSetAccess
     public Result<ClosePeriodResultVO> close(@RequestParam Long accountSetId,
                                               @RequestParam int year,
                                               @RequestParam int month) {
@@ -45,6 +47,7 @@ public class PeriodController {
     @Operation(summary = "反结账")
     @PostMapping("/reopen")
     @OperationLog("期末反结账")
+    @RequireAccountSetAccess
     public Result<Void> reopen(@RequestParam Long accountSetId,
                                @RequestParam int year,
                                @RequestParam int month) {
@@ -55,6 +58,7 @@ public class PeriodController {
     @Operation(summary = "月末结转损益")
     @PostMapping("/carry-forward")
     @OperationLog("损益结转")
+    @RequireAccountSetAccess
     public Result<Void> carryForward(@RequestParam Long accountSetId,
                                      @RequestParam int year,
                                      @RequestParam int month) {
@@ -65,6 +69,7 @@ public class PeriodController {
     @Operation(summary = "年度结转")
     @PostMapping("/carry-forward-year")
     @OperationLog("年度结转")
+    @RequireAccountSetAccess
     public Result<Void> carryForwardYear(@RequestParam Long accountSetId,
                                          @RequestParam Integer fromYear) {
         periodService.carryForwardYear(accountSetId, fromYear);
@@ -74,6 +79,7 @@ public class PeriodController {
     @Operation(summary = "期末成本结转")
     @PostMapping("/carry-forward-cost")
     @OperationLog("成本结转")
+    @RequireAccountSetAccess
     public Result<Long> carryForwardCost(@RequestParam Long accountSetId,
                                           @RequestParam int year,
                                           @RequestParam int month,

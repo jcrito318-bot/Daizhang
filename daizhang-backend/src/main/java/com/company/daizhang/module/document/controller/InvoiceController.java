@@ -1,5 +1,6 @@
 package com.company.daizhang.module.document.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.document.dto.InputInvoiceRequest;
@@ -120,6 +121,7 @@ public class InvoiceController {
 
     @Operation(summary = "发票统计")
     @GetMapping("/statistics")
+    @RequireAccountSetAccess
     public Result<InvoiceStatisticsVO> statistics(@RequestParam Long accountSetId,
                                                    @RequestParam Integer year,
                                                    @RequestParam Integer month) {

@@ -1,5 +1,6 @@
 package com.company.daizhang.module.ledger.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.ledger.dto.LedgerQueryRequest;
@@ -80,6 +81,7 @@ public class LedgerController {
 
     @Operation(summary = "多栏账")
     @GetMapping("/multi-column")
+    @RequireAccountSetAccess
     public Result<MultiColumnLedgerVO> multiColumnLedger(@RequestParam Long accountSetId,
                                                           @RequestParam Long subjectId,
                                                           @RequestParam Integer year,
@@ -90,6 +92,7 @@ public class LedgerController {
 
     @Operation(summary = "数量金额账")
     @GetMapping("/quantity-amount")
+    @RequireAccountSetAccess
     public Result<QuantityAmountLedgerVO> quantityAmountLedger(@RequestParam Long accountSetId,
                                                                 @RequestParam Long subjectId,
                                                                 @RequestParam Integer year,
@@ -100,6 +103,7 @@ public class LedgerController {
 
     @Operation(summary = "辅助核算明细账")
     @GetMapping("/auxiliary-detail")
+    @RequireAccountSetAccess
     public Result<AuxiliaryDetailLedgerVO> auxiliaryDetailLedger(@RequestParam Long accountSetId,
                                                                    @RequestParam Long subjectId,
                                                                    @RequestParam Long auxiliaryId,
@@ -111,6 +115,7 @@ public class LedgerController {
 
     @Operation(summary = "导出明细账Excel")
     @GetMapping("/detail/export")
+    @RequireAccountSetAccess
     public void exportDetailLedger(@RequestParam Long accountSetId,
                                    @RequestParam Long subjectId,
                                    @RequestParam Integer year,
@@ -122,6 +127,7 @@ public class LedgerController {
 
     @Operation(summary = "导出总账Excel")
     @GetMapping("/general/export")
+    @RequireAccountSetAccess
     public void exportGeneralLedger(@RequestParam Long accountSetId,
                                    @RequestParam Integer year,
                                    @RequestParam(required = false) Integer month,
@@ -132,6 +138,7 @@ public class LedgerController {
 
     @Operation(summary = "导出科目余额表Excel")
     @GetMapping("/subject-balance/export")
+    @RequireAccountSetAccess
     public void exportSubjectBalance(@RequestParam Long accountSetId,
                                      @RequestParam Integer year,
                                      @RequestParam(required = false) Integer startMonth,
@@ -145,6 +152,7 @@ public class LedgerController {
 
     @Operation(summary = "账龄分析")
     @GetMapping("/aging-analysis")
+    @RequireAccountSetAccess
     public Result<List<AgingAnalysisVO>> agingAnalysis(@RequestParam Long accountSetId,
                                                        @RequestParam Integer year,
                                                        @RequestParam(required = false) Integer month,
@@ -155,6 +163,7 @@ public class LedgerController {
 
     @Operation(summary = "往来对账")
     @GetMapping("/reconciliation")
+    @RequireAccountSetAccess
     public Result<ReconciliationVO> reconciliation(@RequestParam Long accountSetId,
                                                     @RequestParam Long subjectId,
                                                     @RequestParam Long auxiliaryId,
@@ -166,6 +175,7 @@ public class LedgerController {
 
     @Operation(summary = "账账核对")
     @GetMapping("/account-check")
+    @RequireAccountSetAccess
     public Result<List<AccountCheckVO>> accountCheck(@RequestParam Long accountSetId,
                                                      @RequestParam Integer year,
                                                      @RequestParam(required = false) Integer month) {

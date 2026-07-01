@@ -1,5 +1,6 @@
 package com.company.daizhang.module.amortization.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.amortization.dto.AmortizationRequest;
@@ -24,6 +25,7 @@ public class AmortizationController {
 
     @Operation(summary = "分页查询长期待摊费用")
     @GetMapping("/page")
+    @RequireAccountSetAccess
     public Result<PageResult<AmortizationVO>> page(
             @RequestParam(required = false) Long accountSetId,
             @RequestParam(required = false) String amortizationName,
@@ -73,6 +75,7 @@ public class AmortizationController {
 
     @Operation(summary = "批量摊销所有摊销中的费用")
     @PostMapping("/batch-amortize")
+    @RequireAccountSetAccess
     public Result<Void> batchAmortize(@RequestParam Long accountSetId,
                                       @RequestParam Integer year,
                                       @RequestParam Integer month) {
@@ -91,6 +94,7 @@ public class AmortizationController {
 
     @Operation(summary = "批量生成摊销凭证")
     @PostMapping("/batch-voucher")
+    @RequireAccountSetAccess
     public Result<java.util.List<Long>> batchGenerateAmortizationVouchers(@RequestParam Long accountSetId,
                                                                            @RequestParam Integer year,
                                                                            @RequestParam Integer month) {

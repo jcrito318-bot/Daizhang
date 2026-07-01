@@ -1,5 +1,6 @@
 package com.company.daizhang.module.bank.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
@@ -104,6 +105,7 @@ public class BankController {
 
     @Operation(summary = "智能匹配")
     @PostMapping("/match/smart")
+    @RequireAccountSetAccess
     public Result<List<Map<String, Object>>> smartMatch(@RequestParam Long accountSetId) {
         List<Map<String, Object>> suggestions = bankService.smartMatch(accountSetId);
         return Result.success(suggestions);
@@ -127,6 +129,7 @@ public class BankController {
 
     @Operation(summary = "未达账项列表")
     @GetMapping("/unmatched-items")
+    @RequireAccountSetAccess
     public Result<List<UnmatchedItemVO>> listUnmatchedItems(
             @RequestParam Long accountSetId,
             @RequestParam(required = false) Integer year,

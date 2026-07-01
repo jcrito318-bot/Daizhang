@@ -1,5 +1,6 @@
 package com.company.daizhang.module.subject.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.subject.dto.AuxiliaryCategoryRequest;
@@ -32,6 +33,7 @@ public class AuxiliaryController {
 
     @Operation(summary = "查询辅助核算类别列表")
     @GetMapping("/category/list")
+    @RequireAccountSetAccess
     public Result<List<AuxiliaryCategoryVO>> listCategories(@RequestParam Long accountSetId) {
         List<AuxiliaryCategoryVO> list = auxiliaryService.listCategories(accountSetId);
         return Result.success(list);
@@ -62,6 +64,7 @@ public class AuxiliaryController {
 
     @Operation(summary = "分页查询辅助核算项目")
     @GetMapping("/item/page")
+    @RequireAccountSetAccess
     public Result<PageResult<AuxiliaryItemVO>> pageItems(@RequestParam(required = false) Long accountSetId,
                                                          @RequestParam(required = false) Long categoryId,
                                                          @RequestParam(required = false) String itemName,

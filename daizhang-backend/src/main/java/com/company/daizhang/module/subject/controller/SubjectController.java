@@ -1,5 +1,6 @@
 package com.company.daizhang.module.subject.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.common.vo.ImportResultVO;
 import com.company.daizhang.module.subject.dto.SubjectCreateRequest;
@@ -40,6 +41,7 @@ public class SubjectController {
      */
     @GetMapping("/tree")
     @Operation(summary = "查询科目树", description = "根据账套ID查询科目树形结构")
+    @RequireAccountSetAccess
     public Result<List<SubjectVO>> getTree(@RequestParam Long accountSetId) {
         List<SubjectVO> subjects = subjectService.listSubjectsByAccountSetId(accountSetId);
         
@@ -94,6 +96,7 @@ public class SubjectController {
      */
     @PostMapping("/init")
     @Operation(summary = "初始化默认科目", description = "为账套初始化默认科目模板")
+    @RequireAccountSetAccess
     public Result<Void> initDefaultSubjects(@RequestParam Long accountSetId, 
                                             @RequestParam(defaultValue = "小企业会计准则") String accountingStandard) {
         subjectService.initDefaultSubjects(accountSetId, accountingStandard);
@@ -105,6 +108,7 @@ public class SubjectController {
      */
     @PostMapping("/import")
     @Operation(summary = "批量导入科目", description = "从Excel文件批量导入科目")
+    @RequireAccountSetAccess
     public Result<ImportResultVO> importSubjects(@RequestParam Long accountSetId,
                                                   @RequestParam("file") MultipartFile file) {
         ImportResultVO result = subjectImportService.importSubjects(accountSetId, file);

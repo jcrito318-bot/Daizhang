@@ -92,6 +92,18 @@ CREATE TABLE `sys_role_menu` (
   UNIQUE KEY `uk_role_menu` (`role_id`, `menu_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='角色菜单关联表';
 
+-- 用户账套关联表(数据级授权:IDOR越权治理基础)
+DROP TABLE IF EXISTS `sys_user_account_set`;
+CREATE TABLE `sys_user_account_set` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `user_id` BIGINT NOT NULL COMMENT '用户ID',
+  `account_set_id` BIGINT NOT NULL COMMENT '账套ID',
+  `role_type` VARCHAR(20) NOT NULL DEFAULT 'OWNER' COMMENT '关系类型 OWNER-所有者 ACCOUNTANT-记账员 VIEWER-查看者',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_account_set` (`user_id`, `account_set_id`),
+  KEY `idx_account_set_users` (`account_set_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户账套关联表';
+
 -- 操作日志表
 DROP TABLE IF EXISTS `sys_operation_log`;
 CREATE TABLE `sys_operation_log` (

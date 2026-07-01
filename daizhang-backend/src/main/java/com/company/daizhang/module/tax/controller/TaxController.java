@@ -1,5 +1,6 @@
 package com.company.daizhang.module.tax.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.tax.dto.TaxCalculationCreateRequest;
@@ -60,6 +61,7 @@ public class TaxController {
 
     @Operation(summary = "生成申报表")
     @GetMapping("/declaration/form")
+    @RequireAccountSetAccess
     public Result<TaxDeclarationFormVO> generateDeclarationForm(@RequestParam Long accountSetId,
                                                                 @RequestParam Integer year,
                                                                 @RequestParam Integer month,
@@ -70,6 +72,7 @@ public class TaxController {
 
     @Operation(summary = "导出申报表Excel")
     @GetMapping("/declaration/form/export")
+    @RequireAccountSetAccess
     public ResponseEntity<byte[]> exportDeclarationForm(@RequestParam Long accountSetId,
                                                         @RequestParam Integer year,
                                                         @RequestParam Integer month,
@@ -96,6 +99,7 @@ public class TaxController {
 
     @Operation(summary = "单账套税务检查（漏报/错报/状态异常）")
     @GetMapping("/check")
+    @RequireAccountSetAccess
     public Result<List<TaxCheckResultVO>> checkTaxDeclaration(@RequestParam Long accountSetId,
                                                                @RequestParam Integer year,
                                                                @RequestParam Integer month) {
@@ -202,6 +206,7 @@ public class TaxController {
 
     @Operation(summary = "触发税额自动计算并持久化")
     @PostMapping("/calculation/calculate")
+    @RequireAccountSetAccess
     public Result<List<TaxCalculationResultVO>> calculateTax(@RequestParam Long accountSetId,
                                                               @RequestParam Integer year,
                                                               @RequestParam Integer month) {

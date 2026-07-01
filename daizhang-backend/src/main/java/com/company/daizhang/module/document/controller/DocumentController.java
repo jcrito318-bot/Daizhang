@@ -1,5 +1,6 @@
 package com.company.daizhang.module.document.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.document.dto.DocumentCreateRequest;
@@ -76,6 +77,7 @@ public class DocumentController {
 
     @Operation(summary = "获取票据台账")
     @GetMapping("/ledger")
+    @RequireAccountSetAccess
     public Result<DocumentLedgerVO> ledger(@RequestParam Long accountSetId,
                                             @RequestParam Integer year) {
         DocumentLedgerVO ledger = documentService.getDocumentLedger(accountSetId, year);
@@ -84,6 +86,7 @@ public class DocumentController {
 
     @Operation(summary = "归档票据")
     @PostMapping("/archive")
+    @RequireAccountSetAccess
     public Result<Void> archive(@RequestParam Long accountSetId,
                                  @RequestParam Integer year,
                                  @RequestParam Integer month) {

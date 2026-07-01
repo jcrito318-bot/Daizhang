@@ -1,5 +1,6 @@
 package com.company.daizhang.module.report.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.report.dto.CustomReportRequest;
@@ -63,6 +64,7 @@ public class CustomReportController {
 
     @Operation(summary = "执行自定义报表取数")
     @GetMapping("/{id}/execute")
+    @RequireAccountSetAccess
     public Result<CustomReportDataVO> execute(
             @PathVariable Long id,
             @RequestParam Long accountSetId,

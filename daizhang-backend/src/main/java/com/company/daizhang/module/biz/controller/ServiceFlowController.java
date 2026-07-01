@@ -1,6 +1,7 @@
 package com.company.daizhang.module.biz.controller;
 
 import cn.hutool.core.bean.BeanUtil;
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.biz.dto.ServiceFlowNodeRequest;
@@ -66,6 +67,7 @@ public class ServiceFlowController {
 
     @Operation(summary = "任务分页")
     @GetMapping("/task/page")
+    @RequireAccountSetAccess
     public Result<PageResult<ServiceTaskVO>> taskPage(@RequestParam(required = false) Long accountSetId,
                                                        @RequestParam(required = false) Integer year,
                                                        @RequestParam(required = false) Integer month,

@@ -1,5 +1,6 @@
 package com.company.daizhang.module.salary.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.salary.dto.SocialSecurityConfigRequest;
 import com.company.daizhang.module.salary.service.SocialSecurityConfigService;
@@ -28,6 +29,7 @@ public class SocialSecurityConfigController {
 
     @Operation(summary = "获取社保公积金配置")
     @GetMapping
+    @RequireAccountSetAccess
     public Result<SocialSecurityConfigVO> get(@RequestParam Long accountSetId, @RequestParam Integer year) {
         SocialSecurityConfigVO vo = socialSecurityConfigService.getConfig(accountSetId, year);
         return Result.success(vo);
@@ -42,6 +44,7 @@ public class SocialSecurityConfigController {
 
     @Operation(summary = "根据基数计算社保")
     @GetMapping("/calculate")
+    @RequireAccountSetAccess
     public Result<SocialSecurityCalculationVO> calculate(@RequestParam Long accountSetId,
                                                          @RequestParam Integer year,
                                                          @RequestParam BigDecimal baseSalary) {

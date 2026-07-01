@@ -1,5 +1,6 @@
 package com.company.daizhang.module.voucher.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.voucher.dto.VoucherTemplateRequest;
@@ -24,6 +25,7 @@ public class VoucherTemplateController {
 
     @Operation(summary = "分页查询凭证模板")
     @GetMapping("/page")
+    @RequireAccountSetAccess
     public Result<PageResult<VoucherTemplateVO>> page(@RequestParam Long accountSetId,
                                                        @RequestParam(required = false) String templateName,
                                                        @RequestParam(defaultValue = "1") int pageNum,
