@@ -15,10 +15,14 @@ import com.company.daizhang.module.salary.mapper.EmployeeMapper;
 import com.company.daizhang.module.salary.mapper.SalaryItemMapper;
 import com.company.daizhang.module.salary.mapper.SalarySheetMapper;
 import com.company.daizhang.module.salary.service.SalaryService;
+import com.company.daizhang.module.salary.service.SocialSecurityConfigService;
+import com.company.daizhang.module.salary.service.SpecialDeductionService;
 import com.company.daizhang.module.salary.util.SalaryExportUtil;
 import com.company.daizhang.module.salary.vo.EmployeeVO;
 import com.company.daizhang.module.salary.vo.SalaryItemVO;
 import com.company.daizhang.module.salary.vo.SalarySheetVO;
+import com.company.daizhang.module.salary.vo.SocialSecurityCalculationVO;
+import com.company.daizhang.module.salary.vo.SocialSecurityConfigVO;
 import com.company.daizhang.module.subject.entity.Subject;
 import com.company.daizhang.module.subject.mapper.SubjectMapper;
 import com.company.daizhang.module.system.entity.SysUser;
@@ -51,6 +55,8 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
     private final EmployeeMapper employeeMapper;
     private final SalaryItemMapper salaryItemMapper;
     private final SalarySheetMapper salarySheetMapper;
+    private final SocialSecurityConfigService socialSecurityConfigService;
+    private final SpecialDeductionService specialDeductionService;
     private final SubjectMapper subjectMapper;
     private final SysUserMapper sysUserMapper;
     private final VoucherService voucherService;
@@ -552,54 +558,66 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         details.add(creditBank);
 
         // 贷：其他应付款-社保 (个人部分)
-        if (totalSocialSecurity.compareTo(BigDecimal.ZERO) > 0 && request.getSocialSecuritySubjectId() != null) {
-            Subject socialSecuritySubject = subjectMapper.selectById(request.getSocialSecuritySubjectId());
-            if (socialSecuritySubject != null) {
-                VoucherDetailRequest creditSocialSecurity = new VoucherDetailRequest();
-                creditSocialSecurity.setLineNo(lineNo++);
-                creditSocialSecurity.setSummary("代扣社保");
-                creditSocialSecurity.setSubjectId(socialSecuritySubject.getId());
-                creditSocialSecurity.setSubjectCode(socialSecuritySubject.getCode());
-                creditSocialSecurity.setSubjectName(socialSecuritySubject.getName());
-                creditSocialSecurity.setDebit(BigDecimal.ZERO);
-                creditSocialSecurity.setCredit(totalSocialSecurity);
-                creditSocialSecurity.setSortOrder(5);
-                details.add(creditSocialSecurity);
+        if (totalSocialSecurity.compareTo(BigDecimal.ZERO) > 0) {
+            if (request.getSocialSecuritySubjectId() == null) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "社保金额大于0但未指定社保科目");
             }
+            Subject socialSecuritySubject = subjectMapper.selectById(request.getSocialSecuritySubjectId());
+            if (socialSecuritySubject == null) {
+                throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "社保科目不存在");
+            }
+            VoucherDetailRequest creditSocialSecurity = new VoucherDetailRequest();
+            creditSocialSecurity.setLineNo(lineNo++);
+            creditSocialSecurity.setSummary("代扣社保");
+            creditSocialSecurity.setSubjectId(socialSecuritySubject.getId());
+            creditSocialSecurity.setSubjectCode(socialSecuritySubject.getCode());
+            creditSocialSecurity.setSubjectName(socialSecuritySubject.getName());
+            creditSocialSecurity.setDebit(BigDecimal.ZERO);
+            creditSocialSecurity.setCredit(totalSocialSecurity);
+            creditSocialSecurity.setSortOrder(5);
+            details.add(creditSocialSecurity);
         }
 
         // 贷：其他应付款-公积金 (个人部分)
-        if (totalHousingFund.compareTo(BigDecimal.ZERO) > 0 && request.getHousingFundSubjectId() != null) {
-            Subject housingFundSubject = subjectMapper.selectById(request.getHousingFundSubjectId());
-            if (housingFundSubject != null) {
-                VoucherDetailRequest creditHousingFund = new VoucherDetailRequest();
-                creditHousingFund.setLineNo(lineNo++);
-                creditHousingFund.setSummary("代扣公积金");
-                creditHousingFund.setSubjectId(housingFundSubject.getId());
-                creditHousingFund.setSubjectCode(housingFundSubject.getCode());
-                creditHousingFund.setSubjectName(housingFundSubject.getName());
-                creditHousingFund.setDebit(BigDecimal.ZERO);
-                creditHousingFund.setCredit(totalHousingFund);
-                creditHousingFund.setSortOrder(6);
-                details.add(creditHousingFund);
+        if (totalHousingFund.compareTo(BigDecimal.ZERO) > 0) {
+            if (request.getHousingFundSubjectId() == null) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "公积金金额大于0但未指定公积金科目");
             }
+            Subject housingFundSubject = subjectMapper.selectById(request.getHousingFundSubjectId());
+            if (housingFundSubject == null) {
+                throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "公积金科目不存在");
+            }
+            VoucherDetailRequest creditHousingFund = new VoucherDetailRequest();
+            creditHousingFund.setLineNo(lineNo++);
+            creditHousingFund.setSummary("代扣公积金");
+            creditHousingFund.setSubjectId(housingFundSubject.getId());
+            creditHousingFund.setSubjectCode(housingFundSubject.getCode());
+            creditHousingFund.setSubjectName(housingFundSubject.getName());
+            creditHousingFund.setDebit(BigDecimal.ZERO);
+            creditHousingFund.setCredit(totalHousingFund);
+            creditHousingFund.setSortOrder(6);
+            details.add(creditHousingFund);
         }
 
         // 贷：应交税费-个人所得税
-        if (totalIncomeTax.compareTo(BigDecimal.ZERO) > 0 && request.getIncomeTaxSubjectId() != null) {
-            Subject incomeTaxSubject = subjectMapper.selectById(request.getIncomeTaxSubjectId());
-            if (incomeTaxSubject != null) {
-                VoucherDetailRequest creditIncomeTax = new VoucherDetailRequest();
-                creditIncomeTax.setLineNo(lineNo++);
-                creditIncomeTax.setSummary("代扣个人所得税");
-                creditIncomeTax.setSubjectId(incomeTaxSubject.getId());
-                creditIncomeTax.setSubjectCode(incomeTaxSubject.getCode());
-                creditIncomeTax.setSubjectName(incomeTaxSubject.getName());
-                creditIncomeTax.setDebit(BigDecimal.ZERO);
-                creditIncomeTax.setCredit(totalIncomeTax);
-                creditIncomeTax.setSortOrder(7);
-                details.add(creditIncomeTax);
+        if (totalIncomeTax.compareTo(BigDecimal.ZERO) > 0) {
+            if (request.getIncomeTaxSubjectId() == null) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "个税金额大于0但未指定个税科目");
             }
+            Subject incomeTaxSubject = subjectMapper.selectById(request.getIncomeTaxSubjectId());
+            if (incomeTaxSubject == null) {
+                throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "个税科目不存在");
+            }
+            VoucherDetailRequest creditIncomeTax = new VoucherDetailRequest();
+            creditIncomeTax.setLineNo(lineNo++);
+            creditIncomeTax.setSummary("代扣个人所得税");
+            creditIncomeTax.setSubjectId(incomeTaxSubject.getId());
+            creditIncomeTax.setSubjectCode(incomeTaxSubject.getCode());
+            creditIncomeTax.setSubjectName(incomeTaxSubject.getName());
+            creditIncomeTax.setDebit(BigDecimal.ZERO);
+            creditIncomeTax.setCredit(totalIncomeTax);
+            creditIncomeTax.setSortOrder(7);
+            details.add(creditIncomeTax);
         }
 
         voucherRequest.setDetails(details);
@@ -636,11 +654,22 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         grossSalary = grossSalary.add(salarySheet.getBonus() != null ? salarySheet.getBonus() : BigDecimal.ZERO);
         grossSalary = grossSalary.subtract(salarySheet.getDeduction() != null ? salarySheet.getDeduction() : BigDecimal.ZERO);
 
-        // 应纳税所得额 = 应发工资 - 社保 - 公积金 - 起征点
+        // 应纳税所得额 = 应发工资 - 社保 - 公积金 - 起征点 - 专项附加扣除
         BigDecimal socialSecurity = salarySheet.getSocialSecurity() != null ? salarySheet.getSocialSecurity() : BigDecimal.ZERO;
         BigDecimal housingFund = salarySheet.getHousingFund() != null ? salarySheet.getHousingFund() : BigDecimal.ZERO;
 
-        BigDecimal taxableIncome = grossSalary.subtract(socialSecurity).subtract(housingFund).subtract(threshold);
+        // 专项附加扣除:调用专项扣除服务获取当月可扣除总额,可能返回null,用0兜底
+        BigDecimal specialDeduction = BigDecimal.ZERO;
+        if (salarySheet.getEmployeeId() != null && salarySheet.getYear() != null && salarySheet.getMonth() != null) {
+            BigDecimal monthlyDeduction = specialDeductionService.calculateMonthlyDeduction(
+                    salarySheet.getEmployeeId(), salarySheet.getYear(), salarySheet.getMonth());
+            if (monthlyDeduction != null) {
+                specialDeduction = monthlyDeduction;
+            }
+        }
+
+        BigDecimal taxableIncome = grossSalary.subtract(socialSecurity).subtract(housingFund)
+                .subtract(threshold).subtract(specialDeduction);
 
         if (taxableIncome.compareTo(BigDecimal.ZERO) < 0) {
             taxableIncome = BigDecimal.ZERO;
@@ -690,11 +719,15 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
      * 根据薪资项目计算各项金额
      */
     private void calculateSalaryItems(SalarySheet salarySheet, List<SalaryItem> salaryItems) {
-        // 这里可以根据薪资项目的计算方法来动态计算各项金额
-        // 暂时设置为默认值
-        if (salarySheet.getBaseSalary() == null) {
-            salarySheet.setBaseSalary(BigDecimal.ZERO);
+        // 基本工资从员工档案取
+        Employee employee = employeeMapper.selectById(salarySheet.getEmployeeId());
+        BigDecimal baseSalary = BigDecimal.ZERO;
+        if (employee != null && employee.getBaseSalary() != null) {
+            baseSalary = employee.getBaseSalary();
         }
+        salarySheet.setBaseSalary(baseSalary);
+
+        // 津贴/奖金/扣款默认0(暂未实现按薪资项目动态计算)
         if (salarySheet.getAllowance() == null) {
             salarySheet.setAllowance(BigDecimal.ZERO);
         }
@@ -704,12 +737,26 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         if (salarySheet.getDeduction() == null) {
             salarySheet.setDeduction(BigDecimal.ZERO);
         }
-        if (salarySheet.getSocialSecurity() == null) {
-            salarySheet.setSocialSecurity(BigDecimal.ZERO);
+
+        // 社保及公积金:根据社保公积金配置按缴费基数计算个人部分
+        BigDecimal socialSecurity = BigDecimal.ZERO;
+        BigDecimal housingFund = BigDecimal.ZERO;
+        if (salarySheet.getAccountSetId() != null && salarySheet.getYear() != null) {
+            // 先校验配置是否存在,缺失时按0处理,避免批量计算整体失败
+            SocialSecurityConfigVO config = socialSecurityConfigService.getConfig(
+                    salarySheet.getAccountSetId(), salarySheet.getYear());
+            if (config != null) {
+                SocialSecurityCalculationVO calc = socialSecurityConfigService.calculate(
+                        salarySheet.getAccountSetId(), salarySheet.getYear(), baseSalary);
+                BigDecimal employeeTotal = calc.getEmployeeTotal() != null ? calc.getEmployeeTotal() : BigDecimal.ZERO;
+                BigDecimal housingFundEmployee = calc.getHousingFundEmployee() != null ? calc.getHousingFundEmployee() : BigDecimal.ZERO;
+                // 个人部分合计包含公积金个人部分,社保单独取差额
+                socialSecurity = employeeTotal.subtract(housingFundEmployee);
+                housingFund = housingFundEmployee;
+            }
         }
-        if (salarySheet.getHousingFund() == null) {
-            salarySheet.setHousingFund(BigDecimal.ZERO);
-        }
+        salarySheet.setSocialSecurity(socialSecurity);
+        salarySheet.setHousingFund(housingFund);
     }
 
     /**

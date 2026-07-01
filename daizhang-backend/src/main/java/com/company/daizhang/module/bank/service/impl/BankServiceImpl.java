@@ -336,16 +336,32 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
                  .orderByAsc(BankTransaction::getTransactionDate);
         List<BankTransaction> transactions = this.list(txWrapper);
 
-        // 计算银行余额 = 收入合计 - 支出合计
+        // 查询上月对账单获取期初余额（无上月则期初为0），月度对账需叠加期初余额才有意义
+        int prevYear = request.getMonth() == 1 ? request.getYear() - 1 : request.getYear();
+        int prevMonth = request.getMonth() == 1 ? 12 : request.getMonth() - 1;
+        LambdaQueryWrapper<BankReconciliation> prevWrapper = new LambdaQueryWrapper<>();
+        prevWrapper.eq(BankReconciliation::getAccountSetId, request.getAccountSetId())
+                   .eq(BankReconciliation::getBankAccount, request.getBankAccount())
+                   .eq(BankReconciliation::getYear, prevYear)
+                   .eq(BankReconciliation::getMonth, prevMonth);
+        BankReconciliation prevReconciliation = bankReconciliationMapper.selectOne(prevWrapper);
+        BigDecimal prevBankBalance = prevReconciliation != null && prevReconciliation.getBankBalance() != null
+                ? prevReconciliation.getBankBalance() : BigDecimal.ZERO;
+        BigDecimal prevBookBalance = prevReconciliation != null && prevReconciliation.getBookBalance() != null
+                ? prevReconciliation.getBookBalance() : BigDecimal.ZERO;
+
+        // 计算银行余额 = 期初余额 + 收入合计 - 支出合计（amount为null时跳过避免NPE）
         BigDecimal bankIncome = transactions.stream()
                 .filter(t -> t.getTransactionType() != null && t.getTransactionType() == 1)
+                .filter(t -> t.getAmount() != null)
                 .map(BankTransaction::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal bankExpense = transactions.stream()
                 .filter(t -> t.getTransactionType() != null && t.getTransactionType() == 2)
+                .filter(t -> t.getAmount() != null)
                 .map(BankTransaction::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal bankBalance = bankIncome.subtract(bankExpense);
+        BigDecimal bankBalance = prevBankBalance.add(bankIncome).subtract(bankExpense);
 
         // 查询账簿余额（从凭证明细中计算）,只统计银行存款(1002)科目的借贷
         LambdaQueryWrapper<Voucher> vWrapper = new LambdaQueryWrapper<>();
@@ -355,7 +371,8 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
                 .eq(Voucher::getStatus, 2);
         List<Voucher> vouchers = voucherMapper.selectList(vWrapper);
 
-        BigDecimal bookBalance = BigDecimal.ZERO;
+        // 账簿余额 = 期初余额 + 借方合计 - 贷方合计（与银行余额口径保持一致）
+        BigDecimal bookBalance = prevBookBalance;
         if (!vouchers.isEmpty()) {
             List<Long> voucherIds = vouchers.stream().map(Voucher::getId).collect(Collectors.toList());
             LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
@@ -370,7 +387,7 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
             BigDecimal bookCredit = bankDetails.stream()
                     .map(d -> d.getCredit() != null ? d.getCredit() : BigDecimal.ZERO)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
-            bookBalance = bookDebit.subtract(bookCredit);
+            bookBalance = prevBookBalance.add(bookDebit).subtract(bookCredit);
         }
 
         // 统计未匹配项数

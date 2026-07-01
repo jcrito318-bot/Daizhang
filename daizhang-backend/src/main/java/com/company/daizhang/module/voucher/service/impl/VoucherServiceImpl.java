@@ -598,7 +598,13 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         balance.setYearDebit(newYearDebit);
         balance.setYearCredit(newYearCredit);
 
-        accountBalanceMapper.updateById(balance);
+        // 检查乐观锁更新结果: BaseEntity带@Version,OptimisticLockerInnerInterceptor已启用。
+        // 并发过账同一科目同一期间凭证时,version已被其他事务修改,updateById返回0。
+        // 若不检查返回值,凭证状态变为已过账但余额未累加,造成静默数据损坏且试算不平衡。
+        int updated = accountBalanceMapper.updateById(balance);
+        if (updated == 0) {
+            throw new BusinessException("科目余额更新失败(并发冲突)，请重试。科目ID：" + subjectId);
+        }
     }
 
     @Override
@@ -1119,7 +1125,27 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         }
 
         // 第二步：按顺序分配连续正式号
+        // 必须先查询已审核/已过账凭证的最大数值序号,从maxSeq+1开始编号,
+        // 否则从1开始会与已固化的凭证号冲突,触发唯一索引违例致删除操作失败
+        // (与 rearrangeVoucherNo 保持一致)
+        LambdaQueryWrapper<Voucher> fixedWrapper = new LambdaQueryWrapper<>();
+        fixedWrapper.eq(Voucher::getAccountSetId, accountSetId)
+                    .eq(Voucher::getYear, year)
+                    .eq(Voucher::getMonth, month)
+                    .ne(Voucher::getStatus, 0)
+                    .notLike(Voucher::getVoucherNo, "TMP-%")
+                    .last("ORDER BY CAST(SUBSTRING_INDEX(voucher_no, '-', -1) AS UNSIGNED) DESC LIMIT 1");
+        Voucher maxFixed = this.getOne(fixedWrapper);
         int sequence = 1;
+        if (maxFixed != null && StrUtil.isNotBlank(maxFixed.getVoucherNo())) {
+            String[] parts = maxFixed.getVoucherNo().split("-");
+            if (parts.length == 3) {
+                try {
+                    sequence = Integer.parseInt(parts[2]) + 1;
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
         for (Voucher voucher : vouchers) {
             String newVoucherNo = String.format("%d-%02d-%03d", year, month, sequence);
             LambdaUpdateWrapper<Voucher> formalWrapper = new LambdaUpdateWrapper<>();

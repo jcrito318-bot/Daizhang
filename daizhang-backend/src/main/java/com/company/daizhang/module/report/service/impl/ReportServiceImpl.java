@@ -72,7 +72,7 @@ public class ReportServiceImpl implements ReportService {
                 .eq(AccountBalance::getMonth, month);
         List<AccountBalance> balances = accountBalanceMapper.selectList(balanceWrapper);
         Map<Long, AccountBalance> balanceMap = balances.stream()
-                .collect(Collectors.toMap(AccountBalance::getSubjectId, b -> b));
+                .collect(Collectors.toMap(AccountBalance::getSubjectId, b -> b, (a, b) -> a));
 
         // 查询年初余额（1月份的期初余额）
         LambdaQueryWrapper<AccountBalance> beginWrapper = new LambdaQueryWrapper<>();
@@ -81,7 +81,7 @@ public class ReportServiceImpl implements ReportService {
                 .eq(AccountBalance::getMonth, 1);
         List<AccountBalance> beginBalances = accountBalanceMapper.selectList(beginWrapper);
         Map<Long, AccountBalance> beginBalanceMap = beginBalances.stream()
-                .collect(Collectors.toMap(AccountBalance::getSubjectId, b -> b));
+                .collect(Collectors.toMap(AccountBalance::getSubjectId, b -> b, (a, b) -> a));
 
         // 按科目类别分组：资产、负债、权益
         List<Subject> assetSubjects = subjects.stream()
@@ -151,7 +151,7 @@ public class ReportServiceImpl implements ReportService {
                 .eq(AccountBalance::getMonth, month);
         List<AccountBalance> balances = accountBalanceMapper.selectList(balanceWrapper);
         Map<Long, AccountBalance> balanceMap = balances.stream()
-                .collect(Collectors.toMap(AccountBalance::getSubjectId, b -> b));
+                .collect(Collectors.toMap(AccountBalance::getSubjectId, b -> b, (a, b) -> a));
 
         // 按科目类别分组：收入、费用
         // 注意: balanceDirection为Integer,用equals避免null自动拆箱NPE
@@ -312,7 +312,31 @@ public class ReportServiceImpl implements ReportService {
             }
         }
 
-        // 七、投资收益
+        // 七、减值损失(5701资产减值损失/5802信用减值损失),计入营业利润减项
+        BigDecimal impairmentLoss = BigDecimal.ZERO;
+        BigDecimal impairmentLossYear = BigDecimal.ZERO;
+        for (Subject subject : expenseSubjects) {
+            if (subject.getCode().startsWith("5701") || subject.getCode().startsWith("5802")) {
+                AccountBalance balance = balanceMap.get(subject.getId());
+                BigDecimal currentAmount = balance != null && balance.getPeriodDebit() != null
+                        ? balance.getPeriodDebit() : BigDecimal.ZERO;
+                BigDecimal yearAmount = balance != null && balance.getYearDebit() != null
+                        ? balance.getYearDebit() : BigDecimal.ZERO;
+
+                IncomeStatementItem item = new IncomeStatementItem();
+                item.setRowNo(rowNo++);
+                item.setName(subject.getName());
+                item.setCode(subject.getCode());
+                item.setCurrentAmount(currentAmount);
+                item.setYearAmount(yearAmount);
+                items.add(item);
+
+                impairmentLoss = impairmentLoss.add(currentAmount);
+                impairmentLossYear = impairmentLossYear.add(yearAmount);
+            }
+        }
+
+        // 八、投资收益
         BigDecimal investmentIncome = BigDecimal.ZERO;
         BigDecimal investmentIncomeYear = BigDecimal.ZERO;
         for (Subject subject : revenueSubjects) {
@@ -336,21 +360,23 @@ public class ReportServiceImpl implements ReportService {
             }
         }
 
-        // 八、营业利润 = 营业收入 - 营业成本 - 营业税金及附加 - 销售费用 - 管理费用 - 财务费用 + 投资收益
+        // 九、营业利润 = 营业收入 - 营业成本 - 营业税金及附加 - 销售费用 - 管理费用 - 财务费用 - 减值损失 + 投资收益
         BigDecimal operatingProfit = operatingRevenue.subtract(operatingCost)
                 .subtract(businessTax)
                 .subtract(sellingExpense)
                 .subtract(adminExpense)
                 .subtract(financeExpense)
+                .subtract(impairmentLoss)
                 .add(investmentIncome);
         BigDecimal operatingProfitYear = operatingRevenueYear.subtract(operatingCostYear)
                 .subtract(businessTaxYear)
                 .subtract(sellingExpenseYear)
                 .subtract(adminExpenseYear)
                 .subtract(financeExpenseYear)
+                .subtract(impairmentLossYear)
                 .add(investmentIncomeYear);
 
-        // 九、营业外收入
+        // 十、营业外收入
         BigDecimal nonOperatingIncome = BigDecimal.ZERO;
         BigDecimal nonOperatingIncomeYear = BigDecimal.ZERO;
         for (Subject subject : revenueSubjects) {
@@ -374,7 +400,7 @@ public class ReportServiceImpl implements ReportService {
             }
         }
 
-        // 十、营业外支出
+        // 十一、营业外支出
         BigDecimal nonOperatingExpense = BigDecimal.ZERO;
         BigDecimal nonOperatingExpenseYear = BigDecimal.ZERO;
         for (Subject subject : expenseSubjects) {
@@ -398,11 +424,11 @@ public class ReportServiceImpl implements ReportService {
             }
         }
 
-        // 十一、利润总额 = 营业利润 + 营业外收入 - 营业外支出
+        // 十二、利润总额 = 营业利润 + 营业外收入 - 营业外支出
         BigDecimal totalProfit = operatingProfit.add(nonOperatingIncome).subtract(nonOperatingExpense);
         BigDecimal totalProfitYear = operatingProfitYear.add(nonOperatingIncomeYear).subtract(nonOperatingExpenseYear);
 
-        // 十二、所得税费用
+        // 十三、所得税费用
         BigDecimal incomeTax = BigDecimal.ZERO;
         BigDecimal incomeTaxYear = BigDecimal.ZERO;
         for (Subject subject : expenseSubjects) {
@@ -426,7 +452,7 @@ public class ReportServiceImpl implements ReportService {
             }
         }
 
-        // 十三、净利润 = 利润总额 - 所得税费用
+        // 十四、净利润 = 利润总额 - 所得税费用
         BigDecimal netProfit = totalProfit.subtract(incomeTax);
         BigDecimal netProfitYear = totalProfitYear.subtract(incomeTaxYear);
 
@@ -434,12 +460,12 @@ public class ReportServiceImpl implements ReportService {
         vo.setItems(items);
         vo.setTotalRevenue(operatingRevenue);
         vo.setTotalExpense(operatingCost.add(businessTax).add(sellingExpense).add(adminExpense)
-                .add(financeExpense).add(nonOperatingExpense).add(incomeTax));
+                .add(financeExpense).add(impairmentLoss).add(nonOperatingExpense).add(incomeTax));
         vo.setNetProfit(netProfit);
         // 补充本年累计字段:netProfitYear等已计算但未set,导致前端无法展示本年累计净利润
         vo.setTotalRevenueYear(operatingRevenueYear);
         vo.setTotalExpenseYear(operatingCostYear.add(businessTaxYear).add(sellingExpenseYear).add(adminExpenseYear)
-                .add(financeExpenseYear).add(nonOperatingExpenseYear).add(incomeTaxYear));
+                .add(financeExpenseYear).add(impairmentLossYear).add(nonOperatingExpenseYear).add(incomeTaxYear));
         vo.setTotalProfit(totalProfit);
         vo.setTotalProfitYear(totalProfitYear);
         vo.setNetProfitYear(netProfitYear);
@@ -468,7 +494,7 @@ public class ReportServiceImpl implements ReportService {
                 .eq(AccountBalance::getMonth, month);
         List<AccountBalance> balances = accountBalanceMapper.selectList(balanceWrapper);
         Map<Long, AccountBalance> balanceMap = balances.stream()
-                .collect(Collectors.toMap(AccountBalance::getSubjectId, b -> b));
+                .collect(Collectors.toMap(AccountBalance::getSubjectId, b -> b, (a, b) -> a));
 
         // 构建科目余额表（支持层级展开）
         List<SubjectBalanceRow> rows = buildSubjectBalanceRows(subjects, balanceMap);
@@ -991,20 +1017,23 @@ public class ReportServiceImpl implements ReportService {
                 BigDecimal amt = balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO;
                 operatingCost = operatingCost.add(amt);
             }
-            // 资产类
+            // 资产类(按净额:借-贷,处理备抵科目如累计折旧等贷方余额科目)
             if ("资产".equals(subject.getCategory())) {
-                BigDecimal amt = balance.getEndDebit() != null ? balance.getEndDebit() : BigDecimal.ZERO;
-                totalAssets = totalAssets.add(amt);
+                BigDecimal debit = balance.getEndDebit() != null ? balance.getEndDebit() : BigDecimal.ZERO;
+                BigDecimal credit = balance.getEndCredit() != null ? balance.getEndCredit() : BigDecimal.ZERO;
+                totalAssets = totalAssets.add(debit.subtract(credit));
             }
-            // 负债类
+            // 负债类(按净额:贷-借,与资产负债表口径统一)
             if ("负债".equals(subject.getCategory())) {
-                BigDecimal amt = balance.getEndCredit() != null ? balance.getEndCredit() : BigDecimal.ZERO;
-                totalLiabilities = totalLiabilities.add(amt);
+                BigDecimal debit = balance.getEndDebit() != null ? balance.getEndDebit() : BigDecimal.ZERO;
+                BigDecimal credit = balance.getEndCredit() != null ? balance.getEndCredit() : BigDecimal.ZERO;
+                totalLiabilities = totalLiabilities.add(credit.subtract(debit));
             }
-            // 所有者权益类
+            // 所有者权益类(按净额:贷-借,与资产负债表口径统一)
             if ("所有者权益".equals(subject.getCategory())) {
-                BigDecimal amt = balance.getEndCredit() != null ? balance.getEndCredit() : BigDecimal.ZERO;
-                totalEquity = totalEquity.add(amt);
+                BigDecimal debit = balance.getEndDebit() != null ? balance.getEndDebit() : BigDecimal.ZERO;
+                BigDecimal credit = balance.getEndCredit() != null ? balance.getEndCredit() : BigDecimal.ZERO;
+                totalEquity = totalEquity.add(credit.subtract(debit));
             }
         }
 
@@ -1413,7 +1442,7 @@ public class ReportServiceImpl implements ReportService {
                 .eq(AccountBalance::getMonth, month);
         List<AccountBalance> endBalances = accountBalanceMapper.selectList(endWrapper);
         Map<Long, AccountBalance> endMap = endBalances.stream()
-                .collect(Collectors.toMap(AccountBalance::getSubjectId, b -> b));
+                .collect(Collectors.toMap(AccountBalance::getSubjectId, b -> b, (a, b) -> a));
 
         // 查询年初余额（1月份）
         LambdaQueryWrapper<AccountBalance> beginWrapper = new LambdaQueryWrapper<>();
@@ -1422,7 +1451,7 @@ public class ReportServiceImpl implements ReportService {
                 .eq(AccountBalance::getMonth, 1);
         List<AccountBalance> beginBalances = accountBalanceMapper.selectList(beginWrapper);
         Map<Long, AccountBalance> beginMap = beginBalances.stream()
-                .collect(Collectors.toMap(AccountBalance::getSubjectId, b -> b));
+                .collect(Collectors.toMap(AccountBalance::getSubjectId, b -> b, (a, b) -> a));
 
         List<EquityChangeItem> items = new ArrayList<>();
         BigDecimal totalBegin = BigDecimal.ZERO;
@@ -1433,11 +1462,17 @@ public class ReportServiceImpl implements ReportService {
             AccountBalance beginBal = beginMap.get(subject.getId());
             AccountBalance endBal = endMap.get(subject.getId());
 
-            // 所有者权益科目余额在贷方;年初余额应取beginCredit(年初),而非endCredit(1月末)
-            BigDecimal beginAmount = beginBal != null && beginBal.getBeginCredit() != null
+            // 所有者权益按净额口径(贷-借),与资产负债表统一,处理借方余额的权益科目如库存股4203
+            BigDecimal beginCredit = beginBal != null && beginBal.getBeginCredit() != null
                     ? beginBal.getBeginCredit() : BigDecimal.ZERO;
-            BigDecimal endAmount = endBal != null && endBal.getEndCredit() != null
+            BigDecimal beginDebit = beginBal != null && beginBal.getBeginDebit() != null
+                    ? beginBal.getBeginDebit() : BigDecimal.ZERO;
+            BigDecimal beginAmount = beginCredit.subtract(beginDebit);
+            BigDecimal endCredit = endBal != null && endBal.getEndCredit() != null
                     ? endBal.getEndCredit() : BigDecimal.ZERO;
+            BigDecimal endDebit = endBal != null && endBal.getEndDebit() != null
+                    ? endBal.getEndDebit() : BigDecimal.ZERO;
+            BigDecimal endAmount = endCredit.subtract(endDebit);
             BigDecimal increase = endAmount.subtract(beginAmount);
 
             EquityChangeItem item = new EquityChangeItem();

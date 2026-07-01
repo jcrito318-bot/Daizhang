@@ -6,6 +6,7 @@ import com.company.daizhang.common.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 
 /**
@@ -30,6 +31,11 @@ public class Employee extends BaseEntity {
      * 员工姓名
      */
     private String employeeName;
+
+    /**
+     * 基本工资
+     */
+    private BigDecimal baseSalary;
 
     /**
      * 部门

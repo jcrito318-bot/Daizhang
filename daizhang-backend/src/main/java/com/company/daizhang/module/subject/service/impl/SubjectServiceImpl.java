@@ -189,14 +189,7 @@ public class SubjectServiceImpl extends ServiceImpl<SubjectMapper, Subject> impl
             if (parentSubject == null) {
                 throw new BusinessException(ErrorCode.SUBJECT_PARENT_NOT_FOUND);
             }
-            
-            // 校验上级科目是否为末级科目
-            LambdaQueryWrapper<Subject> childWrapper = new LambdaQueryWrapper<>();
-            childWrapper.eq(Subject::getParentId, request.getParentId());
-            if (this.count(childWrapper) > 0) {
-                throw new BusinessException(ErrorCode.SUBJECT_PARENT_IS_LEAF);
-            }
-            
+
             // 校验科目类别是否一致
             if (!parentSubject.getCategory().equals(request.getCategory())) {
                 throw new BusinessException(ErrorCode.SUBJECT_CATEGORY_MISMATCH);

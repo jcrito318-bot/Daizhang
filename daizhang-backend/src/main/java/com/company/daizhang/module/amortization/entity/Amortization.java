@@ -75,4 +75,9 @@ public class Amortization extends BaseEntity {
      * 备注
      */
     private String remark;
+
+    /**
+     * 最近摊销期间(格式yyyy-MM),用于防止同一期间重复摊销
+     */
+    private String lastAmortizedPeriod;
 }

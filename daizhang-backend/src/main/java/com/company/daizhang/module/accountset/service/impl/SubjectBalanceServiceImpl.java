@@ -5,11 +5,14 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.module.accountset.dto.SubjectBalanceRequest;
 import com.company.daizhang.module.accountset.entity.AccountBalance;
+import com.company.daizhang.module.accountset.entity.AccountPeriod;
 import com.company.daizhang.module.accountset.entity.SubjectBalance;
 import com.company.daizhang.module.accountset.mapper.AccountBalanceMapper;
+import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
 import com.company.daizhang.module.accountset.mapper.SubjectBalanceMapper;
 import com.company.daizhang.module.accountset.service.SubjectBalanceService;
 import com.company.daizhang.module.accountset.vo.SubjectBalanceVO;
+import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.module.subject.entity.Subject;
 import com.company.daizhang.module.subject.mapper.SubjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +36,7 @@ public class SubjectBalanceServiceImpl extends ServiceImpl<SubjectBalanceMapper,
 
     private final AccountBalanceMapper accountBalanceMapper;
     private final SubjectMapper subjectMapper;
+    private final AccountPeriodMapper accountPeriodMapper;
 
     /**
      * 期次：期初
@@ -55,6 +59,17 @@ public class SubjectBalanceServiceImpl extends ServiceImpl<SubjectBalanceMapper,
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void saveBatch(Long accountSetId, Integer year, List<SubjectBalanceRequest> requests) {
+        // 结账校验:已结账期间的期初余额为冻结快照,不允许修改
+        // 否则修改beginDebit后重算endDebit/endCredit会改写已结账期间的期末余额,破坏结账快照,审计轨迹被破坏
+        LambdaQueryWrapper<AccountPeriod> periodWrapper = new LambdaQueryWrapper<>();
+        periodWrapper.eq(AccountPeriod::getAccountSetId, accountSetId)
+                     .eq(AccountPeriod::getYear, year)
+                     .eq(AccountPeriod::getMonth, 1);
+        AccountPeriod janPeriod = accountPeriodMapper.selectOne(periodWrapper);
+        if (janPeriod != null && Integer.valueOf(1).equals(janPeriod.getStatus())) {
+            throw new BusinessException("1月已结账，期初余额不可修改，请先反结账");
+        }
+
         // 先删除该账套该年度的旧数据
         LambdaQueryWrapper<SubjectBalance> deleteWrapper = new LambdaQueryWrapper<>();
         deleteWrapper.eq(SubjectBalance::getAccountSetId, accountSetId)

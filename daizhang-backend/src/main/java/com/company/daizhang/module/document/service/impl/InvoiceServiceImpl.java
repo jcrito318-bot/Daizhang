@@ -114,6 +114,10 @@ public class InvoiceServiceImpl implements InvoiceService {
         if (invoice == null) {
             throw new BusinessException(ErrorCode.INPUT_INVOICE_NOT_FOUND);
         }
+        // 已生成凭证的发票不可删除，否则产生孤儿凭证
+        if (invoice.getVoucherId() != null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "发票已生成凭证，不可删除/作废，请先红冲原凭证");
+        }
         inputInvoiceMapper.deleteById(id);
     }
 
@@ -209,6 +213,10 @@ public class InvoiceServiceImpl implements InvoiceService {
         if (invoice == null) {
             throw new BusinessException(ErrorCode.OUTPUT_INVOICE_NOT_FOUND);
         }
+        // 已生成凭证的发票不可删除，否则产生孤儿凭证
+        if (invoice.getVoucherId() != null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "发票已生成凭证，不可删除/作废，请先红冲原凭证");
+        }
         outputInvoiceMapper.deleteById(id);
     }
 
@@ -218,6 +226,10 @@ public class InvoiceServiceImpl implements InvoiceService {
         OutputInvoice invoice = outputInvoiceMapper.selectById(id);
         if (invoice == null) {
             throw new BusinessException(ErrorCode.OUTPUT_INVOICE_NOT_FOUND);
+        }
+        // 已生成凭证的发票不可作废，否则产生孤儿凭证
+        if (invoice.getVoucherId() != null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "发票已生成凭证，不可删除/作废，请先红冲原凭证");
         }
 
         if (invoice.getInvoiceStatus() != null && invoice.getInvoiceStatus() == 1) {

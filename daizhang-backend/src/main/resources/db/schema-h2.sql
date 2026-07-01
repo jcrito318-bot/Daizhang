@@ -606,6 +606,7 @@ CREATE TABLE IF NOT EXISTS `sal_employee` (
   `account_set_id` BIGINT NOT NULL COMMENT '账套ID',
   `employee_code` VARCHAR(50) NOT NULL COMMENT '员工编号',
   `employee_name` VARCHAR(50) NOT NULL COMMENT '员工姓名',
+  `base_salary` DECIMAL(18,2) NOT NULL DEFAULT 0.00 COMMENT '基本工资',
   `department` VARCHAR(100) DEFAULT NULL COMMENT '部门',
   `job_position` VARCHAR(100) DEFAULT NULL COMMENT '职位',
   `id_card` VARCHAR(20) DEFAULT NULL COMMENT '身份证号',
@@ -1461,6 +1462,9 @@ CREATE TABLE IF NOT EXISTS `acc_amortization` (
   PRIMARY KEY (`id`),
   KEY `idx_amortization_account_set` (`account_set_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='长期待摊费用表';
+
+-- 兼容已有库:为长期待摊费用表补充"最近摊销期间"列,防止同一期间重复摊销
+ALTER TABLE `acc_amortization` ADD COLUMN IF NOT EXISTS `last_amortized_period` VARCHAR(7) DEFAULT NULL COMMENT '最近摊销期间(yyyy-MM)';
 
 -- ============================================
 -- 29. 薪资公式与社保配置模块

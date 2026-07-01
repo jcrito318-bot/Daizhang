@@ -922,17 +922,17 @@ public class TaxServiceImpl implements TaxService {
             }
         }
 
-        // 社保个人部分约占社保合计的2/3（养老8%+医疗2%+失业0.5% ≈ 10.5% / 28% ≈ 37.5%，
-        // 此处简化按个人:单位 = 1:2 估算）
-        BigDecimal socialSecurityPersonal = totalSocialSecurity.multiply(new BigDecimal("0.375"))
+        // SalarySheet.socialSecurity是个人部分（代扣社保），无需再拆分
+        BigDecimal socialSecurityPersonal = totalSocialSecurity;
+        // 单位部分≈个人×27.5/10.5（单位缴费比例27.5% / 个人缴费比例10.5%）
+        BigDecimal socialSecurityCompany = totalSocialSecurity.multiply(new BigDecimal("2.619"))
                 .setScale(2, RoundingMode.HALF_UP);
-        BigDecimal socialSecurityCompany = totalSocialSecurity.subtract(socialSecurityPersonal);
 
-        // 公积金个人和单位各50%
-        BigDecimal housingFundPersonal = totalHousingFund.divide(new BigDecimal("2"), 2, RoundingMode.HALF_UP);
-        BigDecimal housingFundCompany = totalHousingFund.subtract(housingFundPersonal);
+        // 公积金个人:单位=1:1，个人部分就是个人部分，单位部分等于个人部分
+        BigDecimal housingFundPersonal = totalHousingFund;
+        BigDecimal housingFundCompany = totalHousingFund;
 
-        // 社保中各险种比例（按个人10.5%分配）
+        // 社保中各险种比例（个人按10.5%分配，单位按27.5%分配）
         BigDecimal pensionPersonal = socialSecurityPersonal.multiply(new BigDecimal("0.762"))
                 .setScale(2, RoundingMode.HALF_UP); // 养老8%/10.5%
         BigDecimal medicalPersonal = socialSecurityPersonal.multiply(new BigDecimal("0.190"))
@@ -940,16 +940,16 @@ public class TaxServiceImpl implements TaxService {
         BigDecimal unemploymentPersonal = socialSecurityPersonal.multiply(new BigDecimal("0.048"))
                 .setScale(2, RoundingMode.HALF_UP); // 失业0.5%/10.5%
 
-        BigDecimal pensionCompany = socialSecurityCompany.multiply(new BigDecimal("0.571"))
-                .setScale(2, RoundingMode.HALF_UP); // 养老16%/28%
-        BigDecimal medicalCompany = socialSecurityCompany.multiply(new BigDecimal("0.339"))
-                .setScale(2, RoundingMode.HALF_UP); // 医疗9.5%/28%
+        BigDecimal pensionCompany = socialSecurityCompany.multiply(new BigDecimal("0.582"))
+                .setScale(2, RoundingMode.HALF_UP); // 养老16%/27.5%
+        BigDecimal medicalCompany = socialSecurityCompany.multiply(new BigDecimal("0.345"))
+                .setScale(2, RoundingMode.HALF_UP); // 医疗9.5%/27.5%
         BigDecimal unemploymentCompany = socialSecurityCompany.multiply(new BigDecimal("0.018"))
-                .setScale(2, RoundingMode.HALF_UP); // 失业0.5%/28%
+                .setScale(2, RoundingMode.HALF_UP); // 失业0.5%/27.5%
         BigDecimal injuryCompany = socialSecurityCompany.multiply(new BigDecimal("0.018"))
-                .setScale(2, RoundingMode.HALF_UP); // 工伤0.5%/28%
+                .setScale(2, RoundingMode.HALF_UP); // 工伤0.5%/27.5%
         BigDecimal maternityCompany = socialSecurityCompany.multiply(new BigDecimal("0.036"))
-                .setScale(2, RoundingMode.HALF_UP); // 生育1%/28%
+                .setScale(2, RoundingMode.HALF_UP); // 生育1%/27.5%
 
         BigDecimal totalPersonal = socialSecurityPersonal.add(housingFundPersonal);
         BigDecimal totalCompany = socialSecurityCompany.add(housingFundCompany);

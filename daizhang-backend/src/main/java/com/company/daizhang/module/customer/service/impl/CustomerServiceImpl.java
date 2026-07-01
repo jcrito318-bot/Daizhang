@@ -566,16 +566,14 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         int maxOverdueMonths = 0;
         List<ArrearsDetailVO> details = new ArrayList<>();
 
-        // 查询客户所有收款记录
+        // 查询客户所有收款记录,按合同ID分组(后续仅累计活跃合同对应收款,避免口径错配)
         LambdaQueryWrapper<PaymentRecord> paymentWrapper = new LambdaQueryWrapper<>();
         paymentWrapper.eq(PaymentRecord::getCustomerId, customer.getId());
         List<PaymentRecord> allPayments = paymentRecordMapper.selectList(paymentWrapper);
-        // 按合同ID分组收款
         Map<Long, BigDecimal> paidByContract = new HashMap<>();
         for (PaymentRecord payment : allPayments) {
             BigDecimal amount = payment.getAmount() != null ? payment.getAmount() : BigDecimal.ZERO;
             paidByContract.merge(payment.getContractId(), amount, BigDecimal::add);
-            totalPaidAmount = totalPaidAmount.add(amount);
         }
 
         for (ServiceContract contract : contracts) {
@@ -583,6 +581,8 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
             totalContractAmount = totalContractAmount.add(contractAmount);
 
             BigDecimal paidAmount = paidByContract.getOrDefault(contract.getId(), BigDecimal.ZERO);
+            // 仅累计活跃合同对应收款,与totalContractAmount口径一致,避免欠款为负
+            totalPaidAmount = totalPaidAmount.add(paidAmount);
             BigDecimal arrearsAmount = contractAmount.subtract(paidAmount);
 
             // 仅当有欠款时加入明细

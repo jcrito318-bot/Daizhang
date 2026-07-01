@@ -86,7 +86,37 @@ public class DashboardServiceImpl implements DashboardService {
                 .collect(Collectors.groupingBy(TaxDeclaration::getAccountSetId));
 
         // 5. 构建总览统计
-        vo.setSummary(buildSummary(accountSets, pendingTasks, unauditedVouchers, undeclaredTaxes, completedTaskCount));
+        // 注意:列表查询带LIMIT 500仅用于明细展示,统计数必须用独立的selectCount(不加limit),否则超过500时计数失真
+        // 账套总数(不限制)
+        long totalAccountSets = accountSetMapper.selectCount(new LambdaQueryWrapper<>());
+        // 启用账套数(status=1)
+        long activeAccountSets = accountSetMapper.selectCount(new LambdaQueryWrapper<AccountSet>()
+                .eq(AccountSet::getStatus, 1));
+        // 一般纳税人:taxpayerType="2"或包含"一般"
+        long generalTaxpayerCount = accountSetMapper.selectCount(new LambdaQueryWrapper<AccountSet>()
+                .and(w -> w.eq(AccountSet::getTaxpayerType, "2")
+                        .or().like(AccountSet::getTaxpayerType, "一般")));
+        // 小规模纳税人:taxpayerType="1"或包含"小规模"
+        long smallTaxpayerCount = accountSetMapper.selectCount(new LambdaQueryWrapper<AccountSet>()
+                .and(w -> w.eq(AccountSet::getTaxpayerType, "1")
+                        .or().like(AccountSet::getTaxpayerType, "小规模")));
+        // 待办任务数(taskStatus<2,不限制)
+        long pendingTaskCount = serviceTaskMapper.selectCount(new LambdaQueryWrapper<ServiceTask>()
+                .lt(ServiceTask::getTaskStatus, 2));
+        // 逾期待办:状态未完成且创建时间超过7天
+        LocalDateTime threshold = LocalDateTime.now().minusDays(7);
+        long overdueTodoCount = serviceTaskMapper.selectCount(new LambdaQueryWrapper<ServiceTask>()
+                .lt(ServiceTask::getTaskStatus, 2)
+                .lt(ServiceTask::getCreateTime, threshold));
+        // 未审核凭证数(status=0,不限制)
+        long unauditedVoucherCount = voucherMapper.selectCount(new LambdaQueryWrapper<Voucher>()
+                .eq(Voucher::getStatus, 0));
+        // 未申报税务数(status=0,不限制)
+        long undeclaredTaxCount = taxDeclarationMapper.selectCount(new LambdaQueryWrapper<TaxDeclaration>()
+                .eq(TaxDeclaration::getStatus, 0));
+
+        vo.setSummary(buildSummary(totalAccountSets, activeAccountSets, generalTaxpayerCount, smallTaxpayerCount,
+                pendingTaskCount, completedTaskCount, unauditedVoucherCount, undeclaredTaxCount, overdueTodoCount));
 
         // 6. 构建客户列表摘要
         vo.setCustomers(buildCustomerSummaries(accountSets, taskByAccountSet, voucherByAccountSet, taxByAccountSet));
@@ -105,39 +135,22 @@ public class DashboardServiceImpl implements DashboardService {
         return vo;
     }
 
-    private DashboardSummary buildSummary(List<AccountSet> accountSets, List<ServiceTask> pendingTasks,
-                                          List<Voucher> unauditedVouchers, List<TaxDeclaration> undeclaredTaxes,
-                                          long completedTaskCount) {
+    private DashboardSummary buildSummary(long totalAccountSets, long activeAccountSets,
+                                          long generalTaxpayerCount, long smallTaxpayerCount,
+                                          long pendingTaskCount, long completedTaskCount,
+                                          long unauditedVoucherCount, long undeclaredTaxCount,
+                                          long overdueTodoCount) {
         DashboardSummary s = new DashboardSummary();
-        s.setTotalAccountSets(accountSets.size());
-        int active = (int) accountSets.stream().filter(a -> a.getStatus() != null && a.getStatus() == 1).count();
-        s.setActiveAccountSets(active);
-
-        int general = 0;
-        int small = 0;
-        for (AccountSet a : accountSets) {
-            String t = a.getTaxpayerType();
-            if (t == null) continue;
-            if ("2".equals(t) || t.contains("一般")) {
-                general++;
-            } else if ("1".equals(t) || t.contains("小规模")) {
-                small++;
-            }
-        }
-        s.setGeneralTaxpayerCount(general);
-        s.setSmallTaxpayerCount(small);
-
-        s.setPendingTaskCount(pendingTasks.size());
+        // 统计数均由独立的selectCount查询得出(不加LIMIT),避免超过500条时计数失真
+        s.setTotalAccountSets((int) totalAccountSets);
+        s.setActiveAccountSets((int) activeAccountSets);
+        s.setGeneralTaxpayerCount((int) generalTaxpayerCount);
+        s.setSmallTaxpayerCount((int) smallTaxpayerCount);
+        s.setPendingTaskCount((int) pendingTaskCount);
         s.setCompletedTaskCount((int) completedTaskCount);
-        s.setUnauditedVoucherCount(unauditedVouchers.size());
-        s.setUndeclaredTaxCount(undeclaredTaxes.size());
-
-        // 逾期待办：服务任务创建时间超过7天且仍未完成
-        LocalDateTime threshold = LocalDateTime.now().minusDays(7);
-        long overdue = pendingTasks.stream()
-                .filter(t -> t.getCreateTime() != null && t.getCreateTime().isBefore(threshold))
-                .count();
-        s.setOverdueTodoCount((int) overdue);
+        s.setUnauditedVoucherCount((int) unauditedVoucherCount);
+        s.setUndeclaredTaxCount((int) undeclaredTaxCount);
+        s.setOverdueTodoCount((int) overdueTodoCount);
         return s;
     }
 

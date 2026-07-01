@@ -492,7 +492,8 @@ public class InventoryServiceImpl implements InventoryService {
         BigDecimal totalCost = BigDecimal.ZERO;
 
         for (InventoryOutDetail detail : details) {
-            InventoryStock stock = getCurrentStock(out.getAccountSetId(), detail.getItemId(), year, month);
+            // 校验与更新使用同一数据源:getOrCreateStock会从上月结转期初,避免月初首次出库因无当月记录而失败
+            InventoryStock stock = getOrCreateStock(out.getAccountSetId(), detail.getItemId(), year, month);
             // 校验库存充足，避免负库存
             BigDecimal availableQty = (stock != null && stock.getEndQuantity() != null)
                     ? stock.getEndQuantity() : BigDecimal.ZERO;

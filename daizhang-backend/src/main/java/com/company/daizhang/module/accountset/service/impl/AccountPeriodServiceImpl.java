@@ -6,7 +6,9 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.utils.SecurityUtils;
+import com.company.daizhang.module.accountset.entity.AccountBalance;
 import com.company.daizhang.module.accountset.entity.AccountPeriod;
+import com.company.daizhang.module.accountset.mapper.AccountBalanceMapper;
 import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
 import com.company.daizhang.module.accountset.service.AccountPeriodService;
 import com.company.daizhang.module.accountset.vo.AccountPeriodVO;
@@ -17,6 +19,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -28,9 +31,10 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class AccountPeriodServiceImpl implements AccountPeriodService {
-    
+
     private final AccountPeriodMapper accountPeriodMapper;
     private final VoucherMapper voucherMapper;
+    private final AccountBalanceMapper accountBalanceMapper;
     
     @Override
     public List<AccountPeriodVO> listPeriods(Long accountSetId) {
@@ -101,6 +105,23 @@ public class AccountPeriodServiceImpl implements AccountPeriodService {
         long unpostedCount = voucherMapper.selectCount(unpostWrapper);
         if (unpostedCount > 0) {
             throw new BusinessException(400, "存在" + unpostedCount + "张未过账的凭证，无法结账");
+        }
+
+        // 试算平衡校验:结账前必须确保本期借贷发生额平衡,否则会固化错误余额
+        // 原实现仅校验凭证审核+过账,未校验试算平衡,可关闭余额不平的期间,违反复式记账原则
+        LambdaQueryWrapper<AccountBalance> balanceWrapper = new LambdaQueryWrapper<>();
+        balanceWrapper.eq(AccountBalance::getAccountSetId, accountSetId)
+                     .eq(AccountBalance::getYear, year)
+                     .eq(AccountBalance::getMonth, month);
+        List<AccountBalance> balances = accountBalanceMapper.selectList(balanceWrapper);
+        BigDecimal totalDebit = BigDecimal.ZERO;
+        BigDecimal totalCredit = BigDecimal.ZERO;
+        for (AccountBalance b : balances) {
+            totalDebit = totalDebit.add(b.getPeriodDebit() != null ? b.getPeriodDebit() : BigDecimal.ZERO);
+            totalCredit = totalCredit.add(b.getPeriodCredit() != null ? b.getPeriodCredit() : BigDecimal.ZERO);
+        }
+        if (totalDebit.compareTo(totalCredit) != 0) {
+            throw new BusinessException(400, "试算不平衡，借方合计" + totalDebit + "≠贷方合计" + totalCredit + "，无法结账");
         }
 
         // 使用LambdaUpdateWrapper确保null字段能正确更新

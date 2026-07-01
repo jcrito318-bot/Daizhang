@@ -170,6 +170,12 @@ public class AmortizationServiceImpl implements AmortizationService {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
                     "该费用在" + year + "年" + month + "月已摊销,不能重复摊销");
         }
+        // 防重复摊销:校验当前期间是否已摊销过(不依赖凭证,覆盖只调amortize未生成凭证的场景)
+        String currentPeriod = String.format("%04d-%02d", year, month);
+        if (currentPeriod.equals(amortization.getLastAmortizedPeriod())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "该费用在" + year + "年" + month + "月已摊销,不能重复摊销");
+        }
 
         BigDecimal monthlyAmount = amortization.getMonthlyAmount();
         if (monthlyAmount == null) {
@@ -207,6 +213,8 @@ public class AmortizationServiceImpl implements AmortizationService {
             amortization.setRemainingAmount(BigDecimal.ZERO);
         }
 
+        // 标记本期间已摊销,防止重复调用
+        amortization.setLastAmortizedPeriod(currentPeriod);
         amortizationMapper.updateById(amortization);
 
         log.info("长期待摊费用摊销成功：id={}, year={}, month={}, 摊销金额={}", id, year, month, actualAmount);
@@ -229,6 +237,13 @@ public class AmortizationServiceImpl implements AmortizationService {
 
             // 跳过该期间已摊销的
             if (existsAmortizationVoucher(amortization.getId(), year, month)) {
+                log.warn("批量摊销跳过,已摊销: amortizationId={}, year={}, month={}",
+                        amortization.getId(), year, month);
+                continue;
+            }
+            // 防重复:校验当前期间是否已摊销过(不依赖凭证)
+            String currentPeriod = String.format("%04d-%02d", year, month);
+            if (currentPeriod.equals(amortization.getLastAmortizedPeriod())) {
                 log.warn("批量摊销跳过,已摊销: amortizationId={}, year={}, month={}",
                         amortization.getId(), year, month);
                 continue;
@@ -266,6 +281,8 @@ public class AmortizationServiceImpl implements AmortizationService {
                 amortization.setRemainingAmount(remainingAmount);
             }
 
+            // 标记本期间已摊销,防止重复调用
+            amortization.setLastAmortizedPeriod(currentPeriod);
             amortizationMapper.updateById(amortization);
         }
 
@@ -289,6 +306,12 @@ public class AmortizationServiceImpl implements AmortizationService {
         if (existsAmortizationVoucher(id, year, month)) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
                     "该费用在" + year + "年" + month + "月已生成摊销凭证,不能重复生成");
+        }
+        // 防重复摊销:若本期间已通过amortize摊销过,则不再生成凭证,避免重复计账
+        String currentPeriod = String.format("%04d-%02d", year, month);
+        if (currentPeriod.equals(amortization.getLastAmortizedPeriod())) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "该费用在" + year + "年" + month + "月已摊销,不能重复摊销");
         }
         BigDecimal monthlyAmount = amortization.getMonthlyAmount() != null
                 ? amortization.getMonthlyAmount() : BigDecimal.ZERO;
@@ -324,6 +347,27 @@ public class AmortizationServiceImpl implements AmortizationService {
         details.add(buildDetail(voucher.getId(), 2, summary, creditSubjectId, BigDecimal.ZERO, monthlyAmount));
         for (VoucherDetail detail : details) {
             voucherDetailMapper.insert(detail);
+        }
+
+        // 同步更新摊销金额(此前只创建凭证不更新金额,与amortize形成断裂)
+        BigDecimal amortizedAmount = amortization.getAmortizedAmount() != null
+                ? amortization.getAmortizedAmount() : BigDecimal.ZERO;
+        BigDecimal remainingAmount = amortization.getRemainingAmount() != null
+                ? amortization.getRemainingAmount() : BigDecimal.ZERO;
+        // 本次摊销额 = min(月摊销额, 剩余待摊),防止已摊销额超过待摊总额
+        BigDecimal actualAmount = monthlyAmount.min(remainingAmount);
+        if (actualAmount.compareTo(BigDecimal.ZERO) > 0) {
+            amortization.setAmortizedAmount(amortizedAmount.add(actualAmount));
+            BigDecimal newRemaining = remainingAmount.subtract(actualAmount);
+            if (newRemaining.compareTo(BigDecimal.ZERO) <= 0) {
+                amortization.setRemainingAmount(BigDecimal.ZERO);
+                amortization.setStatus(1);
+            } else {
+                amortization.setRemainingAmount(newRemaining);
+            }
+            // 标记本期间已摊销,防止重复摊销
+            amortization.setLastAmortizedPeriod(currentPeriod);
+            amortizationMapper.updateById(amortization);
         }
 
         log.info("长期待摊费用摊销凭证生成成功：摊销ID={}, 凭证ID={}, 凭证号={}, 金额={}",

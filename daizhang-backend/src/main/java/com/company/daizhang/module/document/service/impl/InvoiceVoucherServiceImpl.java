@@ -70,6 +70,11 @@ public class InvoiceVoucherServiceImpl implements InvoiceVoucherService {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "该进项发票已生成凭证");
         }
 
+        // 校验发票认证状态：未认证发票不可生成进项抵扣凭证
+        if (invoice.getAuthStatus() == null || invoice.getAuthStatus() != 1) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "进项发票未认证，不可生成凭证抵扣进项税");
+        }
+
         Long accountSetId = invoice.getAccountSetId();
         LocalDate voucherDate = invoice.getInvoiceDate() != null ? invoice.getInvoiceDate() : LocalDate.now();
         int year = voucherDate.getYear();
@@ -130,6 +135,11 @@ public class InvoiceVoucherServiceImpl implements InvoiceVoucherService {
 
         if (invoice.getVoucherId() != null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "该销项发票已生成凭证");
+        }
+
+        // 校验发票状态：作废/红冲发票不可生成收入凭证
+        if (invoice.getInvoiceStatus() == null || invoice.getInvoiceStatus() != 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "销项发票非正常状态，不可生成凭证");
         }
 
         Long accountSetId = invoice.getAccountSetId();

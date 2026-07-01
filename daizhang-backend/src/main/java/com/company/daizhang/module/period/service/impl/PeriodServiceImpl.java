@@ -551,14 +551,38 @@ public class PeriodServiceImpl implements PeriodService {
             profitBalance.setSubjectId(profitSubject.getId());
             profitBalance.setYear(year);
             profitBalance.setMonth(month);
-            profitBalance.setBeginDebit(BigDecimal.ZERO);
-            profitBalance.setBeginCredit(BigDecimal.ZERO);
+            // 期初从上一期间期末结转,同年内结转本年累计
+            // 原实现begin/year全置零,丢失累计利润,
+            // 导致3103(本年利润)余额每月从0开始,资产负债表"本年利润"只显示当月利润而非本年累计,试算不平衡
+            int lastYear = (month == 1) ? year - 1 : year;
+            int lastMonth = (month == 1) ? 12 : month - 1;
+            LambdaQueryWrapper<AccountBalance> lastProfitWrapper = new LambdaQueryWrapper<>();
+            lastProfitWrapper.eq(AccountBalance::getAccountSetId, accountSetId)
+                       .eq(AccountBalance::getSubjectId, profitSubject.getId())
+                       .eq(AccountBalance::getYear, lastYear)
+                       .eq(AccountBalance::getMonth, lastMonth);
+            AccountBalance lastProfitBalance = accountBalanceMapper.selectOne(lastProfitWrapper);
+            BigDecimal carriedBeginDebit = BigDecimal.ZERO;
+            BigDecimal carriedBeginCredit = BigDecimal.ZERO;
+            BigDecimal carriedYearDebit = BigDecimal.ZERO;
+            BigDecimal carriedYearCredit = BigDecimal.ZERO;
+            if (lastProfitBalance != null) {
+                carriedBeginDebit = lastProfitBalance.getEndDebit() != null ? lastProfitBalance.getEndDebit() : BigDecimal.ZERO;
+                carriedBeginCredit = lastProfitBalance.getEndCredit() != null ? lastProfitBalance.getEndCredit() : BigDecimal.ZERO;
+                if (lastYear == year) {
+                    carriedYearDebit = lastProfitBalance.getYearDebit() != null ? lastProfitBalance.getYearDebit() : BigDecimal.ZERO;
+                    carriedYearCredit = lastProfitBalance.getYearCredit() != null ? lastProfitBalance.getYearCredit() : BigDecimal.ZERO;
+                }
+            }
+            profitBalance.setBeginDebit(carriedBeginDebit);
+            profitBalance.setBeginCredit(carriedBeginCredit);
             profitBalance.setPeriodDebit(BigDecimal.ZERO);
             profitBalance.setPeriodCredit(BigDecimal.ZERO);
-            profitBalance.setEndDebit(BigDecimal.ZERO);
-            profitBalance.setEndCredit(BigDecimal.ZERO);
-            profitBalance.setYearDebit(BigDecimal.ZERO);
-            profitBalance.setYearCredit(BigDecimal.ZERO);
+            // 期末初值=期初(后续会累加本期利润)
+            profitBalance.setEndDebit(carriedBeginDebit);
+            profitBalance.setEndCredit(carriedBeginCredit);
+            profitBalance.setYearDebit(carriedYearDebit);
+            profitBalance.setYearCredit(carriedYearCredit);
             accountBalanceMapper.insert(profitBalance);
         }
         if (profit.compareTo(BigDecimal.ZERO) >= 0) {
@@ -728,6 +752,31 @@ public class PeriodServiceImpl implements PeriodService {
         }
 
         AccountPeriod period = getPeriod(accountSetId, year, month);
+
+        // 期间状态校验:已结账期间余额已固化,不允许再执行成本结转(与carryForward保持一致)
+        if (PeriodStatus.CLOSED.getCode().equals(period.getStatus())) {
+            throw new BusinessException(ErrorCode.PERIOD_ALREADY_CLOSED);
+        }
+
+        // 幂等校验:检查本期是否已存在系统生成的成本结转凭证,避免重复结转
+        // 原实现无任何幂等校验,重复调用会重复借记成本/贷记库存,导致主营业务成本虚增、库存虚减
+        LambdaQueryWrapper<Voucher> existWrapper = new LambdaQueryWrapper<>();
+        existWrapper.eq(Voucher::getAccountSetId, accountSetId)
+                   .eq(Voucher::getYear, year)
+                   .eq(Voucher::getMonth, month)
+                   .eq(Voucher::getSource, 1);
+        List<Voucher> existVouchers = voucherMapper.selectList(existWrapper);
+        if (!existVouchers.isEmpty()) {
+            List<Long> voucherIds = existVouchers.stream().map(Voucher::getId).collect(Collectors.toList());
+            LambdaQueryWrapper<VoucherDetail> costDetailWrapper = new LambdaQueryWrapper<>();
+            costDetailWrapper.in(VoucherDetail::getVoucherId, voucherIds)
+                    .eq(VoucherDetail::getSummary, "结转销售成本");
+            Long costCount = voucherDetailMapper.selectCount(costDetailWrapper);
+            if (costCount != null && costCount > 0) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                        "本期" + year + "年" + month + "月已执行成本结转,不能重复结转");
+            }
+        }
 
         LambdaQueryWrapper<Subject> subjectWrapper = new LambdaQueryWrapper<>();
         subjectWrapper.eq(Subject::getAccountSetId, accountSetId)

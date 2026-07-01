@@ -115,8 +115,8 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
             throw new BusinessException(ErrorCode.DOCUMENT_NOT_FOUND);
         }
 
-        // 已关联凭证的票据不允许修改
-        if (document.getStatus() != null && document.getStatus() == 1) {
+        // 已关联凭证或已归档的票据不允许修改
+        if (document.getStatus() != null && document.getStatus() >= 1) {
             throw new BusinessException(ErrorCode.DOCUMENT_ALREADY_LINKED);
         }
 
@@ -132,8 +132,8 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
             throw new BusinessException(ErrorCode.DOCUMENT_NOT_FOUND);
         }
 
-        // 已关联凭证的票据不允许删除
-        if (document.getStatus() != null && document.getStatus() == 1) {
+        // 已关联凭证或已归档的票据不允许删除
+        if (document.getStatus() != null && document.getStatus() >= 1) {
             throw new BusinessException(ErrorCode.DOCUMENT_ALREADY_LINKED);
         }
 

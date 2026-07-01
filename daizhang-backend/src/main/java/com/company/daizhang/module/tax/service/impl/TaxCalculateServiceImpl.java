@@ -52,9 +52,9 @@ public class TaxCalculateServiceImpl implements TaxCalculateService {
     private static final BigDecimal CIT_RATE_NORMAL = new BigDecimal("0.25");
     private static final BigDecimal CIT_RATE_SMALL = new BigDecimal("0.20");
     /**
-     * 小微企业优惠判定阈值（季度利润）
+     * 小微企业优惠判定阈值（年度累计利润，现行政策300万）
      */
-    private static final BigDecimal SMALL_ENTERPRISE_THRESHOLD = new BigDecimal("1000000");
+    private static final BigDecimal SMALL_ENTERPRISE_THRESHOLD = new BigDecimal("3000000");
 
     @Override
     public List<TaxCalculationResultVO> calculateAllTaxes(Long accountSetId, Integer year, Integer month) {
@@ -105,6 +105,10 @@ public class TaxCalculateServiceImpl implements TaxCalculateService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         BigDecimal vatAmount = outputTax.subtract(inputTax);
+        // 留抵时vatAmount为负值，按0处理，避免污染DB并触发误报
+        if (vatAmount.compareTo(BigDecimal.ZERO) < 0) {
+            vatAmount = BigDecimal.ZERO;
+        }
 
         TaxCalculationResultVO vo = new TaxCalculationResultVO();
         vo.setTaxType("VAT");
@@ -202,12 +206,11 @@ public class TaxCalculateServiceImpl implements TaxCalculateService {
                 .filter(s -> s.getBalanceDirection() != null && s.getBalanceDirection() == 1)
                 .collect(Collectors.toList());
 
-        // 计算季度利润（季度预缴：累计本季度3个月）
-        int quarterStartMonth = ((month - 1) / 3) * 3 + 1;
+        // 计算年度累计利润（季度预缴按年度累计预缴，累计1~month各月）
         BigDecimal totalRevenue = BigDecimal.ZERO;
         BigDecimal totalExpense = BigDecimal.ZERO;
 
-        for (int m = quarterStartMonth; m <= month; m++) {
+        for (int m = 1; m <= month; m++) {
             LambdaQueryWrapper<AccountBalance> balanceWrapper = new LambdaQueryWrapper<>();
             balanceWrapper.eq(AccountBalance::getAccountSetId, accountSetId)
                     .eq(AccountBalance::getYear, year)
@@ -232,7 +235,7 @@ public class TaxCalculateServiceImpl implements TaxCalculateService {
 
         BigDecimal totalProfit = totalRevenue.subtract(totalExpense);
 
-        // 判定税率：小微优惠（季度利润<=100万按20%）
+        // 判定税率：小微优惠（年度累计利润<=300万按20%）
         BigDecimal taxRate = totalProfit.compareTo(SMALL_ENTERPRISE_THRESHOLD) <= 0
                 ? CIT_RATE_SMALL : CIT_RATE_NORMAL;
         // 仅当利润为正时计税

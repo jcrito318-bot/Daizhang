@@ -217,6 +217,7 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         // 计算月折旧额
         BigDecimal monthlyDepreciation = calculateMonthlyDepreciation(
                 request.getPurchaseAmount(),
+                request.getPurchaseAmount(),
                 request.getResidualValue(),
                 request.getUsefulLife(),
                 request.getDepreciationMethod()
@@ -251,6 +252,7 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         if (request.getDepreciationMethod() != null || request.getUsefulLife() != null || request.getResidualValue() != null) {
             BigDecimal monthlyDepreciation = calculateMonthlyDepreciation(
                     asset.getPurchaseAmount(),
+                    asset.getNetValue(),
                     asset.getResidualValue(),
                     asset.getUsefulLife(),
                     asset.getDepreciationMethod()
@@ -352,18 +354,39 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
             // 计算本次折旧
             // 批量折旧遍历账套所有在用资产,任一字段为null会导致整个批次NPE中断。
             // 与calculateMonthlyDepreciation保持一致的null防御。
-            BigDecimal depreciationAmount = asset.getMonthlyDepreciation();
-            if (depreciationAmount == null) {
-                continue; // 月折旧额为空,数据不完整,跳过
+            BigDecimal residualValue = asset.getResidualValue() != null ? asset.getResidualValue() : BigDecimal.ZERO;
+            BigDecimal assetNetValue = asset.getNetValue() != null ? asset.getNetValue() : BigDecimal.ZERO;
+            // 已提足折旧(净值<=残值)跳过,避免负折旧导致累计折旧回退、净值虚增
+            if (assetNetValue.compareTo(residualValue) <= 0) {
+                continue;
+            }
+
+            BigDecimal depreciationAmount;
+            if ("双倍余额递减法".equals(asset.getDepreciationMethod())) {
+                // 双倍余额递减法:基于当前净值计算,体现递减特性(原实现用原值,丧失递减)
+                Integer usefulLife = asset.getUsefulLife();
+                if (usefulLife == null || usefulLife <= 0) {
+                    continue;
+                }
+                BigDecimal rate = BigDecimal.valueOf(2).divide(BigDecimal.valueOf(usefulLife), 4, RoundingMode.HALF_UP);
+                depreciationAmount = assetNetValue.multiply(rate)
+                        .divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP);
+            } else {
+                depreciationAmount = asset.getMonthlyDepreciation();
+                if (depreciationAmount == null) {
+                    continue; // 月折旧额为空,数据不完整,跳过
+                }
             }
             BigDecimal accumulatedDepreciation = (asset.getAccumulatedDeprecation() != null ? asset.getAccumulatedDeprecation() : BigDecimal.ZERO).add(depreciationAmount);
-            BigDecimal netValue = (asset.getNetValue() != null ? asset.getNetValue() : BigDecimal.ZERO).subtract(depreciationAmount);
-            BigDecimal residualValue = asset.getResidualValue() != null ? asset.getResidualValue() : BigDecimal.ZERO;
+            BigDecimal netValue = assetNetValue.subtract(depreciationAmount);
 
-            // 如果净值小于残值，则调整折旧额
+            // 如果净值小于残值，则调整折旧额,使其恰好将净值降至残值
             if (netValue.compareTo(residualValue) < 0) {
-                BigDecimal assetNetValue = asset.getNetValue() != null ? asset.getNetValue() : BigDecimal.ZERO;
                 depreciationAmount = assetNetValue.subtract(residualValue);
+                // 守卫:确保折旧额非负,避免累计折旧回退、净值虚增
+                if (depreciationAmount.compareTo(BigDecimal.ZERO) < 0) {
+                    depreciationAmount = BigDecimal.ZERO;
+                }
                 accumulatedDepreciation = (asset.getAccumulatedDeprecation() != null ? asset.getAccumulatedDeprecation() : BigDecimal.ZERO).add(depreciationAmount);
                 netValue = residualValue;
             }
@@ -608,7 +631,7 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
     /**
      * 计算月折旧额
      */
-    private BigDecimal calculateMonthlyDepreciation(BigDecimal purchaseAmount, BigDecimal residualValue,
+    private BigDecimal calculateMonthlyDepreciation(BigDecimal purchaseAmount, BigDecimal netValue, BigDecimal residualValue,
                                                      Integer usefulLife, String depreciationMethod) {
         // 参数防御:避免usefulLife为null拆箱NPE、为0除零异常、原值/残值为null NPE
         if (purchaseAmount == null || residualValue == null
@@ -621,9 +644,10 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
                     .divide(BigDecimal.valueOf(usefulLife).multiply(BigDecimal.valueOf(12)), 2, RoundingMode.HALF_UP);
         } else if ("双倍余额递减法".equals(depreciationMethod)) {
             // 双倍余额递减法：年折旧率 = 2 / 使用年限 * 100%
-            // 月折旧额 = 原值 * 年折旧率 / 12
+            // 月折旧额 = 当前净值 * 年折旧率 / 12 (基于净值,体现递减特性;净值缺省回退原值)
+            BigDecimal baseValue = (netValue != null ? netValue : purchaseAmount);
             BigDecimal rate = BigDecimal.valueOf(2).divide(BigDecimal.valueOf(usefulLife), 4, RoundingMode.HALF_UP);
-            return purchaseAmount.multiply(rate)
+            return baseValue.multiply(rate)
                     .divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP);
         } else if ("工作量法".equals(depreciationMethod)) {
             // 工作量法：简化为按直线法，月折旧额 = (原值 - 残值) / 使用年限 / 12

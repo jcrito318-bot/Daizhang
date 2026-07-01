@@ -17,6 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayOutputStream;
@@ -50,6 +51,7 @@ public class SubjectBalanceImportServiceImpl implements SubjectBalanceImportServ
     private static final String COL_BEGIN_CREDIT = "期初贷方";
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public ImportResultVO importBalances(Long accountSetId, Integer year, MultipartFile file) {
         List<Map<String, String>> rows;
         try {

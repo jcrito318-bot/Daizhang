@@ -605,6 +605,7 @@ CREATE TABLE `sal_employee` (
   `account_set_id` BIGINT NOT NULL COMMENT '账套ID',
   `employee_code` VARCHAR(50) NOT NULL COMMENT '员工编号',
   `employee_name` VARCHAR(50) NOT NULL COMMENT '员工姓名',
+  `base_salary` DECIMAL(18,2) DEFAULT 0.00 COMMENT '基本工资',
   `department` VARCHAR(100) DEFAULT NULL COMMENT '部门',
   `position` VARCHAR(100) DEFAULT NULL COMMENT '职位',
   `id_card` VARCHAR(20) DEFAULT NULL COMMENT '身份证号',
