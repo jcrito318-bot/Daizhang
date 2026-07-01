@@ -9,6 +9,7 @@ import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.module.accountset.entity.AccountPeriod;
 import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.amortization.dto.AmortizationRequest;
 import com.company.daizhang.module.amortization.entity.Amortization;
 import com.company.daizhang.module.amortization.mapper.AmortizationMapper;
@@ -42,6 +43,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AmortizationServiceImpl implements AmortizationService {
 
+    private final AccountSetAccessService accountSetAccessService;
     private final AmortizationMapper amortizationMapper;
     private final VoucherMapper voucherMapper;
     private final VoucherDetailMapper voucherDetailMapper;
@@ -79,6 +81,8 @@ public class AmortizationServiceImpl implements AmortizationService {
         if (amortization == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "长期待摊费用不存在");
         }
+        // IDOR治理:校验当前用户对该长期待摊费用所属账套的访问权
+        accountSetAccessService.checkAccess(amortization.getAccountSetId());
         return convertToVO(amortization);
     }
 
@@ -117,6 +121,8 @@ public class AmortizationServiceImpl implements AmortizationService {
         if (amortization == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "长期待摊费用不存在");
         }
+        // IDOR治理:校验当前用户对该长期待摊费用所属账套的所有者权限
+        accountSetAccessService.checkOwner(amortization.getAccountSetId());
 
         // 校验总月数必须大于0,防止除零异常
         if (request.getTotalMonths() == null || request.getTotalMonths() <= 0) {
@@ -153,6 +159,8 @@ public class AmortizationServiceImpl implements AmortizationService {
         if (amortization == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "长期待摊费用不存在");
         }
+        // IDOR治理:校验当前用户对该长期待摊费用所属账套的所有者权限
+        accountSetAccessService.checkOwner(amortization.getAccountSetId());
         amortizationMapper.deleteById(id);
     }
 
@@ -163,6 +171,8 @@ public class AmortizationServiceImpl implements AmortizationService {
         if (amortization == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "长期待摊费用不存在");
         }
+        // IDOR治理:校验当前用户对该长期待摊费用所属账套的所有者权限
+        accountSetAccessService.checkOwner(amortization.getAccountSetId());
 
         // 检查状态为摊销中
         if (amortization.getStatus() != null && amortization.getStatus() == 1) {
@@ -300,6 +310,8 @@ public class AmortizationServiceImpl implements AmortizationService {
         if (amortization == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "长期待摊费用不存在");
         }
+        // IDOR治理:校验当前用户对该长期待摊费用所属账套的所有者权限
+        accountSetAccessService.checkOwner(amortization.getAccountSetId());
         if (amortization.getStatus() != null && amortization.getStatus() == 1) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "该费用已摊完，无法生成摊销凭证");
         }

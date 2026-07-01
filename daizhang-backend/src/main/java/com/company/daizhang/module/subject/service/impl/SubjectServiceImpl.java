@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.subject.dto.SubjectCreateRequest;
 import com.company.daizhang.module.subject.dto.SubjectUpdateRequest;
 import com.company.daizhang.module.subject.entity.Subject;
@@ -33,6 +34,7 @@ import java.util.stream.Collectors;
 public class SubjectServiceImpl extends ServiceImpl<SubjectMapper, Subject> implements SubjectService {
     
     private final VoucherDetailMapper voucherDetailMapper;
+    private final AccountSetAccessService accountSetAccessService;
     
     // 科目编码正则：4位数字开头，可以有下级编码
     private static final Pattern SUBJECT_CODE_PATTERN = Pattern.compile("^\\d{4}(\\d{2})*$");
@@ -137,6 +139,8 @@ public class SubjectServiceImpl extends ServiceImpl<SubjectMapper, Subject> impl
         if (subject == null) {
             throw new BusinessException(ErrorCode.SUBJECT_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该科目所属账套的访问权
+        accountSetAccessService.checkAccess(subject.getAccountSetId());
         return convertToVO(subject);
     }
     
@@ -233,6 +237,8 @@ public class SubjectServiceImpl extends ServiceImpl<SubjectMapper, Subject> impl
         if (subject == null) {
             throw new BusinessException(ErrorCode.SUBJECT_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该科目所属账套的所有者权限
+        accountSetAccessService.checkOwner(subject.getAccountSetId());
         
         // 业务校验：科目名称不能为空
         if (StrUtil.isBlank(request.getSubjectName())) {
@@ -271,6 +277,8 @@ public class SubjectServiceImpl extends ServiceImpl<SubjectMapper, Subject> impl
         if (subject == null) {
             throw new BusinessException(ErrorCode.SUBJECT_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该科目所属账套的所有者权限
+        accountSetAccessService.checkOwner(subject.getAccountSetId());
         
         // 业务校验：检查是否存在下级科目
         LambdaQueryWrapper<Subject> childWrapper = new LambdaQueryWrapper<>();

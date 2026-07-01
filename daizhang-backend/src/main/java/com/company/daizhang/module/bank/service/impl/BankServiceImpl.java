@@ -9,6 +9,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.utils.SecurityUtils;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.bank.dto.*;
 import com.company.daizhang.module.bank.entity.BankReconciliation;
 import com.company.daizhang.module.bank.entity.BankTransaction;
@@ -56,6 +57,7 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
     private final VoucherDetailMapper voucherDetailMapper;
     private final SysUserMapper sysUserMapper;
     private final BankVoucherService bankVoucherService;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -119,6 +121,8 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
         if (transaction == null) {
             throw new BusinessException("银行流水不存在");
         }
+        // IDOR治理:校验当前用户对该流水所属账套的访问权
+        accountSetAccessService.checkAccess(transaction.getAccountSetId());
         return convertTransactionToVO(transaction);
     }
 
@@ -252,6 +256,8 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
         if (transaction == null) {
             throw new BusinessException("银行流水不存在");
         }
+        // IDOR治理:校验当前用户对该流水所属账套的所有者权限
+        accountSetAccessService.checkOwner(transaction.getAccountSetId());
         if (transaction.getMatchedStatus() == null || transaction.getMatchedStatus() != 1) {
             throw new BusinessException("该流水未匹配，无法取消");
         }
@@ -419,6 +425,8 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
         if (reconciliation == null) {
             throw new BusinessException("对账单不存在");
         }
+        // IDOR治理:校验当前用户对该对账单所属账套的访问权
+        accountSetAccessService.checkAccess(reconciliation.getAccountSetId());
 
         // 查询该月银行流水
         LocalDate startDate = LocalDate.of(reconciliation.getYear(), reconciliation.getMonth(), 1);
@@ -703,6 +711,8 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
         if (transaction == null) {
             throw new BusinessException("银行流水不存在");
         }
+        // IDOR治理:校验当前用户对该流水所属账套的所有者权限(写凭证)
+        accountSetAccessService.checkOwner(transaction.getAccountSetId());
         if (transaction.getMatchedStatus() != null && transaction.getMatchedStatus() == 1) {
             throw new BusinessException("该银行流水已匹配，无需生成凭证");
         }

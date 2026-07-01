@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.system.entity.SysUser;
 import com.company.daizhang.module.system.mapper.SysUserMapper;
 import com.company.daizhang.module.tax.dto.TaxDeclarationCreateRequest;
@@ -35,6 +36,7 @@ public class TaxDeclarationServiceImpl implements TaxDeclarationService {
 
     private final TaxDeclarationMapper taxDeclarationMapper;
     private final SysUserMapper sysUserMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Override
     public PageResult<TaxDeclarationVO> pageDeclarations(TaxDeclarationQueryRequest request) {
@@ -63,6 +65,8 @@ public class TaxDeclarationServiceImpl implements TaxDeclarationService {
         if (declaration == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "税务申报记录不存在");
         }
+        // IDOR治理:校验当前用户对该申报记录所属账套的访问权
+        accountSetAccessService.checkAccess(declaration.getAccountSetId());
         return convertToVO(declaration);
     }
 
@@ -86,6 +90,8 @@ public class TaxDeclarationServiceImpl implements TaxDeclarationService {
         if (declaration == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "税务申报记录不存在");
         }
+        // IDOR治理:校验当前用户对该申报记录所属账套的所有者权限
+        accountSetAccessService.checkOwner(declaration.getAccountSetId());
         // 已缴纳的记录不允许修改
         if (declaration.getStatus() != null && declaration.getStatus() == 2) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "已缴纳的申报记录不允许修改");
@@ -130,6 +136,8 @@ public class TaxDeclarationServiceImpl implements TaxDeclarationService {
         if (declaration == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "税务申报记录不存在");
         }
+        // IDOR治理:校验当前用户对该申报记录所属账套的所有者权限
+        accountSetAccessService.checkOwner(declaration.getAccountSetId());
         // 已申报或已缴纳的记录不允许删除
         if (declaration.getStatus() != null && declaration.getStatus() > 0) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "已申报或已缴纳的记录不允许删除");
@@ -145,6 +153,8 @@ public class TaxDeclarationServiceImpl implements TaxDeclarationService {
         if (declaration == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "税务申报记录不存在");
         }
+        // IDOR治理:校验当前用户对该申报记录所属账套的所有者权限(执行申报)
+        accountSetAccessService.checkOwner(declaration.getAccountSetId());
         if (declaration.getStatus() != null && declaration.getStatus() >= 1) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "该记录已申报，不能重复申报");
         }
@@ -165,6 +175,8 @@ public class TaxDeclarationServiceImpl implements TaxDeclarationService {
         if (declaration == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "税务申报记录不存在");
         }
+        // IDOR治理:校验当前用户对该申报记录所属账套的所有者权限(缴款)
+        accountSetAccessService.checkOwner(declaration.getAccountSetId());
         if (declaration.getStatus() == null || declaration.getStatus() != 1) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "该记录未申报，不能缴款");
         }

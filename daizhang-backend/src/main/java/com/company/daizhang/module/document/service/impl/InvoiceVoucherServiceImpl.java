@@ -6,6 +6,7 @@ import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.module.accountset.entity.AccountPeriod;
 import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.document.entity.InputInvoice;
 import com.company.daizhang.module.document.entity.OutputInvoice;
 import com.company.daizhang.module.document.mapper.InputInvoiceMapper;
@@ -45,6 +46,7 @@ public class InvoiceVoucherServiceImpl implements InvoiceVoucherService {
     private final SubjectMapper subjectMapper;
     private final AccountPeriodMapper accountPeriodMapper;
     private final VoucherWordMapper voucherWordMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     // 进项发票相关科目编码
     private static final String CODE_INVENTORY = "1405";          // 库存商品
@@ -76,6 +78,8 @@ public class InvoiceVoucherServiceImpl implements InvoiceVoucherService {
         }
 
         Long accountSetId = invoice.getAccountSetId();
+        // IDOR治理:校验当前用户对该发票所属账套的所有者权限（写凭证）
+        accountSetAccessService.checkOwner(accountSetId);
         LocalDate voucherDate = invoice.getInvoiceDate() != null ? invoice.getInvoiceDate() : LocalDate.now();
         int year = voucherDate.getYear();
         int month = voucherDate.getMonthValue();
@@ -143,6 +147,8 @@ public class InvoiceVoucherServiceImpl implements InvoiceVoucherService {
         }
 
         Long accountSetId = invoice.getAccountSetId();
+        // IDOR治理:校验当前用户对该发票所属账套的所有者权限（写凭证）
+        accountSetAccessService.checkOwner(accountSetId);
         LocalDate voucherDate = invoice.getInvoiceDate() != null ? invoice.getInvoiceDate() : LocalDate.now();
         int year = voucherDate.getYear();
         int month = voucherDate.getMonthValue();

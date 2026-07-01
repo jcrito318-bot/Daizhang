@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.document.dto.InputInvoiceRequest;
 import com.company.daizhang.module.document.dto.InvoiceQueryRequest;
 import com.company.daizhang.module.document.dto.OutputInvoiceRequest;
@@ -41,6 +42,7 @@ public class InvoiceServiceImpl implements InvoiceService {
     private final InputInvoiceMapper inputInvoiceMapper;
     private final OutputInvoiceMapper outputInvoiceMapper;
     private final SysUserMapper sysUserMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     // ==================== 进项发票 ====================
 
@@ -72,6 +74,8 @@ public class InvoiceServiceImpl implements InvoiceService {
         if (invoice == null) {
             throw new BusinessException(ErrorCode.INPUT_INVOICE_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该发票所属账套的访问权
+        accountSetAccessService.checkAccess(invoice.getAccountSetId());
         return convertToInputVO(invoice);
     }
 
@@ -94,6 +98,8 @@ public class InvoiceServiceImpl implements InvoiceService {
         if (invoice == null) {
             throw new BusinessException(ErrorCode.INPUT_INVOICE_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该发票所属账套的所有者权限
+        accountSetAccessService.checkOwner(invoice.getAccountSetId());
 
         // 已认证或已作废的发票不允许修改
         if (invoice.getAuthStatus() != null && invoice.getAuthStatus() != 0) {
@@ -114,6 +120,8 @@ public class InvoiceServiceImpl implements InvoiceService {
         if (invoice == null) {
             throw new BusinessException(ErrorCode.INPUT_INVOICE_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该发票所属账套的所有者权限
+        accountSetAccessService.checkOwner(invoice.getAccountSetId());
         // 已生成凭证的发票不可删除，否则产生孤儿凭证
         if (invoice.getVoucherId() != null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "发票已生成凭证，不可删除/作废，请先红冲原凭证");
@@ -128,6 +136,8 @@ public class InvoiceServiceImpl implements InvoiceService {
         if (invoice == null) {
             throw new BusinessException(ErrorCode.INPUT_INVOICE_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该发票所属账套的所有者权限
+        accountSetAccessService.checkOwner(invoice.getAccountSetId());
 
         if (invoice.getAuthStatus() != null && invoice.getAuthStatus() == 1) {
             throw new BusinessException(ErrorCode.INPUT_INVOICE_ALREADY_AUTHENTICATED);
@@ -171,6 +181,8 @@ public class InvoiceServiceImpl implements InvoiceService {
         if (invoice == null) {
             throw new BusinessException(ErrorCode.OUTPUT_INVOICE_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该发票所属账套的访问权
+        accountSetAccessService.checkAccess(invoice.getAccountSetId());
         return convertToOutputVO(invoice);
     }
 
@@ -193,6 +205,8 @@ public class InvoiceServiceImpl implements InvoiceService {
         if (invoice == null) {
             throw new BusinessException(ErrorCode.OUTPUT_INVOICE_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该发票所属账套的所有者权限
+        accountSetAccessService.checkOwner(invoice.getAccountSetId());
 
         // 已作废或已红冲的发票不允许修改
         if (invoice.getInvoiceStatus() != null && invoice.getInvoiceStatus() != 0) {
@@ -213,6 +227,8 @@ public class InvoiceServiceImpl implements InvoiceService {
         if (invoice == null) {
             throw new BusinessException(ErrorCode.OUTPUT_INVOICE_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该发票所属账套的所有者权限
+        accountSetAccessService.checkOwner(invoice.getAccountSetId());
         // 已生成凭证的发票不可删除，否则产生孤儿凭证
         if (invoice.getVoucherId() != null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "发票已生成凭证，不可删除/作废，请先红冲原凭证");
@@ -227,6 +243,8 @@ public class InvoiceServiceImpl implements InvoiceService {
         if (invoice == null) {
             throw new BusinessException(ErrorCode.OUTPUT_INVOICE_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该发票所属账套的所有者权限
+        accountSetAccessService.checkOwner(invoice.getAccountSetId());
         // 已生成凭证的发票不可作废，否则产生孤儿凭证
         if (invoice.getVoucherId() != null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "发票已生成凭证，不可删除/作废，请先红冲原凭证");

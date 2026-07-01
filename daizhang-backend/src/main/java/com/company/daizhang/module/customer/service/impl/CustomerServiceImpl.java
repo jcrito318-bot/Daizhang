@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.biz.entity.ServiceTask;
 import com.company.daizhang.module.biz.mapper.ServiceTaskMapper;
 import com.company.daizhang.module.customer.dto.CustomerCreateRequest;
@@ -62,6 +63,7 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
     private final OutputInvoiceMapper outputInvoiceMapper;
     private final ServiceTaskMapper serviceTaskMapper;
     private final ServiceReportMapper serviceReportMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     /**
      * 合法的客户等级(对应Customer实体customerLevel字段注释)
@@ -106,6 +108,8 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         if (customer == null) {
             throw new BusinessException(404, "客户不存在");
         }
+        // IDOR治理:校验当前用户对该客户所属账套的访问权
+        accountSetAccessService.checkAccess(customer.getAccountSetId());
         return convertToVO(customer);
     }
 
@@ -137,6 +141,8 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         if (customer == null) {
             throw new BusinessException(404, "客户不存在");
         }
+        // IDOR治理:校验当前用户对该客户所属账套的所有者权限
+        accountSetAccessService.checkOwner(customer.getAccountSetId());
 
         // 排除状态字段:customerStatus/status变更必须走专用方法updateCustomerStatus,
         // 否则通用更新可绕过状态机前置校验直接改写业务状态
@@ -151,6 +157,8 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         if (customer == null) {
             throw new BusinessException(404, "客户不存在");
         }
+        // IDOR治理:校验当前用户对该客户所属账套的所有者权限(放在关联校验前)
+        accountSetAccessService.checkOwner(customer.getAccountSetId());
 
         // 校验客户是否存在关联业务记录,避免删除后产生孤儿数据
         LambdaQueryWrapper<ServiceContract> contractWrapper = new LambdaQueryWrapper<>();
@@ -200,6 +208,8 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         if (customer == null) {
             throw new BusinessException(404, "客户不存在");
         }
+        // IDOR治理:校验当前用户对该客户所属账套的访问权
+        accountSetAccessService.checkAccess(customer.getAccountSetId());
 
         CustomerProfileVO profile = new CustomerProfileVO();
         profile.setCustomer(convertToVO(customer));
@@ -440,6 +450,8 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         if (customer == null) {
             throw new BusinessException(404, "客户不存在");
         }
+        // IDOR治理:校验当前用户对该客户所属账套的所有者权限
+        accountSetAccessService.checkOwner(customer.getAccountSetId());
         customer.setCustomerStatus(status);
         this.updateById(customer);
     }
@@ -455,6 +467,8 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         if (customer == null) {
             throw new BusinessException(404, "客户不存在");
         }
+        // IDOR治理:校验当前用户对该客户所属账套的所有者权限
+        accountSetAccessService.checkOwner(customer.getAccountSetId());
         customer.setCustomerLevel(level);
         this.updateById(customer);
     }
@@ -534,6 +548,8 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         if (customer == null) {
             throw new BusinessException(404, "客户不存在");
         }
+        // IDOR治理:校验当前用户对该客户所属账套的访问权
+        accountSetAccessService.checkAccess(customer.getAccountSetId());
         return buildArrearsVO(customer);
     }
 

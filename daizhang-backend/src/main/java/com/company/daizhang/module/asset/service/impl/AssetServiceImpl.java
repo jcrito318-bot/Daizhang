@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.asset.dto.*;
 import com.company.daizhang.module.asset.entity.AssetCategory;
 import com.company.daizhang.module.asset.entity.DepreciationRecord;
@@ -50,6 +51,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> implements AssetService {
 
+    private final AccountSetAccessService accountSetAccessService;
     private final AssetCategoryMapper assetCategoryMapper;
     private final DepreciationRecordMapper depreciationRecordMapper;
     private final VoucherService voucherService;
@@ -85,6 +87,8 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         if (category == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "资产分类不存在");
         }
+        // IDOR治理:校验当前用户对该资产分类所属账套的访问权
+        accountSetAccessService.checkAccess(category.getAccountSetId());
         return convertCategoryToVO(category);
     }
 
@@ -112,6 +116,8 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         if (category == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "资产分类不存在");
         }
+        // IDOR治理:校验当前用户对该资产分类所属账套的所有者权限
+        accountSetAccessService.checkOwner(category.getAccountSetId());
 
         BeanUtil.copyProperties(request, category);
         assetCategoryMapper.updateById(category);
@@ -124,6 +130,8 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         if (category == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "资产分类不存在");
         }
+        // IDOR治理:校验当前用户对该资产分类所属账套的所有者权限
+        accountSetAccessService.checkOwner(category.getAccountSetId());
 
         // 检查是否有子分类
         LambdaQueryWrapper<AssetCategory> childWrapper = new LambdaQueryWrapper<>();
@@ -186,6 +194,8 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         if (asset == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "固定资产不存在");
         }
+        // IDOR治理:校验当前用户对该资产所属账套的访问权
+        accountSetAccessService.checkAccess(asset.getAccountSetId());
         return convertAssetToVO(asset);
     }
 
@@ -234,6 +244,8 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         if (asset == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "固定资产不存在");
         }
+        // IDOR治理:校验当前用户对该资产所属账套的所有者权限
+        accountSetAccessService.checkOwner(asset.getAccountSetId());
 
         // 如果修改了分类，更新分类名称
         if (request.getCategoryId() != null && !request.getCategoryId().equals(asset.getCategoryId())) {
@@ -270,6 +282,8 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         if (asset == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "固定资产不存在");
         }
+        // IDOR治理:校验当前用户对该资产所属账套的所有者权限
+        accountSetAccessService.checkOwner(asset.getAccountSetId());
 
         // 检查是否有折旧记录
         LambdaQueryWrapper<DepreciationRecord> recordWrapper = new LambdaQueryWrapper<>();
@@ -289,6 +303,8 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         if (asset == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "固定资产不存在");
         }
+        // IDOR治理:校验当前用户对该资产所属账套的所有者权限
+        accountSetAccessService.checkOwner(asset.getAccountSetId());
 
         asset.setStatus(request.getTargetStatus());
         if (StrUtil.isNotBlank(request.getRemark())) {
@@ -328,6 +344,8 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         if (record == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "折旧记录不存在");
         }
+        // IDOR治理:校验当前用户对该折旧记录所属账套的访问权
+        accountSetAccessService.checkAccess(record.getAccountSetId());
         return convertRecordToVO(record);
     }
 
@@ -431,6 +449,8 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         if (record == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "折旧记录不存在");
         }
+        // IDOR治理:校验当前用户对该折旧记录所属账套的所有者权限
+        accountSetAccessService.checkOwner(record.getAccountSetId());
 
         if (record.getVoucherId() != null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "该折旧记录已生成凭证");

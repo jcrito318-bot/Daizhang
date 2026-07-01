@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.document.dto.DocumentCreateRequest;
 import com.company.daizhang.module.document.dto.DocumentQueryRequest;
 import com.company.daizhang.module.document.dto.DocumentUpdateRequest;
@@ -46,6 +47,7 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
 
     private final VoucherMapper voucherMapper;
     private final SysUserMapper sysUserMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Override
     public PageResult<DocumentVO> pageDocuments(DocumentQueryRequest request) {
@@ -78,6 +80,8 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
         if (document == null) {
             throw new BusinessException(ErrorCode.DOCUMENT_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该票据所属账套的访问权
+        accountSetAccessService.checkAccess(document.getAccountSetId());
         return convertToVO(document);
     }
 
@@ -114,6 +118,8 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
         if (document == null) {
             throw new BusinessException(ErrorCode.DOCUMENT_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该票据所属账套的所有者权限
+        accountSetAccessService.checkOwner(document.getAccountSetId());
 
         // 已关联凭证或已归档的票据不允许修改
         if (document.getStatus() != null && document.getStatus() >= 1) {
@@ -131,6 +137,8 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
         if (document == null) {
             throw new BusinessException(ErrorCode.DOCUMENT_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该票据所属账套的所有者权限
+        accountSetAccessService.checkOwner(document.getAccountSetId());
 
         // 已关联凭证或已归档的票据不允许删除
         if (document.getStatus() != null && document.getStatus() >= 1) {
@@ -147,6 +155,8 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
         if (document == null) {
             throw new BusinessException(ErrorCode.DOCUMENT_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该票据所属账套的所有者权限
+        accountSetAccessService.checkOwner(document.getAccountSetId());
 
         // 已关联凭证的票据不可重复关联,否则原voucherId被覆盖,丢失原关联且无审计痕迹
         if (document.getStatus() != null && document.getStatus() == 1) {
@@ -170,6 +180,8 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
         if (document == null) {
             throw new BusinessException(ErrorCode.DOCUMENT_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该票据所属账套的所有者权限
+        accountSetAccessService.checkOwner(document.getAccountSetId());
 
         if (document.getStatus() == null || document.getStatus() != 1) {
             throw new BusinessException(ErrorCode.DOCUMENT_NOT_LINKED);

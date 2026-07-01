@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.salary.dto.*;
 import com.company.daizhang.module.salary.entity.Employee;
 import com.company.daizhang.module.salary.entity.SalaryItem;
@@ -55,6 +56,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
     private final EmployeeMapper employeeMapper;
     private final SalaryItemMapper salaryItemMapper;
     private final SalarySheetMapper salarySheetMapper;
+    private final AccountSetAccessService accountSetAccessService;
     private final SocialSecurityConfigService socialSecurityConfigService;
     private final SpecialDeductionService specialDeductionService;
     private final SubjectMapper subjectMapper;
@@ -92,6 +94,8 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         if (employee == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "员工不存在");
         }
+        // IDOR治理:校验当前用户对该员工所属账套的访问权
+        accountSetAccessService.checkAccess(employee.getAccountSetId());
         return convertEmployeeToVO(employee);
     }
 
@@ -122,6 +126,8 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         if (employee == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "员工不存在");
         }
+        // IDOR治理:校验当前用户对该员工所属账套的所有者权限
+        accountSetAccessService.checkOwner(employee.getAccountSetId());
 
         // 如果修改了员工编号，检查是否与其他员工重复
         if (request.getEmployeeCode() != null && !request.getEmployeeCode().equals(employee.getEmployeeCode())) {
@@ -146,6 +152,8 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         if (employee == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "员工不存在");
         }
+        // IDOR治理:校验当前用户对该员工所属账套的所有者权限
+        accountSetAccessService.checkOwner(employee.getAccountSetId());
 
         // 检查是否有薪资记录
         LambdaQueryWrapper<SalarySheet> wrapper = new LambdaQueryWrapper<>();
@@ -186,6 +194,8 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         if (salaryItem == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "薪资项目不存在");
         }
+        // IDOR治理:校验当前用户对该薪资项目所属账套的访问权
+        accountSetAccessService.checkAccess(salaryItem.getAccountSetId());
         return convertSalaryItemToVO(salaryItem);
     }
 
@@ -213,6 +223,8 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         if (salaryItem == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "薪资项目不存在");
         }
+        // IDOR治理:校验当前用户对该薪资项目所属账套的所有者权限
+        accountSetAccessService.checkOwner(salaryItem.getAccountSetId());
 
         // 如果修改了项目编码，检查是否与其他项目重复
         if (request.getItemCode() != null && !request.getItemCode().equals(salaryItem.getItemCode())) {
@@ -237,6 +249,8 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         if (salaryItem == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "薪资项目不存在");
         }
+        // IDOR治理:校验当前用户对该薪资项目所属账套的所有者权限
+        accountSetAccessService.checkOwner(salaryItem.getAccountSetId());
         salaryItemMapper.deleteById(id);
     }
 
@@ -270,6 +284,8 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         if (salarySheet == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "薪资表不存在");
         }
+        // IDOR治理:校验当前用户对该薪资表所属账套的访问权
+        accountSetAccessService.checkAccess(salarySheet.getAccountSetId());
         return convertSalarySheetToVO(salarySheet);
     }
 
@@ -311,6 +327,8 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         if (salarySheet == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "薪资表不存在");
         }
+        // IDOR治理:校验当前用户对该薪资表所属账套的所有者权限
+        accountSetAccessService.checkOwner(salarySheet.getAccountSetId());
 
         // 已确认或已发放的不能修改
         if (salarySheet.getStatus() != null && salarySheet.getStatus() != 0) {
@@ -332,6 +350,8 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         if (salarySheet == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "薪资表不存在");
         }
+        // IDOR治理:校验当前用户对该薪资表所属账套的所有者权限
+        accountSetAccessService.checkOwner(salarySheet.getAccountSetId());
 
         // 只有草稿状态才能删除
         if (salarySheet.getStatus() != null && salarySheet.getStatus() != 0) {
@@ -348,6 +368,8 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         if (salarySheet == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "薪资表不存在");
         }
+        // IDOR治理:校验当前用户对该薪资表所属账套的所有者权限(确认)
+        accountSetAccessService.checkOwner(salarySheet.getAccountSetId());
 
         if (salarySheet.getStatus() == null || salarySheet.getStatus() != 0) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "只能确认草稿状态的薪资记录");
@@ -364,6 +386,8 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         if (salarySheet == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "薪资表不存在");
         }
+        // IDOR治理:校验当前用户对该薪资表所属账套的所有者权限(发放)
+        accountSetAccessService.checkOwner(salarySheet.getAccountSetId());
 
         if (salarySheet.getStatus() == null || salarySheet.getStatus() != 1) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "只能发放已确认状态的薪资记录");

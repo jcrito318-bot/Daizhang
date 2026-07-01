@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.customer.dto.ContractCreateRequest;
 import com.company.daizhang.module.customer.dto.ContractQueryRequest;
 import com.company.daizhang.module.customer.dto.ContractUpdateRequest;
@@ -35,6 +36,7 @@ import java.util.stream.Collectors;
 public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, ServiceContract> implements ContractService {
 
     private final CustomerMapper customerMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Override
     public PageResult<ContractVO> pageContracts(ContractQueryRequest request) {
@@ -75,6 +77,8 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
         if (contract == null) {
             throw new BusinessException(404, "合同不存在");
         }
+        // IDOR治理:校验当前用户对该合同所属账套的访问权
+        accountSetAccessService.checkAccess(contract.getAccountSetId());
         return convertToVO(contract);
     }
 
@@ -111,6 +115,8 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
         if (contract == null) {
             throw new BusinessException(404, "合同不存在");
         }
+        // IDOR治理:校验当前用户对该合同所属账套的所有者权限
+        accountSetAccessService.checkOwner(contract.getAccountSetId());
         // 保存原状态,防止copyProperties覆盖status绕过状态机(状态变更只能走专用接口)
         Integer originalStatus = contract.getStatus();
         // 使用ignoreNullValue避免Hutool默认拷贝null导致部分更新时字段被置空
@@ -127,6 +133,8 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
         if (contract == null) {
             throw new BusinessException(404, "合同不存在");
         }
+        // IDOR治理:校验当前用户对该合同所属账套的所有者权限
+        accountSetAccessService.checkOwner(contract.getAccountSetId());
 
         this.removeById(id);
     }

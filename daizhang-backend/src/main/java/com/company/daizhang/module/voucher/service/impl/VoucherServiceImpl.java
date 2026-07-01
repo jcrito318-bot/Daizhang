@@ -16,6 +16,7 @@ import com.company.daizhang.module.accountset.entity.SubjectBalance;
 import com.company.daizhang.module.accountset.mapper.AccountBalanceMapper;
 import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
 import com.company.daizhang.module.accountset.mapper.SubjectBalanceMapper;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.subject.entity.Subject;
 import com.company.daizhang.module.subject.mapper.SubjectMapper;
 import com.company.daizhang.module.system.entity.SysUser;
@@ -59,6 +60,7 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     private final SysUserMapper sysUserMapper;
     private final SubjectMapper subjectMapper;
     private final SubjectBalanceMapper subjectBalanceMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Override
     public PageResult<VoucherVO> pageVouchers(VoucherQueryRequest request) {
@@ -89,6 +91,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         if (voucher == null) {
             throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该凭证所属账套的访问权
+        accountSetAccessService.checkAccess(voucher.getAccountSetId());
 
         VoucherVO vo = convertToVO(voucher);
 
@@ -189,6 +193,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         if (voucher == null) {
             throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该凭证所属账套的所有者权限
+        accountSetAccessService.checkOwner(voucher.getAccountSetId());
 
         // 只有未审核的凭证才能修改
         if (voucher.getStatus() != 0) {
@@ -277,6 +283,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         if (voucher == null) {
             throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该凭证所属账套的所有者权限
+        accountSetAccessService.checkOwner(voucher.getAccountSetId());
 
         // 只有未审核的凭证才能删除
         if (voucher.getStatus() != 0) {
@@ -304,6 +312,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         if (voucher == null) {
             throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该凭证所属账套的所有者权限
+        accountSetAccessService.checkOwner(voucher.getAccountSetId());
 
         // 不能重复审核
         if (voucher.getStatus() != 0) {
@@ -336,6 +346,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         if (voucher == null) {
             throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该凭证所属账套的所有者权限
+        accountSetAccessService.checkOwner(voucher.getAccountSetId());
 
         // 只有已审核且未过账的凭证才能反审核
         if (voucher.getStatus() != 1) {
@@ -373,6 +385,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                 errors.add("凭证ID=" + id + " 不存在");
                 continue;
             }
+            // IDOR治理:校验当前用户对该凭证所属账套的所有者权限
+            accountSetAccessService.checkOwner(voucher.getAccountSetId());
             if (voucher.getStatus() != null && voucher.getStatus() != 0) {
                 errors.add("凭证" + voucher.getVoucherNo() + " 非未审核状态，不能审核");
                 continue;
@@ -418,6 +432,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                 errors.add("凭证ID=" + id + " 不存在");
                 continue;
             }
+            // IDOR治理:校验当前用户对该凭证所属账套的所有者权限
+            accountSetAccessService.checkOwner(voucher.getAccountSetId());
             // 只有已审核且未过账的凭证才能反审核
             if (voucher.getStatus() == null || voucher.getStatus() != 1) {
                 errors.add("凭证" + voucher.getVoucherNo() + " 非已审核状态，不能反审核");
@@ -451,6 +467,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         if (voucher == null) {
             throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该凭证所属账套的所有者权限
+        accountSetAccessService.checkOwner(voucher.getAccountSetId());
 
         // 只有已审核的凭证才能过账
         if (voucher.getStatus() != 1) {
@@ -690,6 +708,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         if (original == null) {
             throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该凭证所属账套的访问权
+        accountSetAccessService.checkAccess(original.getAccountSetId());
 
         // 校验目标期间存在且未结账（复制等同于在原期间新建凭证，须遵守期间约束）
         AccountPeriod period = checkPeriodExists(original.getAccountSetId(), original.getYear(), original.getMonth());
@@ -758,6 +778,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         if (original == null) {
             throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该凭证所属账套的所有者权限
+        accountSetAccessService.checkOwner(original.getAccountSetId());
         // 红冲仅对已过账凭证有意义（status=2），未审核/未过账凭证不可红冲
         if (original.getStatus() == null || original.getStatus() != 2) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "只有已过账的凭证才能红冲");
@@ -952,6 +974,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         if (voucher == null) {
             throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该凭证所属账套的所有者权限
+        accountSetAccessService.checkOwner(voucher.getAccountSetId());
 
         // 只有草稿凭证才能提交
         if (voucher.getDraftStatus() == null || voucher.getDraftStatus() != 1) {

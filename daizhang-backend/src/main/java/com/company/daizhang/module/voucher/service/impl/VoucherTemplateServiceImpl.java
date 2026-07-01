@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.voucher.dto.VoucherTemplateRequest;
 import com.company.daizhang.module.voucher.entity.VoucherTemplate;
 import com.company.daizhang.module.voucher.entity.VoucherTemplateDetail;
@@ -33,6 +34,7 @@ import java.util.stream.Collectors;
 public class VoucherTemplateServiceImpl extends ServiceImpl<VoucherTemplateMapper, VoucherTemplate> implements VoucherTemplateService {
 
     private final VoucherTemplateDetailMapper voucherTemplateDetailMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Override
     public PageResult<VoucherTemplateVO> pageTemplates(Long accountSetId, String templateName, int pageNum, int pageSize) {
@@ -58,6 +60,8 @@ public class VoucherTemplateServiceImpl extends ServiceImpl<VoucherTemplateMappe
         if (template == null) {
             throw new BusinessException(ErrorCode.VOUCHER_TEMPLATE_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该模板所属账套的访问权
+        accountSetAccessService.checkAccess(template.getAccountSetId());
 
         VoucherTemplateVO vo = convertToVO(template);
 
@@ -101,6 +105,8 @@ public class VoucherTemplateServiceImpl extends ServiceImpl<VoucherTemplateMappe
         if (template == null) {
             throw new BusinessException(ErrorCode.VOUCHER_TEMPLATE_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该模板所属账套的所有者权限
+        accountSetAccessService.checkOwner(template.getAccountSetId());
 
         // 业务校验：模板明细不能为空
         if (request.getDetails() == null || request.getDetails().isEmpty()) {
@@ -130,6 +136,8 @@ public class VoucherTemplateServiceImpl extends ServiceImpl<VoucherTemplateMappe
         if (template == null) {
             throw new BusinessException(ErrorCode.VOUCHER_TEMPLATE_NOT_FOUND);
         }
+        // IDOR治理:校验当前用户对该模板所属账套的所有者权限
+        accountSetAccessService.checkOwner(template.getAccountSetId());
 
         // 删除模板明细
         LambdaQueryWrapper<VoucherTemplateDetail> detailWrapper = new LambdaQueryWrapper<>();
