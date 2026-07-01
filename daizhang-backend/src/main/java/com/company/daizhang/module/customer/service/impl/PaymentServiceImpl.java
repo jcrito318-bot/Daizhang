@@ -123,6 +123,19 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
             throw new BusinessException(404, "收款记录不存在");
         }
 
+        // 若变更了合同,校验新合同存在且归属于同一客户,防止收款记录关联到错误合同
+        if (request.getContractId() != null
+                && !request.getContractId().equals(payment.getContractId())) {
+            ServiceContract newContract = contractMapper.selectById(request.getContractId());
+            if (newContract == null) {
+                throw new BusinessException(404, "合同不存在");
+            }
+            if (newContract.getCustomerId() == null
+                    || !newContract.getCustomerId().equals(payment.getCustomerId())) {
+                throw new BusinessException(403, "合同不属于该客户，不能关联");
+            }
+        }
+
         BeanUtil.copyProperties(request, payment);
         this.updateById(payment);
     }

@@ -165,21 +165,32 @@ public class InvoiceVoucherServiceImpl implements InvoiceVoucherService {
             totalAmount = amount.add(taxAmount);
         }
 
+        // 红冲/负数发票：金额为负时借贷方向反转，金额取绝对值，避免应交税费贷方余额为负（多交税款应挂借方）
+        boolean isNegative = amount.compareTo(BigDecimal.ZERO) < 0;
+        BigDecimal absAmount = amount.abs();
+        BigDecimal absTaxAmount = taxAmount.abs();
+        BigDecimal absTotalAmount = totalAmount.abs();
+
         String buyerName = StrUtil.isBlank(invoice.getBuyerName()) ? "销项发票" : invoice.getBuyerName();
         String summary = "销售收款-" + buyerName;
 
         // 创建凭证
-        Voucher voucher = buildVoucher(accountSetId, voucherDate, year, month, totalAmount, totalAmount);
+        Voucher voucher = buildVoucher(accountSetId, voucherDate, year, month, absTotalAmount, absTotalAmount);
         voucherMapper.insert(voucher);
 
         // 创建凭证明细
         List<VoucherDetail> details = new ArrayList<>();
-        // 借: 应收账款 金额=价税合计
-        details.add(buildDetail(voucher.getId(), 1, summary, receivableSubjectId, accountSetId, CODE_ACCOUNTS_RECEIVABLE, totalAmount, BigDecimal.ZERO));
-        // 贷: 主营业务收入 金额=不含税金额
-        details.add(buildDetail(voucher.getId(), 2, summary, revenueSubjectId, accountSetId, CODE_MAIN_REVENUE, BigDecimal.ZERO, amount));
-        // 贷: 应交税费-销项税额 金额=税额
-        details.add(buildDetail(voucher.getId(), 3, summary, outputTaxSubjectId, accountSetId, CODE_OUTPUT_TAX, BigDecimal.ZERO, taxAmount));
+        if (!isNegative) {
+            // 正常销售：借:应收账款(价税合计) 贷:主营业务收入(不含税) 贷:应交税费-销项税额(税额)
+            details.add(buildDetail(voucher.getId(), 1, summary, receivableSubjectId, accountSetId, CODE_ACCOUNTS_RECEIVABLE, absTotalAmount, BigDecimal.ZERO));
+            details.add(buildDetail(voucher.getId(), 2, summary, revenueSubjectId, accountSetId, CODE_MAIN_REVENUE, BigDecimal.ZERO, absAmount));
+            details.add(buildDetail(voucher.getId(), 3, summary, outputTaxSubjectId, accountSetId, CODE_OUTPUT_TAX, BigDecimal.ZERO, absTaxAmount));
+        } else {
+            // 红冲/负数：借贷方向反转 借:主营业务收入(不含税) 借:应交税费-销项税额(税额) 贷:应收账款(价税合计)
+            details.add(buildDetail(voucher.getId(), 1, summary, revenueSubjectId, accountSetId, CODE_MAIN_REVENUE, absAmount, BigDecimal.ZERO));
+            details.add(buildDetail(voucher.getId(), 2, summary, outputTaxSubjectId, accountSetId, CODE_OUTPUT_TAX, absTaxAmount, BigDecimal.ZERO));
+            details.add(buildDetail(voucher.getId(), 3, summary, receivableSubjectId, accountSetId, CODE_ACCOUNTS_RECEIVABLE, BigDecimal.ZERO, absTotalAmount));
+        }
         for (VoucherDetail detail : details) {
             voucherDetailMapper.insert(detail);
         }
@@ -342,8 +353,7 @@ public class InvoiceVoucherServiceImpl implements InvoiceVoucherService {
                .eq(Voucher::getYear, year)
                .eq(Voucher::getMonth, month)
                .notLike(Voucher::getVoucherNo, "TMP-%")
-               .orderByDesc(Voucher::getVoucherNo)
-               .last("LIMIT 1");
+               .last("ORDER BY CAST(SUBSTRING_INDEX(voucher_no, '-', -1) AS UNSIGNED) DESC LIMIT 1");
         Voucher lastVoucher = voucherMapper.selectOne(wrapper);
 
         int sequence = 1;

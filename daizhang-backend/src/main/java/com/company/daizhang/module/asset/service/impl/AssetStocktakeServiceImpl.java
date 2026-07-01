@@ -289,7 +289,9 @@ public class AssetStocktakeServiceImpl implements AssetStocktakeService {
             BigDecimal diff = d.getDiffAmount() != null ? d.getDiffAmount() : BigDecimal.ZERO;
             if (RESULT_GAIN.equals(d.getResult()) && diff.compareTo(BigDecimal.ZERO) > 0) {
                 gainAmount = gainAmount.add(diff);
-            } else if (RESULT_LOSS.equals(d.getResult()) && diff.compareTo(BigDecimal.ZERO) < 0) {
+            } else if (RESULT_LOSS.equals(d.getResult())) {
+                // 盘亏金额取绝对值,兼容 diffAmount 为负(实盘-账面)或正(损失金额)两种存法;
+                // 原条件 `diff < 0` 在盘亏金额为正时跳过该明细,导致 lossAmount 为 0、盘亏无凭证记录
                 lossAmount = lossAmount.add(diff.abs());
             }
         }

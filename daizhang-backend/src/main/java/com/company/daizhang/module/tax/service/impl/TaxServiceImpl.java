@@ -65,6 +65,12 @@ public class TaxServiceImpl implements TaxService {
     private final CustomerMapper customerMapper;
     private final com.company.daizhang.module.salary.mapper.EmployeeMapper employeeMapper;
 
+    /**
+     * 残疾人就业保障金安置比例（1.5%）。
+     * 不同地区/客户政策可能不同（部分地区有减免），提取为常量便于统一调整。
+     */
+    private static final BigDecimal DISABILITY_EMPLOYMENT_RATE = new BigDecimal("0.015");
+
     @Override
     public TaxDeclarationFormVO generateDeclarationForm(Long accountSetId, Integer year, Integer month, String formType) {
         AccountSet accountSet = accountSetMapper.selectById(accountSetId);
@@ -216,10 +222,6 @@ public class TaxServiceImpl implements TaxService {
 
         // 当前日期
         LocalDate today = LocalDate.now();
-        // 上月所属年月
-        YearMonth lastMonth = YearMonth.now().minusMonths(1);
-        Integer lastYear = lastMonth.getYear();
-        Integer lastMonthValue = lastMonth.getMonthValue();
 
         // 申报截止日为次月15日（即当月15日）
         LocalDate deadline = LocalDate.of(today.getYear(), today.getMonthValue(), 15);
@@ -228,6 +230,13 @@ public class TaxServiceImpl implements TaxService {
             YearMonth nextMonth = YearMonth.now().plusMonths(1);
             deadline = LocalDate.of(nextMonth.getYear(), nextMonth.getMonthValue(), 15);
         }
+
+        // 税款所属期 = 截止日所在月份 - 1（如截止日8月15日则属期为7月）
+        // 原实现直接取 YearMonth.now().minusMonths(1)，当 today>15 截止日顺延至下月时
+        // 属期仍为上月，导致提醒期间与截止日错配
+        YearMonth lastMonth = YearMonth.from(deadline).minusMonths(1);
+        Integer lastYear = lastMonth.getYear();
+        Integer lastMonthValue = lastMonth.getMonthValue();
 
         int daysRemaining = (int) java.time.temporal.ChronoUnit.DAYS.between(today, deadline);
 
@@ -373,8 +382,11 @@ public class TaxServiceImpl implements TaxService {
             BigDecimal expectedAmount = form.getTaxAmount() != null ? form.getTaxAmount() : BigDecimal.ZERO;
             BigDecimal declaredAmount = declaration.getDeclaredAmount() != null ? declaration.getDeclaredAmount() : BigDecimal.ZERO;
 
+            // 仅当系统计算金额>0（避免除零）且已申报金额非null时进行差异校验。
+            // 0申报也是有效申报（免税企业/零申报），不应因金额为0而跳过校验，
+            // 否则系统计算>0而申报0元的差异会被遗漏。
             if (expectedAmount.compareTo(BigDecimal.ZERO) > 0
-                    && declaredAmount.compareTo(BigDecimal.ZERO) > 0) {
+                    && declaration.getDeclaredAmount() != null) {
                 BigDecimal diff = expectedAmount.subtract(declaredAmount).abs();
                 BigDecimal ratio = diff.divide(expectedAmount, 4, RoundingMode.HALF_UP);
                 if (ratio.compareTo(new BigDecimal("0.05")) > 0) {
@@ -1005,8 +1017,8 @@ public class TaxServiceImpl implements TaxService {
         }
         BigDecimal avgSalary = empCount > 0 ? totalSalary.divide(new BigDecimal(empCount), 2, RoundingMode.HALF_UP) : BigDecimal.ZERO;
 
-        // 安置比例1.5%
-        BigDecimal placementRate = new BigDecimal("0.015");
+        // 安置比例1.5%（提取为类常量 DISABILITY_EMPLOYMENT_RATE，便于按客户/地区政策调整）
+        BigDecimal placementRate = DISABILITY_EMPLOYMENT_RATE;
         int disabledEmployees = 0;
         BigDecimal requiredDisabled = new BigDecimal(empCount).multiply(placementRate);
         BigDecimal actualDisabled = new BigDecimal(disabledEmployees);

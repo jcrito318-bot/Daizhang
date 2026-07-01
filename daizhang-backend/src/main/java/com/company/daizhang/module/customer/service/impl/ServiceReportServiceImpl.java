@@ -112,7 +112,8 @@ public class ServiceReportServiceImpl extends ServiceImpl<ServiceReportMapper, S
             throw new BusinessException(400, "已发布的报告不能修改");
         }
 
-        BeanUtil.copyProperties(request, report);
+        // 使用ignoreNullValue避免request中status为null时把已有status覆盖为null,导致已审核状态丢失
+        BeanUtil.copyProperties(request, report, cn.hutool.core.bean.copier.CopyOptions.create().ignoreNullValue());
         report.setId(id);
         this.updateById(report);
         log.info("更新服务报告成功，报告ID: {}", id);

@@ -346,8 +346,7 @@ public class BankVoucherServiceImpl implements BankVoucherService {
                .eq(Voucher::getYear, year)
                .eq(Voucher::getMonth, month)
                .notLike(Voucher::getVoucherNo, "TMP-%")
-               .orderByDesc(Voucher::getVoucherNo)
-               .last("LIMIT 1");
+               .last("ORDER BY CAST(SUBSTRING_INDEX(voucher_no, '-', -1) AS UNSIGNED) DESC LIMIT 1");
         Voucher lastVoucher = voucherMapper.selectOne(wrapper);
 
         int sequence = 1;

@@ -724,8 +724,11 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
         vo.setTransactionDate(transaction.getTransactionDate());
         vo.setAmount(transaction.getAmount());
         vo.setSummary(transaction.getSummary());
-        vo.setType(transaction.getTransactionType() != null && transaction.getTransactionType() == 1
-                ? "收入" : "支出");
+        // transactionType为null时不误判为支出，null判断放在前面
+        Integer txType = transaction.getTransactionType();
+        if (txType != null) {
+            vo.setType(txType == 1 ? "收入" : "支出");
+        }
         return vo;
     }
 

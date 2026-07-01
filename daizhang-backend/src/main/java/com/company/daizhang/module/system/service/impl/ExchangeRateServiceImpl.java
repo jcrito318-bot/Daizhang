@@ -73,6 +73,9 @@ public class ExchangeRateServiceImpl extends ServiceImpl<ExchangeRateMapper, Exc
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createRate(ExchangeRateRequest request) {
+        // 校验同一币种+同一日期是否已存在汇率记录，避免重复保存导致取汇率时取错值
+        checkDuplicate(request.getCurrencyCode(), request.getRateDate(), null);
+
         ExchangeRate rate = new ExchangeRate();
         BeanUtil.copyProperties(request, rate);
         if (StrUtil.isBlank(rate.getRateType())) {
@@ -90,9 +93,30 @@ public class ExchangeRateServiceImpl extends ServiceImpl<ExchangeRateMapper, Exc
             throw new BusinessException(404, "汇率不存在");
         }
 
+        // 校验同一币种+同一日期是否已存在其他汇率记录（排除当前记录自身）
+        checkDuplicate(request.getCurrencyCode(), request.getRateDate(), id);
+
         BeanUtil.copyProperties(request, rate);
         this.updateById(rate);
         log.info("更新汇率成功，id: {}", id);
+    }
+
+    /**
+     * 校验同一币种+同一日期是否已存在汇率记录。
+     *
+     * @param currencyCode 币种代码
+     * @param rateDate     汇率日期
+     * @param excludeId    需要排除的记录ID（更新时传入当前记录ID，新增时传 null）
+     */
+    private void checkDuplicate(String currencyCode, LocalDate rateDate, Long excludeId) {
+        LambdaQueryWrapper<ExchangeRate> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ExchangeRate::getCurrencyCode, currencyCode)
+               .eq(ExchangeRate::getRateDate, rateDate)
+               .ne(excludeId != null, ExchangeRate::getId, excludeId);
+        long count = this.count(wrapper);
+        if (count > 0) {
+            throw new BusinessException("该币种在该日期的汇率已存在，请勿重复添加");
+        }
     }
 
     @Override

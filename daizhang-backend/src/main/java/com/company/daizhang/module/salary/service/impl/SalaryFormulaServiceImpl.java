@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -84,13 +85,26 @@ public class SalaryFormulaServiceImpl extends ServiceImpl<SalaryFormulaMapper, S
         if (expression == null || expression.trim().isEmpty()) {
             return BigDecimal.ZERO;
         }
-        // 替换变量
+        // 替换变量：采用“变量名长度降序 + 两步占位符法”避免子串误匹配。
+        // 例如公式“基本工资 + 岗位工资”，若存在变量“工资”，直接 replace 会把
+        // “基本工资”/“岗位工资”中的“工资”先替换掉，破坏成“基本<值>”/“岗位<值>”。
         String expr = expression.trim();
-        if (variables != null) {
-            for (Map.Entry<String, BigDecimal> entry : variables.entrySet()) {
-                if (entry.getKey() != null && entry.getValue() != null) {
-                    expr = expr.replace(entry.getKey(), entry.getValue().toPlainString());
-                }
+        if (variables != null && !variables.isEmpty()) {
+            // 1) 按变量名长度降序排序：长变量名先被占位符替换，避免被短变量名（其子串）破坏。
+            List<Map.Entry<String, BigDecimal>> sortedEntries = variables.entrySet().stream()
+                    .filter(e -> e.getKey() != null && e.getValue() != null)
+                    .sorted((a, b) -> Integer.compare(b.getKey().length(), a.getKey().length()))
+                    .collect(Collectors.toList());
+            // 2) 第一步：把每个变量替换为唯一占位符 #{i}，占位符不会与其他变量名产生子串匹配。
+            List<String> values = new ArrayList<>();
+            for (Map.Entry<String, BigDecimal> entry : sortedEntries) {
+                String placeholder = "#{" + values.size() + "}";
+                expr = expr.replace(entry.getKey(), placeholder);
+                values.add(entry.getValue().toPlainString());
+            }
+            // 3) 第二步：把占位符替换为实际值，值中即使包含其他变量名也不会被二次匹配。
+            for (int i = 0; i < values.size(); i++) {
+                expr = expr.replace("#{" + i + "}", values.get(i));
             }
         }
         // 解析并计算

@@ -16,9 +16,11 @@ import com.company.daizhang.module.customer.dto.CustomerUpdateRequest;
 import com.company.daizhang.module.customer.entity.Customer;
 import com.company.daizhang.module.customer.entity.PaymentRecord;
 import com.company.daizhang.module.customer.entity.ServiceContract;
+import com.company.daizhang.module.customer.entity.ServiceReport;
 import com.company.daizhang.module.customer.mapper.CustomerMapper;
 import com.company.daizhang.module.customer.mapper.PaymentRecordMapper;
 import com.company.daizhang.module.customer.mapper.ServiceContractMapper;
+import com.company.daizhang.module.customer.mapper.ServiceReportMapper;
 import com.company.daizhang.module.customer.service.CustomerService;
 import com.company.daizhang.module.customer.vo.ArrearsDetailVO;
 import com.company.daizhang.module.customer.vo.ArrearsVO;
@@ -39,6 +41,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -58,6 +61,12 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
     private final InputInvoiceMapper inputInvoiceMapper;
     private final OutputInvoiceMapper outputInvoiceMapper;
     private final ServiceTaskMapper serviceTaskMapper;
+    private final ServiceReportMapper serviceReportMapper;
+
+    /**
+     * 合法的客户等级(对应Customer实体customerLevel字段注释)
+     */
+    private static final List<String> VALID_CUSTOMER_LEVELS = Arrays.asList("VIP", "重要", "普通", "潜在");
 
     @Override
     public PageResult<CustomerVO> pageCustomers(CustomerQueryRequest request) {
@@ -141,6 +150,25 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         Customer customer = this.getById(id);
         if (customer == null) {
             throw new BusinessException(404, "客户不存在");
+        }
+
+        // 校验客户是否存在关联业务记录,避免删除后产生孤儿数据
+        LambdaQueryWrapper<ServiceContract> contractWrapper = new LambdaQueryWrapper<>();
+        contractWrapper.eq(ServiceContract::getCustomerId, id);
+        if (serviceContractMapper.selectCount(contractWrapper) > 0) {
+            throw new BusinessException(400, "客户存在关联业务记录，无法删除，请先处理关联数据");
+        }
+
+        LambdaQueryWrapper<PaymentRecord> paymentWrapper = new LambdaQueryWrapper<>();
+        paymentWrapper.eq(PaymentRecord::getCustomerId, id);
+        if (paymentRecordMapper.selectCount(paymentWrapper) > 0) {
+            throw new BusinessException(400, "客户存在关联业务记录，无法删除，请先处理关联数据");
+        }
+
+        LambdaQueryWrapper<ServiceReport> reportWrapper = new LambdaQueryWrapper<>();
+        reportWrapper.eq(ServiceReport::getCustomerId, id);
+        if (serviceReportMapper.selectCount(reportWrapper) > 0) {
+            throw new BusinessException(400, "客户存在关联业务记录，无法删除，请先处理关联数据");
         }
 
         this.removeById(id);
@@ -404,6 +432,10 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateCustomerStatus(Long customerId, Integer status) {
+        // 校验客户状态合法值:0-潜在 1-在服 2-流失
+        if (status == null || status < 0 || status > 2) {
+            throw new BusinessException(400, "非法的客户状态值，合法值：0-潜在 1-在服 2-流失");
+        }
         Customer customer = this.getById(customerId);
         if (customer == null) {
             throw new BusinessException(404, "客户不存在");
@@ -415,6 +447,10 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void updateCustomerLevel(Long customerId, String level) {
+        // 校验客户等级合法值:VIP/重要/普通/潜在
+        if (StrUtil.isBlank(level) || !VALID_CUSTOMER_LEVELS.contains(level)) {
+            throw new BusinessException(400, "非法的客户等级值，合法值：VIP/重要/普通/潜在");
+        }
         Customer customer = this.getById(customerId);
         if (customer == null) {
             throw new BusinessException(404, "客户不存在");

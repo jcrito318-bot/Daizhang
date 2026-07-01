@@ -34,6 +34,28 @@ public class DataBackupServiceImpl implements DataBackupService {
     private static final String DATA_FILE = "daizhang.mv.db";
     private static final DateTimeFormatter TIMESTAMP_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
 
+    /**
+     * 恢复进行中标志位：恢复期间置为 true，恢复结束后置为 false。
+     * 其他写操作 Service 可通过 {@link #isRestoring()} 判断是否应拒绝写入，
+     * 避免恢复过程中数据被覆盖或数据库文件被占用导致恢复失败。
+     */
+    private static volatile boolean restoring = false;
+
+    /**
+     * 恢复操作同步锁：保证同一时刻只有一个恢复操作在执行，避免并发恢复冲突。
+     */
+    private static final Object RESTORE_LOCK = new Object();
+
+    /**
+     * 判断系统是否正在恢复数据库。
+     * 恢复期间应对数据库的写操作予以拒绝，防止恢复的数据被覆盖或数据库文件被占用。
+     *
+     * @return true 表示正在恢复数据库，此时应避免对数据库进行写操作
+     */
+    public static boolean isRestoring() {
+        return restoring;
+    }
+
     @Override
     public String backup() {
         Path sourcePath = Paths.get(DATA_DIR, DATA_FILE);
@@ -102,18 +124,29 @@ public class DataBackupServiceImpl implements DataBackupService {
 
     @Override
     public void restore(String fileName) {
-        Path backupPath = resolveSafeBackupPath(fileName);
-        if (!Files.exists(backupPath)) {
-            throw new BusinessException(ErrorCode.NOT_FOUND, "备份文件不存在");
-        }
+        // 加锁保证同一时刻只有一个恢复操作执行，避免并发恢复导致数据库文件被并发覆盖。
+        // 恢复期间通过 restoring 标志位阻断应用对数据库的写入，防止恢复的数据被覆盖
+        // 或数据库文件被占用导致恢复失败。其他写操作 Service 可通过 isRestoring() 判断。
+        log.info("开始数据库恢复，备份文件: {}", fileName);
+        synchronized (RESTORE_LOCK) {
+            restoring = true;
+            try {
+                Path backupPath = resolveSafeBackupPath(fileName);
+                if (!Files.exists(backupPath)) {
+                    throw new BusinessException(ErrorCode.NOT_FOUND, "备份文件不存在");
+                }
 
-        Path targetPath = Paths.get(DATA_DIR, DATA_FILE);
-        try {
-            Files.copy(backupPath, targetPath, StandardCopyOption.REPLACE_EXISTING);
-            log.info("数据库恢复成功，备份文件: {}，需要重启应用使恢复生效", fileName);
-        } catch (IOException e) {
-            log.error("数据库恢复失败", e);
-            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "数据库恢复失败");
+                Path targetPath = Paths.get(DATA_DIR, DATA_FILE);
+                try {
+                    Files.copy(backupPath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+                    log.info("数据库恢复成功，备份文件: {}，需要重启应用使恢复生效", fileName);
+                } catch (IOException e) {
+                    log.error("数据库恢复失败", e);
+                    throw new BusinessException(ErrorCode.INTERNAL_ERROR, "数据库恢复失败");
+                }
+            } finally {
+                restoring = false;
+            }
         }
     }
 

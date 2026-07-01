@@ -132,9 +132,13 @@ public class AmortizationServiceImpl implements AmortizationService {
 
         // 重新计算剩余待摊
         BigDecimal remainingAmount = request.getTotalAmount().subtract(amortization.getAmortizedAmount());
+        // 守卫:手动调整导致已摊销额超过待摊总额时,剩余待摊为负会令后续摊销凭证金额为负、报表错乱,归零
+        if (remainingAmount.compareTo(BigDecimal.ZERO) < 0) {
+            remainingAmount = BigDecimal.ZERO;
+        }
         amortization.setRemainingAmount(remainingAmount);
 
-        // 如果剩余待摊 <= 0，更新状态为已摊完
+        // 如果剩余待摊 <= 0，更新状态为已摊完(归零即视为已完成,status:0-摊销中 1-已摊完)
         if (remainingAmount.compareTo(BigDecimal.ZERO) <= 0) {
             amortization.setStatus(1);
         }

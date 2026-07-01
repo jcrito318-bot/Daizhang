@@ -351,20 +351,28 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
                 continue; // 已存在折旧记录，跳过
             }
 
+            // 并发折旧无锁修复:折旧前用 selectById 重新读取资产最新累计折旧/净值/version,
+            // 不用方法入参 asset 列表中的旧值,避免并发触发月度折旧时同一资产被折旧两次、
+            // 累计折旧翻倍、净值计算错误
+            FixedAsset latest = this.getById(asset.getId());
+            if (latest == null) {
+                continue;
+            }
+
             // 计算本次折旧
             // 批量折旧遍历账套所有在用资产,任一字段为null会导致整个批次NPE中断。
             // 与calculateMonthlyDepreciation保持一致的null防御。
-            BigDecimal residualValue = asset.getResidualValue() != null ? asset.getResidualValue() : BigDecimal.ZERO;
-            BigDecimal assetNetValue = asset.getNetValue() != null ? asset.getNetValue() : BigDecimal.ZERO;
+            BigDecimal residualValue = latest.getResidualValue() != null ? latest.getResidualValue() : BigDecimal.ZERO;
+            BigDecimal assetNetValue = latest.getNetValue() != null ? latest.getNetValue() : BigDecimal.ZERO;
             // 已提足折旧(净值<=残值)跳过,避免负折旧导致累计折旧回退、净值虚增
             if (assetNetValue.compareTo(residualValue) <= 0) {
                 continue;
             }
 
             BigDecimal depreciationAmount;
-            if ("双倍余额递减法".equals(asset.getDepreciationMethod())) {
+            if ("双倍余额递减法".equals(latest.getDepreciationMethod())) {
                 // 双倍余额递减法:基于当前净值计算,体现递减特性(原实现用原值,丧失递减)
-                Integer usefulLife = asset.getUsefulLife();
+                Integer usefulLife = latest.getUsefulLife();
                 if (usefulLife == null || usefulLife <= 0) {
                     continue;
                 }
@@ -372,12 +380,12 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
                 depreciationAmount = assetNetValue.multiply(rate)
                         .divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP);
             } else {
-                depreciationAmount = asset.getMonthlyDepreciation();
+                depreciationAmount = latest.getMonthlyDepreciation();
                 if (depreciationAmount == null) {
                     continue; // 月折旧额为空,数据不完整,跳过
                 }
             }
-            BigDecimal accumulatedDepreciation = (asset.getAccumulatedDeprecation() != null ? asset.getAccumulatedDeprecation() : BigDecimal.ZERO).add(depreciationAmount);
+            BigDecimal accumulatedDepreciation = (latest.getAccumulatedDeprecation() != null ? latest.getAccumulatedDeprecation() : BigDecimal.ZERO).add(depreciationAmount);
             BigDecimal netValue = assetNetValue.subtract(depreciationAmount);
 
             // 如果净值小于残值，则调整折旧额,使其恰好将净值降至残值
@@ -387,16 +395,16 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
                 if (depreciationAmount.compareTo(BigDecimal.ZERO) < 0) {
                     depreciationAmount = BigDecimal.ZERO;
                 }
-                accumulatedDepreciation = (asset.getAccumulatedDeprecation() != null ? asset.getAccumulatedDeprecation() : BigDecimal.ZERO).add(depreciationAmount);
+                accumulatedDepreciation = (latest.getAccumulatedDeprecation() != null ? latest.getAccumulatedDeprecation() : BigDecimal.ZERO).add(depreciationAmount);
                 netValue = residualValue;
             }
 
             // 创建折旧记录
             DepreciationRecord record = new DepreciationRecord();
             record.setAccountSetId(request.getAccountSetId());
-            record.setAssetId(asset.getId());
-            record.setAssetCode(asset.getAssetCode());
-            record.setAssetName(asset.getAssetName());
+            record.setAssetId(latest.getId());
+            record.setAssetCode(latest.getAssetCode());
+            record.setAssetName(latest.getAssetName());
             record.setYear(request.getYear());
             record.setMonth(request.getMonth());
             record.setDepreciationAmount(depreciationAmount);
@@ -404,10 +412,15 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
             record.setNetValue(netValue);
             depreciationRecordMapper.insert(record);
 
-            // 更新资产的累计折旧和净值
-            asset.setAccumulatedDeprecation(accumulatedDepreciation);
-            asset.setNetValue(netValue);
-            this.updateById(asset);
+            // 更新资产的累计折旧和净值,基于 latest 的 version 做乐观锁更新(BaseEntity.@Version
+            // + OptimisticLockerInnerInterceptor)。并发折旧时另一线程已改 version,本次 updateById
+            // 返回 false(影响行数0),抛异常回滚本次折旧记录插入,避免同一资产被折旧两次
+            latest.setAccumulatedDeprecation(accumulatedDepreciation);
+            latest.setNetValue(netValue);
+            boolean updated = this.updateById(latest);
+            if (!updated) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "资产折旧并发冲突，请重试");
+            }
         }
     }
 

@@ -104,7 +104,8 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         // 校验阶段
         validateStage(request.getStage());
 
-        BeanUtil.copyProperties(request, opportunity);
+        // 使用ignoreNullValue避免request中stage为null时把已有stage清空,导致商机阶段丢失、销售漏斗统计错误
+        BeanUtil.copyProperties(request, opportunity, cn.hutool.core.bean.copier.CopyOptions.create().ignoreNullValue());
         opportunity.setId(id);
         // 根据负责人ID填充负责人姓名
         fillAssigneeName(opportunity);
