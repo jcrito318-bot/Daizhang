@@ -66,6 +66,7 @@ public class SubjectController {
      */
     @PostMapping
     @Operation(summary = "创建科目", description = "创建新的会计科目")
+    @RequireAccountSetAccess
     public Result<SubjectVO> create(@Valid @RequestBody SubjectCreateRequest request) {
         subjectService.createSubject(request);
         return Result.success(null);

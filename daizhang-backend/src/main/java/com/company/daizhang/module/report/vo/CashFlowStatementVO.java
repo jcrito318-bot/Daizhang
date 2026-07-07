@@ -33,6 +33,18 @@ public class CashFlowStatementVO {
     // 净增加额
     private BigDecimal netIncrease;
 
+    // 本年累计(1~month)
+    private BigDecimal operatingInflowYear;
+    private BigDecimal operatingOutflowYear;
+    private BigDecimal operatingNetFlowYear;
+    private BigDecimal investingInflowYear;
+    private BigDecimal investingOutflowYear;
+    private BigDecimal investingNetFlowYear;
+    private BigDecimal financingInflowYear;
+    private BigDecimal financingOutflowYear;
+    private BigDecimal financingNetFlowYear;
+    private BigDecimal netIncreaseYear;
+
     // 明细项列表
     private List<CashFlowItemVO> items;
 }

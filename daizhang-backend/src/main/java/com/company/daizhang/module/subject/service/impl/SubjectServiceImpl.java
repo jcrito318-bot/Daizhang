@@ -147,6 +147,9 @@ public class SubjectServiceImpl extends ServiceImpl<SubjectMapper, Subject> impl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createSubject(SubjectCreateRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限
+        accountSetAccessService.checkOwner(request.getAccountSetId());
+
         // 业务校验：科目编码不能为空
         if (StrUtil.isBlank(request.getSubjectCode())) {
             throw new BusinessException(ErrorCode.SUBJECT_CODE_BLANK);

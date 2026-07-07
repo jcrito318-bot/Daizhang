@@ -13,6 +13,7 @@ import com.company.daizhang.module.accountset.mapper.SubjectBalanceMapper;
 import com.company.daizhang.module.accountset.service.SubjectBalanceService;
 import com.company.daizhang.module.accountset.vo.SubjectBalanceVO;
 import com.company.daizhang.common.exception.BusinessException;
+import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.module.subject.entity.Subject;
 import com.company.daizhang.module.subject.mapper.SubjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -79,6 +80,17 @@ public class SubjectBalanceServiceImpl extends ServiceImpl<SubjectBalanceMapper,
 
         // 批量插入新数据
         if (requests != null && !requests.isEmpty()) {
+            // 借贷平衡校验:期初余额借方合计必须等于贷方合计
+            BigDecimal totalDebit = requests.stream()
+                    .map(r -> r.getBeginDebit() != null ? r.getBeginDebit() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            BigDecimal totalCredit = requests.stream()
+                    .map(r -> r.getBeginCredit() != null ? r.getBeginCredit() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            if (totalDebit.compareTo(totalCredit) != 0) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                        "期初余额借贷不平衡(借方合计:" + totalDebit + ", 贷方合计:" + totalCredit + ")");
+            }
             for (SubjectBalanceRequest request : requests) {
                 SubjectBalance balance = new SubjectBalance();
                 BeanUtil.copyProperties(request, balance);

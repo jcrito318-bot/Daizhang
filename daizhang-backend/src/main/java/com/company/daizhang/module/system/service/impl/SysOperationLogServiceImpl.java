@@ -17,6 +17,8 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * 操作日志服务实现
@@ -56,17 +58,42 @@ public class SysOperationLogServiceImpl extends ServiceImpl<SysOperationLogMappe
         baseMapper.insert(buildCleanAuditLog(keepDays));
         log.info("操作日志清理审计已记录,操作人: {}, keepDays: {}", SecurityUtils.getCurrentUsername(), keepDays);
 
-        LambdaQueryWrapper<SysOperationLog> wrapper = new LambdaQueryWrapper<>();
-        // keepDays为空则不加条件，清理全部；否则清理 keepDays 天前的日志
-        if (keepDays != null) {
-            // 显式指定时区:LocalDateTime.now()默认使用JVM时区,容器TZ配置错误时清理边界会偏移。
-            // 注:application.yml 的 spring.jackson.time-zone 仅影响JSON序列化,不影响此处取值。
-            LocalDateTime beforeTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusDays(keepDays);
-            wrapper.lt(SysOperationLog::getCreateTime, beforeTime);
+        // 分批删除,每批1000条,避免单条大DELETE长时间锁表阻塞其他查询。
+        // 不加@Transactional:使每批deleteBatchIds各自提交、及时释放行锁,
+        // 否则整循环共用一个事务会重新退化成长事务,违背分批初衷。
+        // 显式指定时区:LocalDateTime.now()默认使用JVM时区,容器TZ配置错误时清理边界会偏移。
+        // 注:application.yml 的 spring.jackson.time-zone 仅影响JSON序列化,不影响此处取值。
+        LocalDateTime cutoffTime;
+        if (keepDays == null) {
+            // 全表清理:删除所有 createTime < now 的记录(即全部历史日志)
+            cutoffTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai"));
+        } else {
+            cutoffTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusDays(keepDays);
         }
-        long count = this.count(wrapper);
-        this.baseMapper.delete(wrapper);
-        log.info("清理操作日志完成，保留天数: {}, 清理数量: {}", keepDays, count);
+
+        int batchSize = 1000;
+        int totalDeleted = 0;
+        while (true) {
+            // 先查一批待删除ID,再按ID删除,控制单条DELETE影响行数
+            List<Long> ids = baseMapper.selectList(
+                    new LambdaQueryWrapper<SysOperationLog>()
+                            .lt(SysOperationLog::getCreateTime, cutoffTime)
+                            .last("LIMIT " + batchSize)
+            ).stream().map(SysOperationLog::getId).collect(Collectors.toList());
+
+            if (ids.isEmpty()) {
+                break;
+            }
+
+            baseMapper.deleteBatchIds(ids);
+            totalDeleted += ids.size();
+
+            // 本批不足batchSize,说明已无符合条件记录,结束循环
+            if (ids.size() < batchSize) {
+                break;
+            }
+        }
+        log.info("清理操作日志完成，保留天数: {}, 清理数量: {}", keepDays, totalDeleted);
 
         // 全表清理(keepDays为空)会删除先插入的审计记录,需重新写入以保证审计链条完整
         if (keepDays == null) {

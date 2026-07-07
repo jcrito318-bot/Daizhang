@@ -41,6 +41,7 @@ public class AuxiliaryController {
 
     @Operation(summary = "创建辅助核算类别")
     @PostMapping("/category")
+    @RequireAccountSetAccess
     public Result<Void> createCategory(@Valid @RequestBody AuxiliaryCategoryRequest request) {
         auxiliaryService.createCategory(request);
         return Result.success();
@@ -48,6 +49,7 @@ public class AuxiliaryController {
 
     @Operation(summary = "更新辅助核算类别")
     @PutMapping("/category/{id}")
+    @RequireAccountSetAccess(required = false)
     public Result<Void> updateCategory(@PathVariable Long id, @Valid @RequestBody AuxiliaryCategoryRequest request) {
         auxiliaryService.updateCategory(id, request);
         return Result.success();
@@ -55,6 +57,7 @@ public class AuxiliaryController {
 
     @Operation(summary = "删除辅助核算类别")
     @DeleteMapping("/category/{id}")
+    @RequireAccountSetAccess(required = false)
     public Result<Void> deleteCategory(@PathVariable Long id) {
         auxiliaryService.deleteCategory(id);
         return Result.success();
@@ -83,6 +86,7 @@ public class AuxiliaryController {
 
     @Operation(summary = "创建辅助核算项目")
     @PostMapping("/item")
+    @RequireAccountSetAccess
     public Result<Void> createItem(@Valid @RequestBody AuxiliaryItemRequest request) {
         auxiliaryService.createItem(request);
         return Result.success();
@@ -90,6 +94,7 @@ public class AuxiliaryController {
 
     @Operation(summary = "更新辅助核算项目")
     @PutMapping("/item/{id}")
+    @RequireAccountSetAccess(required = false)
     public Result<Void> updateItem(@PathVariable Long id, @Valid @RequestBody AuxiliaryItemRequest request) {
         auxiliaryService.updateItem(id, request);
         return Result.success();
@@ -97,6 +102,7 @@ public class AuxiliaryController {
 
     @Operation(summary = "删除辅助核算项目")
     @DeleteMapping("/item/{id}")
+    @RequireAccountSetAccess(required = false)
     public Result<Void> deleteItem(@PathVariable Long id) {
         auxiliaryService.deleteItem(id);
         return Result.success();

@@ -38,6 +38,7 @@ public class BankAccountController {
 
     @Operation(summary = "分页查询银行账户")
     @GetMapping("/page")
+    @RequireAccountSetAccess
     public Result<PageResult<BankAccountVO>> page(BankAccountQueryRequest request) {
         PageResult<BankAccountVO> page = bankAccountService.pageBankAccounts(request);
         return Result.success(page);
@@ -53,6 +54,7 @@ public class BankAccountController {
 
     @Operation(summary = "根据ID查询银行账户")
     @GetMapping("/{id}")
+    @RequireAccountSetAccess(required = false)
     public Result<BankAccountVO> getById(@PathVariable Long id) {
         BankAccountVO vo = bankAccountService.getBankAccountById(id);
         return Result.success(vo);
@@ -60,6 +62,7 @@ public class BankAccountController {
 
     @Operation(summary = "创建银行账户")
     @PostMapping
+    @RequireAccountSetAccess
     public Result<Void> create(@Valid @RequestBody BankAccountRequest request) {
         bankAccountService.createBankAccount(request);
         return Result.success();
@@ -67,6 +70,7 @@ public class BankAccountController {
 
     @Operation(summary = "更新银行账户")
     @PutMapping("/{id}")
+    @RequireAccountSetAccess(required = false)
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody BankAccountRequest request) {
         bankAccountService.updateBankAccount(id, request);
         return Result.success();
@@ -74,6 +78,7 @@ public class BankAccountController {
 
     @Operation(summary = "删除银行账户")
     @DeleteMapping("/{id}")
+    @RequireAccountSetAccess(required = false)
     public Result<Void> delete(@PathVariable Long id) {
         bankAccountService.deleteBankAccount(id);
         return Result.success();
@@ -81,6 +86,7 @@ public class BankAccountController {
 
     @Operation(summary = "更新银行账户状态")
     @PutMapping("/{id}/status")
+    @RequireAccountSetAccess(required = false)
     public Result<Void> updateStatus(@PathVariable Long id, @RequestParam Integer status) {
         bankAccountService.updateStatus(id, status);
         return Result.success();

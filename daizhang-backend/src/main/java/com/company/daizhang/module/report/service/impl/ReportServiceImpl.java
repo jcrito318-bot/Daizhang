@@ -591,35 +591,41 @@ public class ReportServiceImpl implements ReportService {
             log.warn("期间未结账，报表数据可能变更。accountSetId={}, {}年{}月", accountSetId, year, month);
         }
 
-        // 1. 查询该账套该期间所有已过账凭证（status=2）
-        // 已知限制: 此处仅查询当月(eq year + eq month),暂不支持本年累计(1~month 累计金额)。
-        // 利润表 IncomeStatementVO 含本年累计字段,而 CashFlowStatementVO 无对应字段;
-        // 受当前改动范围限制不可修改 VO,故本年累计暂未实现。
-        // 后续在 CashFlowStatementVO 增加 yearToDate* 字段后,可在此追加
-        // le(month) 的累计查询并填充(与当月逻辑一致,仅汇总区间不同)。
-        LambdaQueryWrapper<Voucher> voucherWrapper = new LambdaQueryWrapper<>();
-        voucherWrapper.eq(Voucher::getAccountSetId, accountSetId)
+        // 1. 查询当月已过账凭证（status=2）
+        LambdaQueryWrapper<Voucher> monthWrapper = new LambdaQueryWrapper<>();
+        monthWrapper.eq(Voucher::getAccountSetId, accountSetId)
                 .eq(Voucher::getYear, year)
                 .eq(Voucher::getMonth, month)
                 .eq(Voucher::getStatus, 2);
-        List<Voucher> vouchers = voucherMapper.selectList(voucherWrapper);
+        List<Voucher> monthVouchers = voucherMapper.selectList(monthWrapper);
+        CashFlowAggregate monthAgg = analyzeCashFlowVouchers(monthVouchers);
 
-        BigDecimal operatingInflow = BigDecimal.ZERO;
-        BigDecimal operatingOutflow = BigDecimal.ZERO;
-        BigDecimal investingInflow = BigDecimal.ZERO;
-        BigDecimal investingOutflow = BigDecimal.ZERO;
-        BigDecimal financingInflow = BigDecimal.ZERO;
-        BigDecimal financingOutflow = BigDecimal.ZERO;
-        List<CashFlowItemVO> items = new ArrayList<>();
+        // 2. 查询本年累计(1~month)已过账凭证，用于本年累计金额
+        LambdaQueryWrapper<Voucher> ytdWrapper = new LambdaQueryWrapper<>();
+        ytdWrapper.eq(Voucher::getAccountSetId, accountSetId)
+                .eq(Voucher::getYear, year)
+                .le(Voucher::getMonth, month)
+                .eq(Voucher::getStatus, 2);
+        List<Voucher> ytdVouchers = voucherMapper.selectList(ytdWrapper);
+        CashFlowAggregate ytdAgg = analyzeCashFlowVouchers(ytdVouchers);
 
+        // 3. 汇总构建VO（当月 + 本年累计）
+        return buildCashFlowStatementVO(year, month, monthAgg, ytdAgg);
+    }
+
+    /**
+     * 分析凭证列表，按现金流量类别汇总流入流出并构建明细项。
+     * 当月与本年累计共用此逻辑，仅传入的凭证区间不同。
+     */
+    private CashFlowAggregate analyzeCashFlowVouchers(List<Voucher> vouchers) {
+        CashFlowAggregate agg = new CashFlowAggregate();
         if (vouchers.isEmpty()) {
-            return buildCashFlowStatementVO(year, month, operatingInflow, operatingOutflow,
-                    investingInflow, investingOutflow, financingInflow, financingOutflow, items);
+            return agg;
         }
 
         List<Long> voucherIds = vouchers.stream().map(Voucher::getId).collect(Collectors.toList());
 
-        // 2. 查询这些凭证的明细
+        // 查询这些凭证的明细
         LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
         detailWrapper.in(VoucherDetail::getVoucherId, voucherIds);
         List<VoucherDetail> allDetails = voucherDetailMapper.selectList(detailWrapper);
@@ -628,7 +634,7 @@ public class ReportServiceImpl implements ReportService {
         Map<Long, List<VoucherDetail>> detailsByVoucher = allDetails.stream()
                 .collect(Collectors.groupingBy(VoucherDetail::getVoucherId));
 
-        // 3. 分析每张凭证
+        // 分析每张凭证
         for (Voucher voucher : vouchers) {
             List<VoucherDetail> details = detailsByVoucher.get(voucher.getId());
             if (details == null || details.isEmpty()) {
@@ -671,14 +677,14 @@ public class ReportServiceImpl implements ReportService {
                     item.setCategory(category);
                     item.setItemName(itemName);
                     item.setAmount(debit);
-                    items.add(item);
+                    agg.items.add(item);
 
                     if ("经营".equals(category)) {
-                        operatingInflow = operatingInflow.add(debit);
+                        agg.operatingInflow = agg.operatingInflow.add(debit);
                     } else if ("投资".equals(category)) {
-                        investingInflow = investingInflow.add(debit);
+                        agg.investingInflow = agg.investingInflow.add(debit);
                     } else if ("筹资".equals(category)) {
-                        financingInflow = financingInflow.add(debit);
+                        agg.financingInflow = agg.financingInflow.add(debit);
                     }
                 }
                 if (credit.compareTo(BigDecimal.ZERO) > 0) {
@@ -687,52 +693,78 @@ public class ReportServiceImpl implements ReportService {
                     item.setCategory(category);
                     item.setItemName(itemName);
                     item.setAmount(credit);
-                    items.add(item);
+                    agg.items.add(item);
 
                     if ("经营".equals(category)) {
-                        operatingOutflow = operatingOutflow.add(credit);
+                        agg.operatingOutflow = agg.operatingOutflow.add(credit);
                     } else if ("投资".equals(category)) {
-                        investingOutflow = investingOutflow.add(credit);
+                        agg.investingOutflow = agg.investingOutflow.add(credit);
                     } else if ("筹资".equals(category)) {
-                        financingOutflow = financingOutflow.add(credit);
+                        agg.financingOutflow = agg.financingOutflow.add(credit);
                     }
                 }
             }
         }
-
-        // 4. 汇总计算净额
-        return buildCashFlowStatementVO(year, month, operatingInflow, operatingOutflow,
-                investingInflow, investingOutflow, financingInflow, financingOutflow, items);
+        return agg;
     }
 
     /**
-     * 构建现金流量表VO
+     * 构建现金流量表VO（当月 + 本年累计）
      */
     private CashFlowStatementVO buildCashFlowStatementVO(Integer year, Integer month,
-                                                         BigDecimal operatingInflow, BigDecimal operatingOutflow,
-                                                         BigDecimal investingInflow, BigDecimal investingOutflow,
-                                                         BigDecimal financingInflow, BigDecimal financingOutflow,
-                                                         List<CashFlowItemVO> items) {
-        BigDecimal operatingNetFlow = operatingInflow.subtract(operatingOutflow);
-        BigDecimal investingNetFlow = investingInflow.subtract(investingOutflow);
-        BigDecimal financingNetFlow = financingInflow.subtract(financingOutflow);
+                                                         CashFlowAggregate monthAgg,
+                                                         CashFlowAggregate ytdAgg) {
+        BigDecimal operatingNetFlow = monthAgg.operatingInflow.subtract(monthAgg.operatingOutflow);
+        BigDecimal investingNetFlow = monthAgg.investingInflow.subtract(monthAgg.investingOutflow);
+        BigDecimal financingNetFlow = monthAgg.financingInflow.subtract(monthAgg.financingOutflow);
         BigDecimal netIncrease = operatingNetFlow.add(investingNetFlow).add(financingNetFlow);
+
+        BigDecimal operatingNetFlowYear = ytdAgg.operatingInflow.subtract(ytdAgg.operatingOutflow);
+        BigDecimal investingNetFlowYear = ytdAgg.investingInflow.subtract(ytdAgg.investingOutflow);
+        BigDecimal financingNetFlowYear = ytdAgg.financingInflow.subtract(ytdAgg.financingOutflow);
+        BigDecimal netIncreaseYear = operatingNetFlowYear.add(investingNetFlowYear).add(financingNetFlowYear);
 
         CashFlowStatementVO vo = new CashFlowStatementVO();
         vo.setYear(year);
         vo.setMonth(month);
-        vo.setOperatingInflow(operatingInflow);
-        vo.setOperatingOutflow(operatingOutflow);
+        // 当月金额
+        vo.setOperatingInflow(monthAgg.operatingInflow);
+        vo.setOperatingOutflow(monthAgg.operatingOutflow);
         vo.setOperatingNetFlow(operatingNetFlow);
-        vo.setInvestingInflow(investingInflow);
-        vo.setInvestingOutflow(investingOutflow);
+        vo.setInvestingInflow(monthAgg.investingInflow);
+        vo.setInvestingOutflow(monthAgg.investingOutflow);
         vo.setInvestingNetFlow(investingNetFlow);
-        vo.setFinancingInflow(financingInflow);
-        vo.setFinancingOutflow(financingOutflow);
+        vo.setFinancingInflow(monthAgg.financingInflow);
+        vo.setFinancingOutflow(monthAgg.financingOutflow);
         vo.setFinancingNetFlow(financingNetFlow);
         vo.setNetIncrease(netIncrease);
-        vo.setItems(items);
+        vo.setItems(monthAgg.items);
+        // 本年累计金额(1~month)
+        vo.setOperatingInflowYear(ytdAgg.operatingInflow);
+        vo.setOperatingOutflowYear(ytdAgg.operatingOutflow);
+        vo.setOperatingNetFlowYear(operatingNetFlowYear);
+        vo.setInvestingInflowYear(ytdAgg.investingInflow);
+        vo.setInvestingOutflowYear(ytdAgg.investingOutflow);
+        vo.setInvestingNetFlowYear(investingNetFlowYear);
+        vo.setFinancingInflowYear(ytdAgg.financingInflow);
+        vo.setFinancingOutflowYear(ytdAgg.financingOutflow);
+        vo.setFinancingNetFlowYear(financingNetFlowYear);
+        vo.setNetIncreaseYear(netIncreaseYear);
         return vo;
+    }
+
+    /**
+     * 现金流量汇总中间结构：承载某一区间凭证分析后的流入流出及明细项。
+     * 当月与本年累计各持一份实例。
+     */
+    private static class CashFlowAggregate {
+        BigDecimal operatingInflow = BigDecimal.ZERO;
+        BigDecimal operatingOutflow = BigDecimal.ZERO;
+        BigDecimal investingInflow = BigDecimal.ZERO;
+        BigDecimal investingOutflow = BigDecimal.ZERO;
+        BigDecimal financingInflow = BigDecimal.ZERO;
+        BigDecimal financingOutflow = BigDecimal.ZERO;
+        List<CashFlowItemVO> items = new ArrayList<>();
     }
 
     /**

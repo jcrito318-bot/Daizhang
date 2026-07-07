@@ -7,10 +7,13 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.bank.dto.BankAccountQueryRequest;
 import com.company.daizhang.module.bank.dto.BankAccountRequest;
 import com.company.daizhang.module.bank.entity.BankAccount;
+import com.company.daizhang.module.bank.entity.BankTransaction;
 import com.company.daizhang.module.bank.mapper.BankAccountMapper;
+import com.company.daizhang.module.bank.mapper.BankTransactionMapper;
 import com.company.daizhang.module.bank.service.BankAccountService;
 import com.company.daizhang.module.bank.vo.BankAccountVO;
 import com.company.daizhang.module.subject.entity.Subject;
@@ -33,6 +36,8 @@ public class BankAccountServiceImpl implements BankAccountService {
 
     private final BankAccountMapper bankAccountMapper;
     private final SubjectMapper subjectMapper;
+    private final AccountSetAccessService accountSetAccessService;
+    private final BankTransactionMapper bankTransactionMapper;
 
     @Override
     public PageResult<BankAccountVO> pageBankAccounts(BankAccountQueryRequest request) {
@@ -71,12 +76,14 @@ public class BankAccountServiceImpl implements BankAccountService {
         if (account == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "银行账户不存在");
         }
+        accountSetAccessService.checkAccess(account.getAccountSetId());
         return convertToVO(account);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createBankAccount(BankAccountRequest request) {
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         // 校验账号在该账套下唯一
         LambdaQueryWrapper<BankAccount> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(BankAccount::getAccountSetId, request.getAccountSetId())
@@ -106,6 +113,7 @@ public class BankAccountServiceImpl implements BankAccountService {
         if (account == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "银行账户不存在");
         }
+        accountSetAccessService.checkOwner(account.getAccountSetId());
         // 账号变更时校验唯一性
         if (!account.getAccountNumber().equals(request.getAccountNumber())) {
             LambdaQueryWrapper<BankAccount> wrapper = new LambdaQueryWrapper<>();
@@ -131,6 +139,15 @@ public class BankAccountServiceImpl implements BankAccountService {
         if (account == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "银行账户不存在");
         }
+        accountSetAccessService.checkOwner(account.getAccountSetId());
+        // 校验是否存在交易流水，有流水不允许删除
+        LambdaQueryWrapper<BankTransaction> txWrapper = new LambdaQueryWrapper<>();
+        txWrapper.eq(BankTransaction::getAccountSetId, account.getAccountSetId())
+                 .eq(BankTransaction::getBankAccount, account.getAccountNumber());
+        Long txCount = bankTransactionMapper.selectCount(txWrapper);
+        if (txCount > 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "该银行账户存在交易流水，无法删除");
+        }
         bankAccountMapper.deleteById(id);
         log.info("删除银行账户成功，ID: {}", id);
     }
@@ -142,6 +159,7 @@ public class BankAccountServiceImpl implements BankAccountService {
         if (account == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "银行账户不存在");
         }
+        accountSetAccessService.checkOwner(account.getAccountSetId());
         account.setStatus(status);
         bankAccountMapper.updateById(account);
         log.info("更新银行账户状态，ID: {}, status: {}", id, status);
