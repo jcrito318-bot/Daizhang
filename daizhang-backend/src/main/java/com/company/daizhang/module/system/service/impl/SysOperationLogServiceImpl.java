@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 
 /**
@@ -58,7 +59,9 @@ public class SysOperationLogServiceImpl extends ServiceImpl<SysOperationLogMappe
         LambdaQueryWrapper<SysOperationLog> wrapper = new LambdaQueryWrapper<>();
         // keepDays为空则不加条件，清理全部；否则清理 keepDays 天前的日志
         if (keepDays != null) {
-            LocalDateTime beforeTime = LocalDateTime.now().minusDays(keepDays);
+            // 显式指定时区:LocalDateTime.now()默认使用JVM时区,容器TZ配置错误时清理边界会偏移。
+            // 注:application.yml 的 spring.jackson.time-zone 仅影响JSON序列化,不影响此处取值。
+            LocalDateTime beforeTime = LocalDateTime.now(ZoneId.of("Asia/Shanghai")).minusDays(keepDays);
             wrapper.lt(SysOperationLog::getCreateTime, beforeTime);
         }
         long count = this.count(wrapper);
@@ -81,7 +84,7 @@ public class SysOperationLogServiceImpl extends ServiceImpl<SysOperationLogMappe
         auditLog.setUsername(SecurityUtils.getCurrentUsername());
         auditLog.setOperation("清理操作日志");
         auditLog.setParams("keepDays=" + keepDays);
-        auditLog.setCreateTime(LocalDateTime.now());
+        auditLog.setCreateTime(LocalDateTime.now(ZoneId.of("Asia/Shanghai")));
         return auditLog;
     }
 

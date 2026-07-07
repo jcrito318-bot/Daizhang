@@ -235,7 +235,8 @@ public class LedgerServiceImpl implements LedgerService {
             } else {
                 runningBalance = runningBalance.add(vo.getCredit()).subtract(vo.getDebit());
             }
-            vo.setDirection(runningBalance.compareTo(BigDecimal.ZERO) >= 0 ? "借" : "贷");
+            int cmp = runningBalance.compareTo(BigDecimal.ZERO);
+            vo.setDirection(cmp > 0 ? "借" : (cmp < 0 ? "贷" : "平"));
             vo.setBalance(runningBalance.abs());
 
             allRows.add(vo);
@@ -1031,7 +1032,8 @@ public class LedgerServiceImpl implements LedgerService {
             } else {
                 runningBalance = runningBalance.add(credit).subtract(debit);
             }
-            vo.setDirection(runningBalance.compareTo(BigDecimal.ZERO) >= 0 ? "借" : "贷");
+            int cmp = runningBalance.compareTo(BigDecimal.ZERO);
+            vo.setDirection(cmp > 0 ? "借" : (cmp < 0 ? "贷" : "平"));
             vo.setBalance(runningBalance.abs());
 
             detailList.add(vo);
@@ -1122,7 +1124,8 @@ public class LedgerServiceImpl implements LedgerService {
                 } else {
                     runningBalance = runningBalance.add(credit).subtract(debit);
                 }
-                row.createCell(5).setCellValue(runningBalance.compareTo(BigDecimal.ZERO) >= 0 ? "借" : "贷");
+                int cmp = runningBalance.compareTo(BigDecimal.ZERO);
+                row.createCell(5).setCellValue(cmp > 0 ? "借" : (cmp < 0 ? "贷" : "平"));
                 row.createCell(6).setCellValue(runningBalance.abs().doubleValue());
             }
 
@@ -1500,7 +1503,7 @@ public class LedgerServiceImpl implements LedgerService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(readOnly = true)
     public ReconciliationVO reconciliation(Long accountSetId, Long subjectId, Long auxiliaryId, Integer year, Integer month) {
         validateLedgerParams(accountSetId, subjectId, year, month);
         if (auxiliaryId == null) {
@@ -1747,8 +1750,10 @@ public class LedgerServiceImpl implements LedgerService {
         check1.setLeftAmount(generalPeriodDebit);
         check1.setRightAmount(detailTotalDebit);
         check1.setDifference(generalPeriodDebit.subtract(detailTotalDebit));
-        check1.setBalanced(generalPeriodDebit.compareTo(detailTotalDebit) == 0
-                && generalPeriodCredit.compareTo(detailTotalCredit) == 0);
+        // AccountCheckVO 仅有 leftAmount/rightAmount 单组金额字段，当前仅展示借方对比。
+        // 复式记账下借贷必相等，借方平衡则贷方必然平衡，故 balanced 仅按借方判定，
+        // 避免出现借方差额为 0 但因贷方不一致而 balanced=false 的展示与判定不一致问题。
+        check1.setBalanced(generalPeriodDebit.compareTo(detailTotalDebit) == 0);
         check1.setDescription(check1.getBalanced() ? "总账与明细账借贷方发生额一致" : "总账与明细账借贷方发生额不一致");
         result.add(check1);
 

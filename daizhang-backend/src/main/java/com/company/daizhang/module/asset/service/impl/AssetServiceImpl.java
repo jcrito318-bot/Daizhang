@@ -569,10 +569,11 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void calculateDepreciation(DepreciationRequest request) {
-        // 查询所有在用资产
+        // 查询需计提折旧的资产:在用(0)和闲置(1)均需折旧,已处置/报废(2)不再折旧。
+        // 会计准则中闲置固定资产通常仍需计提折旧(直到报废或处置)。
         LambdaQueryWrapper<FixedAsset> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(FixedAsset::getAccountSetId, request.getAccountSetId())
-               .eq(FixedAsset::getStatus, 0); // 在用
+               .in(FixedAsset::getStatus, 0, 1); // 在用+闲置均折旧,已处置(2)不折旧
         List<FixedAsset> assets = this.list(wrapper);
 
         for (FixedAsset asset : assets) {

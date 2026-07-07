@@ -42,7 +42,7 @@ public class VoucherController {
 
     @Operation(summary = "分页查询凭证")
     @GetMapping("/page")
-    public Result<PageResult<VoucherVO>> page(VoucherQueryRequest request) {
+    public Result<PageResult<VoucherVO>> page(@Valid VoucherQueryRequest request) {
         PageResult<VoucherVO> page = voucherService.pageVouchers(request);
         return Result.success(page);
     }

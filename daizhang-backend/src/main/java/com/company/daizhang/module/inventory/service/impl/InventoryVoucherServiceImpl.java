@@ -257,6 +257,8 @@ public class InventoryVoucherServiceImpl implements InventoryVoucherService {
             return 0L;
         }
         long successCount = 0;
+        // 收集失败项ID,便于运维定位需重试的单据(方法签名返回 successCount,此处至少保证日志可查)
+        List<Long> failedIds = new ArrayList<>();
         for (Long inId : inIds) {
             try {
                 // 通过 self 代理调用，使 generateInVoucher 的 REQUIRES_NEW 事务传播生效，
@@ -264,9 +266,18 @@ public class InventoryVoucherServiceImpl implements InventoryVoucherService {
                 self.generateInVoucher(inId);
                 successCount++;
             } catch (BusinessException e) {
-                // 单笔失败不影响整批，记录告警后继续
+                // 业务异常(如单据状态不符、科目缺失)单笔失败不影响整批,记录告警后继续
                 log.warn("批量生成入库凭证跳过，入库单ID: {}, 原因: {}", inId, e.getMessage());
+                failedIds.add(inId);
+            } catch (Exception e) {
+                // 非业务异常(NPE/DB异常等)同样不中断整批,但需 error 级别记录便于排查
+                log.error("批量生成入库凭证异常，入库单ID: {}", inId, e);
+                failedIds.add(inId);
             }
+        }
+        if (!failedIds.isEmpty()) {
+            log.warn("批量生成入库凭证存在失败项,失败数量: {}/{}, failedIds={}",
+                    failedIds.size(), inIds.size(), failedIds);
         }
         log.info("批量生成入库凭证完成，成功数量: {}/{}", successCount, inIds.size());
         return successCount;
@@ -278,6 +289,8 @@ public class InventoryVoucherServiceImpl implements InventoryVoucherService {
             return 0L;
         }
         long successCount = 0;
+        // 收集失败项ID,便于运维定位需重试的单据(方法签名返回 successCount,此处至少保证日志可查)
+        List<Long> failedIds = new ArrayList<>();
         for (Long outId : outIds) {
             try {
                 // 通过 self 代理调用，使 generateOutVoucher 的 REQUIRES_NEW 事务传播生效
@@ -285,7 +298,16 @@ public class InventoryVoucherServiceImpl implements InventoryVoucherService {
                 successCount++;
             } catch (BusinessException e) {
                 log.warn("批量生成出库凭证跳过，出库单ID: {}, 原因: {}", outId, e.getMessage());
+                failedIds.add(outId);
+            } catch (Exception e) {
+                // 非业务异常(NPE/DB异常等)同样不中断整批,但需 error 级别记录便于排查
+                log.error("批量生成出库凭证异常，出库单ID: {}", outId, e);
+                failedIds.add(outId);
             }
+        }
+        if (!failedIds.isEmpty()) {
+            log.warn("批量生成出库凭证存在失败项,失败数量: {}/{}, failedIds={}",
+                    failedIds.size(), outIds.size(), failedIds);
         }
         log.info("批量生成出库凭证完成，成功数量: {}/{}", successCount, outIds.size());
         return successCount;

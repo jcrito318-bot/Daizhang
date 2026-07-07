@@ -132,7 +132,10 @@ public class SysRoleServiceImpl extends ServiceImpl<SysRoleMapper, SysRole> impl
         if (role == null) {
             throw new BusinessException(ErrorCode.ROLE_NOT_FOUND);
         }
-        
+
+        // 记录原始角色编码,用于检测是否变更(JWT无状态,roleCode变更后已登录用户需重新登录)
+        String originalRoleCode = role.getRoleCode();
+
         // 业务校验：角色状态值必须是0或1
         if (request.getStatus() != null && request.getStatus() != 0 && request.getStatus() != 1) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "角色状态值不正确");
@@ -150,7 +153,13 @@ public class SysRoleServiceImpl extends ServiceImpl<SysRoleMapper, SysRole> impl
         
         BeanUtil.copyProperties(request, role);
         this.updateById(role);
-        
+
+        // 角色编码变更后,已登录该角色用户的JWT中缓存旧roleCode,权限无法即时失效,
+        // 需提示用户重新登录后生效
+        if (StrUtil.isNotBlank(request.getRoleCode()) && !request.getRoleCode().equals(originalRoleCode)) {
+            log.warn("角色编码已修改({} -> {})，已登录该角色的用户需重新登录后权限生效", originalRoleCode, request.getRoleCode());
+        }
+
         log.info("更新角色成功，角色ID: {}", id);
     }
     
@@ -175,12 +184,20 @@ public class SysRoleServiceImpl extends ServiceImpl<SysRoleMapper, SysRole> impl
         }
         
         this.removeById(id);
-        
+
         // 删除角色菜单关联
         LambdaQueryWrapper<SysRoleMenu> rmWrapper = new LambdaQueryWrapper<>();
         rmWrapper.eq(SysRoleMenu::getRoleId, id);
         roleMenuMapper.delete(rmWrapper);
-        
+
+        // 删除后再次校验:并发场景下可能在检查通过后有新用户被分配该角色,
+        // 此时若仍有用户关联则抛出异常触发事务回滚,避免删除仍在使用的角色
+        LambdaQueryWrapper<SysUserRole> recheckWrapper = new LambdaQueryWrapper<>();
+        recheckWrapper.eq(SysUserRole::getRoleId, id);
+        if (userRoleMapper.selectCount(recheckWrapper) > 0) {
+            throw new BusinessException(ErrorCode.ROLE_HAS_USERS);
+        }
+
         log.info("删除角色成功，角色ID: {}, 角色编码: {}", id, role.getRoleCode());
     }
     

@@ -715,6 +715,12 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
 
         // 实发工资 = 应发工资 - 社保 - 公积金 - 个人所得税
         BigDecimal netSalary = grossSalary.subtract(socialSecurity).subtract(housingFund).subtract(incomeTax);
+        // 实发工资为负(如个税预扣额较大时)业务上不合理,凭证生成会产生负数贷方金额,故归零并告警
+        if (netSalary.compareTo(BigDecimal.ZERO) < 0) {
+            log.warn("实发工资为负,归零处理: employeeId={}, gross={}, socialSecurity={}, housingFund={}, incomeTax={}, net={}",
+                    salarySheet.getEmployeeId(), grossSalary, socialSecurity, housingFund, incomeTax, netSalary);
+            netSalary = BigDecimal.ZERO;
+        }
         salarySheet.setNetSalary(netSalary);
     }
 
@@ -863,6 +869,32 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         }
 
         // 社保及公积金:根据社保公积金配置按缴费基数计算个人部分
+        BigDecimal[] insuranceAndFund = calculateInsuranceAndFund(salarySheet, baseSalary);
+        BigDecimal socialSecurity = insuranceAndFund[0];
+        BigDecimal housingFund = insuranceAndFund[1];
+
+        // 按薪资项目公式动态计算:查询该账套启用的公式并求值
+        evaluateSalaryFormulas(salarySheet, salaryItems, baseSalary, socialSecurity, housingFund);
+
+        // 公式可能修改 base_salary(如按绩效调整基本工资),若被修改则基于新值重算社保和公积金,
+        // 避免社保/公积金仍按原始 baseSalary 计算导致与实际工资不一致
+        BigDecimal currentBaseSalary = salarySheet.getBaseSalary();
+        if (currentBaseSalary != null && !currentBaseSalary.equals(baseSalary)) {
+            log.info("公式修改了base_salary,重新计算社保公积金: {} -> {}", baseSalary, currentBaseSalary);
+            calculateInsuranceAndFund(salarySheet, currentBaseSalary);
+        }
+    }
+
+    /**
+     * 根据社保公积金配置按缴费基数计算个人部分,并回写到工资表
+     * <p>供 calculateSalaryItems 初始计算与公式修改 base_salary 后重算复用,
+     * 避免逻辑重复。配置缺失时按0处理,避免批量计算整体失败。</p>
+     *
+     * @param salarySheet 工资表(方法会回写 socialSecurity/housingFund 字段)
+     * @param baseSalary  缴费基数
+     * @return [socialSecurity, housingFund]
+     */
+    private BigDecimal[] calculateInsuranceAndFund(SalarySheet salarySheet, BigDecimal baseSalary) {
         BigDecimal socialSecurity = BigDecimal.ZERO;
         BigDecimal housingFund = BigDecimal.ZERO;
         if (salarySheet.getAccountSetId() != null && salarySheet.getYear() != null) {
@@ -881,9 +913,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         }
         salarySheet.setSocialSecurity(socialSecurity);
         salarySheet.setHousingFund(housingFund);
-
-        // 按薪资项目公式动态计算:查询该账套启用的公式并求值
-        evaluateSalaryFormulas(salarySheet, salaryItems, baseSalary, socialSecurity, housingFund);
+        return new BigDecimal[]{socialSecurity, housingFund};
     }
 
     /**
@@ -930,6 +960,8 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         context.put("housingFund", housingFund);
 
         // 按优先级逐个求值,结果回写上下文以支持公式链式引用
+        // 收集计算失败的公式信息,便于后续扩展(如写入备注/抛异常),当前至少保证可见于日志
+        List<String> failedFormulas = new ArrayList<>();
         for (SalaryFormula formula : formulas) {
             String targetItem = formula.getTargetItem();
             String expression = formula.getFormulaExpression();
@@ -952,10 +984,17 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
                 // 回写到工资表对应字段
                 applyFormulaResultToSheet(salarySheet, targetItem, result);
             } catch (Exception e) {
-                // 公式计算异常(如除零、变量未定义)时记日志并跳过,不中断整体计算
-                log.warn("薪资公式计算失败,公式名称:{},目标项:{},表达式:{},错误:{}",
+                // 公式计算异常(如除零、变量未定义)时记录 error 级别日志并收集失败信息,
+                // 不中断整体计算,但避免静默吞掉导致薪资项保持默认0而用户无感知
+                log.error("薪资公式[{}]计算失败: item={}, expression={}, error={}",
                         formula.getFormulaName(), targetItem, expression, e.getMessage());
+                failedFormulas.add(formula.getFormulaName() + "[" + targetItem + "]: " + e.getMessage());
             }
+        }
+        // 汇总本次公式求值的失败项,便于运维排查(后续可由调用方写入工资表备注)
+        if (!failedFormulas.isEmpty()) {
+            log.warn("薪资公式计算存在失败项,employeeId={}, failedCount={}, failed={}",
+                    salarySheet.getEmployeeId(), failedFormulas.size(), failedFormulas);
         }
     }
 

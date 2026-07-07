@@ -69,7 +69,18 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         // IDOR治理:校验当前用户对该账套的访问权
         accountSetAccessService.checkAccess(request.getAccountSetId());
 
-        Page<Voucher> page = new Page<>(request.getPageNum(), request.getPageSize());
+        // 防御性钳制分页参数:VoucherQueryRequest 暂未声明 @Min/@Max 校验注解,
+        // pageNum<=0 会让 MyBatis-Plus 计算 offset 为负,生成非法SQL;pageSize 过大易触发全表扫描/OOM。
+        // 在此统一兜底,即便 @Valid 注解缺失或参数被绕过也保证安全。
+        int pageNum = request.getPageNum() != null ? request.getPageNum() : 1;
+        int pageSize = request.getPageSize() != null ? request.getPageSize() : 20;
+        if (pageNum < 1) pageNum = 1;
+        if (pageSize < 1) pageSize = 20;
+        if (pageSize > 100) pageSize = 100;
+        request.setPageNum(pageNum);
+        request.setPageSize(pageSize);
+
+        Page<Voucher> page = new Page<>(pageNum, pageSize);
 
         LambdaQueryWrapper<Voucher> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Voucher::getAccountSetId, request.getAccountSetId())
@@ -184,6 +195,10 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         voucher.setTotalCredit(totalCredit);
         voucher.setStatus(0);
         voucher.setSource(0);
+        // 显式重置 draftStatus=0:BeanUtil.copyProperties 会把 VoucherCreateRequest.draftStatus
+        // 拷入实体,客户端可在请求体带 draftStatus=1,导致一张已通过借贷平衡校验的正式凭证
+        // 被误标记为草稿(draftStatus=1),后续 audit/post 流程会因"草稿不可审核"等校验失败。
+        voucher.setDraftStatus(0);
 
         String voucherNo = null;
         int maxRetry = 3;
@@ -314,6 +329,11 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         // IDOR治理:校验当前用户对该凭证所属账套的所有者权限
         accountSetAccessService.checkOwner(voucher.getAccountSetId());
 
+        // 期间校验:即便删除的是草稿凭证,若其位于已结账期间,删除也可能破坏结账快照
+        // (如引发 renumber 改写其他凭证号),与 create/update/post/unpost 保持一致,
+        // 避免破坏结账冻结。
+        checkPeriodNotClosed(checkPeriodExists(voucher.getAccountSetId(), voucher.getYear(), voucher.getMonth()));
+
         // 只有未审核的凭证才能删除
         if (voucher.getStatus() != 0) {
             throw new BusinessException(ErrorCode.VOUCHER_ALREADY_AUDITED);
@@ -364,6 +384,10 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         // 审核为状态变更(非删除/资金类操作)，会计员(ACCOUNTANT)应可审核凭证
         accountSetAccessService.checkAccess(voucher.getAccountSetId());
 
+        // 期间校验:已结账期间内的凭证不可审核,与 create/update/post/unpost 保持一致,
+        // 避免破坏结账冻结(已结账期间内不应再发生状态变更)
+        checkPeriodNotClosed(checkPeriodExists(voucher.getAccountSetId(), voucher.getYear(), voucher.getMonth()));
+
         // 已作废的凭证不能审核
         if (voucher.getStatus() != null && voucher.getStatus() == 3) {
             throw new BusinessException(ErrorCode.VOUCHER_ALREADY_CANCELED, "已作废的凭证不能审核");
@@ -406,6 +430,10 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         // IDOR治理:校验当前用户对该凭证所属账套的访问权(OWNER/ACCOUNTANT/VIEWER)
         // 反审核为状态变更(非删除/资金类操作)，会计员(ACCOUNTANT)应可反审核凭证
         accountSetAccessService.checkAccess(voucher.getAccountSetId());
+
+        // 期间校验:已结账期间内的凭证不可反审核,与 create/update/post/unpost 保持一致,
+        // 避免破坏结账冻结(已结账期间内不应再发生状态变更)
+        checkPeriodNotClosed(checkPeriodExists(voucher.getAccountSetId(), voucher.getYear(), voucher.getMonth()));
 
         // 只有已审核且未过账的凭证才能反审核
         if (voucher.getStatus() != 1) {
@@ -624,7 +652,13 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
 
         // 查询科目以获取余额方向
         Subject subject = subjectMapper.selectById(subjectId);
-        Integer balanceDirection = subject != null && subject.getBalanceDirection() != null
+        // subject 为 null 时不可静默默认方向,否则会以错误的余额方向冲减余额表,
+        // 造成试算不平衡且难以追溯。直接抛业务异常暴露数据不一致问题。
+        if (subject == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "科目不存在(id=" + subjectId + ")");
+        }
+        Integer balanceDirection = subject.getBalanceDirection() != null
                 ? subject.getBalanceDirection() : 1;
 
         // 反过账时该期间该科目的余额记录必然存在(过账时已创建),直接查询
@@ -814,6 +848,10 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         // IDOR治理:校验当前用户对该凭证所属账套的所有者权限
         accountSetAccessService.checkOwner(voucher.getAccountSetId());
 
+        // 期间校验:已结账期间内的凭证不可作废,与 create/update/post/unpost 保持一致,
+        // 避免破坏结账冻结(已结账期间内不应再发生状态变更)
+        checkPeriodNotClosed(checkPeriodExists(voucher.getAccountSetId(), voucher.getYear(), voucher.getMonth()));
+
         // 已作废不能重复作废
         if (voucher.getStatus() != null && voucher.getStatus() == 3) {
             throw new BusinessException(ErrorCode.VOUCHER_ALREADY_CANCELED);
@@ -847,7 +885,13 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
 
         // 查询科目以获取余额方向
         Subject subject = subjectMapper.selectById(subjectId);
-        Integer balanceDirection = subject != null && subject.getBalanceDirection() != null
+        // subject 为 null 时不可静默默认方向,否则会以错误的余额方向写入余额表,
+        // 造成试算不平衡且难以追溯。直接抛业务异常暴露数据不一致问题。
+        if (subject == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "科目不存在(id=" + subjectId + ")");
+        }
+        Integer balanceDirection = subject.getBalanceDirection() != null
                 ? subject.getBalanceDirection() : 1;
 
         // 查询或创建该期间该科目的余额记录
@@ -987,6 +1031,13 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         }
 
         // 查询已审核/已过账凭证的最大序号,未审核凭证从maxSeq+1开始编号,避免与已固化号冲突
+        //
+        // 已知限制(P2):当未审核凭证原序号小于已过账/已审核凭证最大序号时,
+        // 从 maxSeq+1 起编会把未审核凭证强制上移,原序号位置成为新断号。
+        // 例如:已过账凭证序号 1-5,未审核凭证原序号 2,重编后未审核变为 6,原 2 成为断号。
+        // 安全的全自动修复需分析整个序号分布(避免与已过账冲突 + 不制造新断号),
+        // 简单的 min(maxSeq+1, unauditedMin) 在未审核与已过账序号交错时仍会与已过账冲突,
+        // 故此处暂保留 maxSeq+1 起编,建议用户在已过账凭证较少时先整理未审核凭证。
         LambdaQueryWrapper<Voucher> fixedWrapper = new LambdaQueryWrapper<>();
         fixedWrapper.eq(Voucher::getAccountSetId, accountSetId)
                     .eq(Voucher::getYear, year)
@@ -1527,6 +1578,13 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         // 必须先查询已审核/已过账凭证的最大数值序号,从maxSeq+1开始编号,
         // 否则从1开始会与已固化的凭证号冲突,触发唯一索引违例致删除操作失败
         // (与 rearrangeVoucherNo 保持一致)
+        //
+        // 已知限制(P2):当未审核凭证原序号小于已过账/已审核凭证最大序号时,
+        // 从 maxSeq+1 起编会把未审核凭证强制上移,原序号位置成为新断号。
+        // 例如:已过账凭证序号 1-5,未审核凭证原序号 2,重编后未审核变为 6,原 2 成为断号。
+        // 安全的全自动修复需分析整个序号分布(避免与已过账冲突 + 不制造新断号),
+        // 简单的 min(maxSeq+1, unauditedMin) 在未审核与已过账序号交错时仍会与已过账冲突,
+        // 故此处暂保留 maxSeq+1 起编,建议用户在已过账凭证较少时先整理未审核凭证。
         LambdaQueryWrapper<Voucher> fixedWrapper = new LambdaQueryWrapper<>();
         fixedWrapper.eq(Voucher::getAccountSetId, accountSetId)
                     .eq(Voucher::getYear, year)

@@ -179,7 +179,18 @@ public class SysMenuServiceImpl extends ServiceImpl<SysMenuMapper, SysMenu> impl
         if (this.count(wrapper) > 0) {
             throw new BusinessException(ErrorCode.MENU_HAS_CHILDREN);
         }
-        
+
+        // 删除前查询引用该菜单的角色,如有则告警提示受影响的角色(相关角色权限将被缩减)
+        LambdaQueryWrapper<SysRoleMenu> affectedWrapper = new LambdaQueryWrapper<>();
+        affectedWrapper.eq(SysRoleMenu::getMenuId, id);
+        List<Long> affectedRoleIds = roleMenuMapper.selectList(affectedWrapper).stream()
+                .map(SysRoleMenu::getRoleId)
+                .distinct()
+                .collect(Collectors.toList());
+        if (!affectedRoleIds.isEmpty()) {
+            log.warn("删除菜单(id={},name={})将影响角色: {}", id, menu.getName(), affectedRoleIds);
+        }
+
         this.removeById(id);
         
         // 删除角色菜单关联

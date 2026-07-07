@@ -43,13 +43,15 @@ public class ReportExcelUtil {
             headerFont.setBold(true);
             headerStyle.setFont(headerFont);
             headerStyle.setAlignment(HorizontalAlignment.CENTER);
-            
+            // 金额单元格样式（避免 BigDecimal 转 double 精度丢失/无数字格式）
+            CellStyle amountStyle = createAmountStyle(workbook);
+
             // 标题
             Row titleRow = sheet.createRow(0);
             Cell titleCell = titleRow.createCell(0);
             titleCell.setCellValue("资产负债表 " + year + "年" + month + "月");
             titleCell.setCellStyle(headerStyle);
-            
+
             // 表头
             Row headerRow = sheet.createRow(2);
             headerRow.createCell(0).setCellValue("项目");
@@ -59,17 +61,17 @@ public class ReportExcelUtil {
             for (int i = 0; i < 4; i++) {
                 headerRow.getCell(i).setCellStyle(headerStyle);
             }
-            
+
             // 资产项目
             int rowNum = 3;
-            rowNum = writeBalanceSheetItems(sheet, rowNum, "资产", data.getAssets());
-            
+            rowNum = writeBalanceSheetItems(sheet, rowNum, "资产", data.getAssets(), amountStyle);
+
             // 负债和所有者权益项目
             rowNum++;
-            rowNum = writeBalanceSheetItems(sheet, rowNum, "负债", data.getLiabilities());
-            
+            rowNum = writeBalanceSheetItems(sheet, rowNum, "负债", data.getLiabilities(), amountStyle);
+
             rowNum++;
-            rowNum = writeBalanceSheetItems(sheet, rowNum, "所有者权益", data.getEquity());
+            rowNum = writeBalanceSheetItems(sheet, rowNum, "所有者权益", data.getEquity(), amountStyle);
             
             // 设置列宽
             sheet.setColumnWidth(0, 20 * 256);
@@ -98,13 +100,15 @@ public class ReportExcelUtil {
             headerFont.setBold(true);
             headerStyle.setFont(headerFont);
             headerStyle.setAlignment(HorizontalAlignment.CENTER);
-            
+            // 金额单元格样式（避免 BigDecimal 转 double 精度丢失/无数字格式）
+            CellStyle amountStyle = createAmountStyle(workbook);
+
             // 标题
             Row titleRow = sheet.createRow(0);
             Cell titleCell = titleRow.createCell(0);
             titleCell.setCellValue("利润表 " + year + "年" + month + "月");
             titleCell.setCellStyle(headerStyle);
-            
+
             // 表头
             Row headerRow = sheet.createRow(2);
             headerRow.createCell(0).setCellValue("项目");
@@ -114,15 +118,15 @@ public class ReportExcelUtil {
             for (int i = 0; i < 4; i++) {
                 headerRow.getCell(i).setCellStyle(headerStyle);
             }
-            
+
             // 数据行
             int rowNum = 3;
             for (IncomeStatementItem item : data.getItems()) {
                 Row row = sheet.createRow(rowNum++);
                 row.createCell(0).setCellValue(item.getName());
                 row.createCell(1).setCellValue(item.getRowNo());
-                row.createCell(2).setCellValue(item.getCurrentAmount().doubleValue());
-                row.createCell(3).setCellValue(item.getYearAmount().doubleValue());
+                setAmountCell(row, 2, item.getCurrentAmount().doubleValue(), amountStyle);
+                setAmountCell(row, 3, item.getYearAmount().doubleValue(), amountStyle);
             }
             
             // 设置列宽
@@ -152,13 +156,15 @@ public class ReportExcelUtil {
             headerFont.setBold(true);
             headerStyle.setFont(headerFont);
             headerStyle.setAlignment(HorizontalAlignment.CENTER);
-            
+            // 金额单元格样式（避免 BigDecimal 转 double 精度丢失/无数字格式）
+            CellStyle amountStyle = createAmountStyle(workbook);
+
             // 标题
             Row titleRow = sheet.createRow(0);
             Cell titleCell = titleRow.createCell(0);
             titleCell.setCellValue("科目余额表 " + year + "年" + month + "月");
             titleCell.setCellStyle(headerStyle);
-            
+
             // 表头
             Row headerRow = sheet.createRow(2);
             headerRow.createCell(0).setCellValue("科目编码");
@@ -172,19 +178,19 @@ public class ReportExcelUtil {
             for (int i = 0; i < 8; i++) {
                 headerRow.getCell(i).setCellStyle(headerStyle);
             }
-            
+
             // 数据行
             int rowNum = 3;
             for (SubjectBalanceRow row : data.getRows()) {
                 Row dataRow = sheet.createRow(rowNum++);
                 dataRow.createCell(0).setCellValue(row.getSubjectCode());
                 dataRow.createCell(1).setCellValue(row.getSubjectName());
-                dataRow.createCell(2).setCellValue(row.getBeginDebit().doubleValue());
-                dataRow.createCell(3).setCellValue(row.getBeginCredit().doubleValue());
-                dataRow.createCell(4).setCellValue(row.getPeriodDebit().doubleValue());
-                dataRow.createCell(5).setCellValue(row.getPeriodCredit().doubleValue());
-                dataRow.createCell(6).setCellValue(row.getEndDebit().doubleValue());
-                dataRow.createCell(7).setCellValue(row.getEndCredit().doubleValue());
+                setAmountCell(dataRow, 2, row.getBeginDebit().doubleValue(), amountStyle);
+                setAmountCell(dataRow, 3, row.getBeginCredit().doubleValue(), amountStyle);
+                setAmountCell(dataRow, 4, row.getPeriodDebit().doubleValue(), amountStyle);
+                setAmountCell(dataRow, 5, row.getPeriodCredit().doubleValue(), amountStyle);
+                setAmountCell(dataRow, 6, row.getEndDebit().doubleValue(), amountStyle);
+                setAmountCell(dataRow, 7, row.getEndCredit().doubleValue(), amountStyle);
             }
             
             // 设置列宽
@@ -215,6 +221,8 @@ public class ReportExcelUtil {
             headerFont.setBold(true);
             headerStyle.setFont(headerFont);
             headerStyle.setAlignment(HorizontalAlignment.CENTER);
+            // 金额单元格样式（避免 BigDecimal 转 double 精度丢失/无数字格式）
+            CellStyle amountStyle = createAmountStyle(workbook);
 
             // 标题
             Row titleRow = sheet.createRow(0);
@@ -241,20 +249,20 @@ public class ReportExcelUtil {
                     Row row = sheet.createRow(rowNum++);
                     row.createCell(0).setCellValue(item.getItemName());
                     row.createCell(1).setCellValue(item.getRowNo());
-                    row.createCell(2).setCellValue(item.getBeginningBalance() != null ? item.getBeginningBalance().doubleValue() : 0);
-                    row.createCell(3).setCellValue(item.getIncreaseAmount() != null ? item.getIncreaseAmount().doubleValue() : 0);
-                    row.createCell(4).setCellValue(item.getDecreaseAmount() != null ? item.getDecreaseAmount().doubleValue() : 0);
-                    row.createCell(5).setCellValue(item.getEndingBalance() != null ? item.getEndingBalance().doubleValue() : 0);
+                    setAmountCell(row, 2, item.getBeginningBalance() != null ? item.getBeginningBalance().doubleValue() : 0, amountStyle);
+                    setAmountCell(row, 3, item.getIncreaseAmount() != null ? item.getIncreaseAmount().doubleValue() : 0, amountStyle);
+                    setAmountCell(row, 4, item.getDecreaseAmount() != null ? item.getDecreaseAmount().doubleValue() : 0, amountStyle);
+                    setAmountCell(row, 5, item.getEndingBalance() != null ? item.getEndingBalance().doubleValue() : 0, amountStyle);
                 }
             }
 
             // 合计行
             Row totalRow = sheet.createRow(rowNum);
             totalRow.createCell(0).setCellValue("合计");
-            totalRow.createCell(2).setCellValue(data.getTotalBeginningBalance() != null ? data.getTotalBeginningBalance().doubleValue() : 0);
-            totalRow.createCell(3).setCellValue(data.getTotalIncrease() != null ? data.getTotalIncrease().doubleValue() : 0);
-            totalRow.createCell(4).setCellValue(data.getTotalDecrease() != null ? data.getTotalDecrease().doubleValue() : 0);
-            totalRow.createCell(5).setCellValue(data.getTotalEndingBalance() != null ? data.getTotalEndingBalance().doubleValue() : 0);
+            setAmountCell(totalRow, 2, data.getTotalBeginningBalance() != null ? data.getTotalBeginningBalance().doubleValue() : 0, amountStyle);
+            setAmountCell(totalRow, 3, data.getTotalIncrease() != null ? data.getTotalIncrease().doubleValue() : 0, amountStyle);
+            setAmountCell(totalRow, 4, data.getTotalDecrease() != null ? data.getTotalDecrease().doubleValue() : 0, amountStyle);
+            setAmountCell(totalRow, 5, data.getTotalEndingBalance() != null ? data.getTotalEndingBalance().doubleValue() : 0, amountStyle);
 
             // 设置列宽
             sheet.setColumnWidth(0, 25 * 256);
@@ -284,6 +292,8 @@ public class ReportExcelUtil {
             headerFont.setBold(true);
             headerStyle.setFont(headerFont);
             headerStyle.setAlignment(HorizontalAlignment.CENTER);
+            // 金额单元格样式（避免 BigDecimal 转 double 精度丢失/无数字格式）
+            CellStyle amountStyle = createAmountStyle(workbook);
 
             // 标题
             Row titleRow = sheet.createRow(0);
@@ -309,8 +319,8 @@ public class ReportExcelUtil {
                     Row row = sheet.createRow(rowNum++);
                     row.createCell(0).setCellValue(item.getDepartmentCode() != null ? item.getDepartmentCode() : "");
                     row.createCell(1).setCellValue(item.getDepartmentName() != null ? item.getDepartmentName() : "");
-                    row.createCell(2).setCellValue(item.getPeriodAmount() != null ? item.getPeriodAmount().doubleValue() : 0);
-                    row.createCell(3).setCellValue(item.getYearAmount() != null ? item.getYearAmount().doubleValue() : 0);
+                    setAmountCell(row, 2, item.getPeriodAmount() != null ? item.getPeriodAmount().doubleValue() : 0, amountStyle);
+                    setAmountCell(row, 3, item.getYearAmount() != null ? item.getYearAmount().doubleValue() : 0, amountStyle);
                     row.createCell(4).setCellValue(item.getPercentage() != null ? item.getPercentage().doubleValue() : 0);
                 }
             }
@@ -318,7 +328,7 @@ public class ReportExcelUtil {
             // 合计行
             Row totalRow = sheet.createRow(rowNum);
             totalRow.createCell(0).setCellValue("合计");
-            totalRow.createCell(2).setCellValue(data.getTotalExpense() != null ? data.getTotalExpense().doubleValue() : 0);
+            setAmountCell(totalRow, 2, data.getTotalExpense() != null ? data.getTotalExpense().doubleValue() : 0, amountStyle);
 
             // 设置列宽
             sheet.setColumnWidth(0, 15 * 256);
@@ -335,13 +345,13 @@ public class ReportExcelUtil {
         }
     }
 
-    private int writeBalanceSheetItems(Sheet sheet, int rowNum, String category, List<BalanceSheetItem> items) {
+    private int writeBalanceSheetItems(Sheet sheet, int rowNum, String category, List<BalanceSheetItem> items, CellStyle amountStyle) {
         for (BalanceSheetItem item : items) {
             Row row = sheet.createRow(rowNum++);
             row.createCell(0).setCellValue(item.getName());
             row.createCell(1).setCellValue(item.getRowNo());
-            row.createCell(2).setCellValue(item.getBeginningBalance().doubleValue());
-            row.createCell(3).setCellValue(item.getEndingBalance().doubleValue());
+            setAmountCell(row, 2, item.getBeginningBalance().doubleValue(), amountStyle);
+            setAmountCell(row, 3, item.getEndingBalance().doubleValue(), amountStyle);
         }
         return rowNum;
     }
@@ -359,6 +369,8 @@ public class ReportExcelUtil {
             headerFont.setBold(true);
             headerStyle.setFont(headerFont);
             headerStyle.setAlignment(HorizontalAlignment.CENTER);
+            // 金额单元格样式（避免 BigDecimal 转 double 精度丢失/无数字格式）
+            CellStyle amountStyle = createAmountStyle(workbook);
 
             // 标题
             Row titleRow = sheet.createRow(0);
@@ -387,13 +399,13 @@ public class ReportExcelUtil {
                         Row row = sheet.createRow(rowNum++);
                         row.createCell(0).setCellValue("    " + item.getItemName());
                         row.createCell(1).setCellValue(rowNo++);
-                        row.createCell(2).setCellValue(item.getAmount() != null ? item.getAmount().doubleValue() : 0);
+                        setAmountCell(row, 2, item.getAmount() != null ? item.getAmount().doubleValue() : 0, amountStyle);
                     }
                 }
             }
-            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流入小计", data.getOperatingInflow(), rowNo++);
-            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流出小计", data.getOperatingOutflow(), rowNo++);
-            rowNum = writeCashFlowSummary(sheet, rowNum, "    经营活动产生的现金流量净额", data.getOperatingNetFlow(), rowNo++);
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流入小计", data.getOperatingInflow(), rowNo++, amountStyle);
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流出小计", data.getOperatingOutflow(), rowNo++, amountStyle);
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    经营活动产生的现金流量净额", data.getOperatingNetFlow(), rowNo++, amountStyle);
 
             // 二、投资活动产生的现金流量
             rowNum = writeCashFlowSection(sheet, rowNum, "二、投资活动产生的现金流量", headerStyle, true);
@@ -403,13 +415,13 @@ public class ReportExcelUtil {
                         Row row = sheet.createRow(rowNum++);
                         row.createCell(0).setCellValue("    " + item.getItemName());
                         row.createCell(1).setCellValue(rowNo++);
-                        row.createCell(2).setCellValue(item.getAmount() != null ? item.getAmount().doubleValue() : 0);
+                        setAmountCell(row, 2, item.getAmount() != null ? item.getAmount().doubleValue() : 0, amountStyle);
                     }
                 }
             }
-            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流入小计", data.getInvestingInflow(), rowNo++);
-            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流出小计", data.getInvestingOutflow(), rowNo++);
-            rowNum = writeCashFlowSummary(sheet, rowNum, "    投资活动产生的现金流量净额", data.getInvestingNetFlow(), rowNo++);
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流入小计", data.getInvestingInflow(), rowNo++, amountStyle);
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流出小计", data.getInvestingOutflow(), rowNo++, amountStyle);
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    投资活动产生的现金流量净额", data.getInvestingNetFlow(), rowNo++, amountStyle);
 
             // 三、筹资活动产生的现金流量
             rowNum = writeCashFlowSection(sheet, rowNum, "三、筹资活动产生的现金流量", headerStyle, true);
@@ -419,17 +431,17 @@ public class ReportExcelUtil {
                         Row row = sheet.createRow(rowNum++);
                         row.createCell(0).setCellValue("    " + item.getItemName());
                         row.createCell(1).setCellValue(rowNo++);
-                        row.createCell(2).setCellValue(item.getAmount() != null ? item.getAmount().doubleValue() : 0);
+                        setAmountCell(row, 2, item.getAmount() != null ? item.getAmount().doubleValue() : 0, amountStyle);
                     }
                 }
             }
-            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流入小计", data.getFinancingInflow(), rowNo++);
-            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流出小计", data.getFinancingOutflow(), rowNo++);
-            rowNum = writeCashFlowSummary(sheet, rowNum, "    筹资活动产生的现金流量净额", data.getFinancingNetFlow(), rowNo++);
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流入小计", data.getFinancingInflow(), rowNo++, amountStyle);
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流出小计", data.getFinancingOutflow(), rowNo++, amountStyle);
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    筹资活动产生的现金流量净额", data.getFinancingNetFlow(), rowNo++, amountStyle);
 
             // 四、现金及现金等价物净增加额
             rowNum = writeCashFlowSection(sheet, rowNum, "四、现金及现金等价物净增加额", headerStyle, true);
-            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金及现金等价物净增加额", data.getNetIncrease(), rowNo++);
+            rowNum = writeCashFlowSummary(sheet, rowNum, "    现金及现金等价物净增加额", data.getNetIncrease(), rowNo++, amountStyle);
 
             // 设置列宽
             sheet.setColumnWidth(0, 35 * 256);
@@ -459,12 +471,35 @@ public class ReportExcelUtil {
     /**
      * 写入现金流量表小计/净额行
      */
-    private int writeCashFlowSummary(Sheet sheet, int rowNum, String name, java.math.BigDecimal amount, int rowNo) {
+    private int writeCashFlowSummary(Sheet sheet, int rowNum, String name, java.math.BigDecimal amount, int rowNo, CellStyle amountStyle) {
         Row row = sheet.createRow(rowNum++);
         row.createCell(0).setCellValue(name);
         row.createCell(1).setCellValue(rowNo);
-        row.createCell(2).setCellValue(amount != null ? amount.doubleValue() : 0);
+        setAmountCell(row, 2, amount != null ? amount.doubleValue() : 0, amountStyle);
         return rowNum;
+    }
+
+    /**
+     * 创建金额单元格样式（千分位 + 两位小数）。
+     * BigDecimal 直接转 double 写入 Excel 会丢失精度且默认无数字格式，
+     * 应用统一数字格式后可保证显示规范并在 Excel 中精确求和。
+     */
+    private CellStyle createAmountStyle(Workbook workbook) {
+        CellStyle amountStyle = workbook.createCellStyle();
+        DataFormat format = workbook.createDataFormat();
+        amountStyle.setDataFormat(format.getFormat("#,##0.00"));
+        return amountStyle;
+    }
+
+    /**
+     * 写入金额单元格并应用数字格式
+     */
+    private void setAmountCell(Row row, int col, double value, CellStyle amountStyle) {
+        Cell cell = row.createCell(col);
+        cell.setCellValue(value);
+        if (amountStyle != null) {
+            cell.setCellStyle(amountStyle);
+        }
     }
 
     private void outputExcel(HttpServletResponse response, Workbook workbook, String fileName) throws IOException {

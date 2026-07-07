@@ -9,6 +9,7 @@ import com.company.daizhang.common.constant.CommonConstant;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.common.utils.SecurityUtils;
 import com.company.daizhang.module.accountset.entity.UserAccountSet;
 import com.company.daizhang.module.accountset.mapper.UserAccountSetMapper;
 import com.company.daizhang.module.system.dto.UserCreateRequest;
@@ -140,6 +141,24 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         if (this.count(wrapper) > 0) {
             throw new BusinessException(ErrorCode.USER_ALREADY_EXISTS);
         }
+
+        // 检查邮箱是否已存在(邮箱可用于密码找回,重复将导致歧义)
+        if (StrUtil.isNotBlank(request.getEmail())) {
+            LambdaQueryWrapper<SysUser> emailWrapper = new LambdaQueryWrapper<>();
+            emailWrapper.eq(SysUser::getEmail, request.getEmail());
+            if (this.count(emailWrapper) > 0) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "邮箱已被使用");
+            }
+        }
+
+        // 检查手机号是否已存在
+        if (StrUtil.isNotBlank(request.getPhone())) {
+            LambdaQueryWrapper<SysUser> phoneWrapper = new LambdaQueryWrapper<>();
+            phoneWrapper.eq(SysUser::getPhone, request.getPhone());
+            if (this.count(phoneWrapper) > 0) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "手机号已被使用");
+            }
+        }
         
         SysUser user = new SysUser();
         BeanUtil.copyProperties(request, user);
@@ -195,7 +214,27 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         if (request.getStatus() != null && request.getStatus() != 0 && request.getStatus() != 1) {
             throw new BusinessException(ErrorCode.USER_STATUS_INVALID);
         }
-        
+
+        // 检查邮箱是否已存在(排除自身ID)
+        if (StrUtil.isNotBlank(request.getEmail())) {
+            LambdaQueryWrapper<SysUser> emailWrapper = new LambdaQueryWrapper<>();
+            emailWrapper.eq(SysUser::getEmail, request.getEmail());
+            emailWrapper.ne(SysUser::getId, id);
+            if (this.count(emailWrapper) > 0) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "邮箱已被使用");
+            }
+        }
+
+        // 检查手机号是否已存在(排除自身ID)
+        if (StrUtil.isNotBlank(request.getPhone())) {
+            LambdaQueryWrapper<SysUser> phoneWrapper = new LambdaQueryWrapper<>();
+            phoneWrapper.eq(SysUser::getPhone, request.getPhone());
+            phoneWrapper.ne(SysUser::getId, id);
+            if (this.count(phoneWrapper) > 0) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "手机号已被使用");
+            }
+        }
+
         BeanUtil.copyProperties(request, user);
         this.updateById(user);
         
@@ -230,7 +269,13 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         if (id == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "用户ID不能为空");
         }
-        
+
+        // 不能删除当前登录用户:删除后当前token仍有效直至过期,且无法再登录
+        Long currentUserId = SecurityUtils.getCurrentUserId();
+        if (id.equals(currentUserId)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "不能删除当前登录用户");
+        }
+
         SysUser user = this.getById(id);
         if (user == null) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND);
