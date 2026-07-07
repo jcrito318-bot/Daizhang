@@ -43,6 +43,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -463,29 +464,41 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         Long currentUserId = SecurityUtils.getCurrentUserId();
         LocalDateTime now = LocalDateTime.now();
         int success = 0;
-        List<String> errors = new java.util.ArrayList<>();
+        // 失败项ID与原因并行收集，便于运维定位具体失败凭证
+        List<Long> failedIds = new ArrayList<>();
+        List<String> errors = new ArrayList<>();
 
         for (Long id : ids) {
             Voucher voucher = this.getById(id);
             if (voucher == null) {
+                failedIds.add(id);
                 errors.add("凭证ID=" + id + " 不存在");
                 continue;
             }
             // IDOR治理:校验当前用户对该凭证所属账套的访问权(OWNER/ACCOUNTANT/VIEWER)
             // 审核为状态变更(非删除/资金类操作)，会计员(ACCOUNTANT)应可审核凭证
-            accountSetAccessService.checkAccess(voucher.getAccountSetId());
+            try {
+                accountSetAccessService.checkAccess(voucher.getAccountSetId());
+            } catch (BusinessException e) {
+                failedIds.add(id);
+                errors.add("凭证" + voucher.getVoucherNo() + " 无访问权限:" + e.getMessage());
+                continue;
+            }
             if (voucher.getStatus() != null && voucher.getStatus() != 0) {
+                failedIds.add(id);
                 errors.add("凭证" + voucher.getVoucherNo() + " 非未审核状态，不能审核");
                 continue;
             }
             // 制单人与审核人不能为同一人
             if (voucher.getCreateBy() != null && voucher.getCreateBy().equals(currentUserId)) {
+                failedIds.add(id);
                 errors.add("凭证" + voucher.getVoucherNo() + " 制单人与审核人不能为同一人");
                 continue;
             }
             // 借贷平衡校验
             if (voucher.getTotalDebit() != null && voucher.getTotalCredit() != null
                     && voucher.getTotalDebit().compareTo(voucher.getTotalCredit()) != 0) {
+                failedIds.add(id);
                 errors.add("凭证" + voucher.getVoucherNo() + " 借贷不平衡");
                 continue;
             }
@@ -496,7 +509,9 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             success++;
         }
 
-        if (!errors.isEmpty()) {
+        // 汇总输出失败明细:返回值仅为成功数,失败项ID与原因通过日志透传,便于调用方/运维定位
+        if (!failedIds.isEmpty()) {
+            log.warn("批量审核失败项: failedIds={}, errors={}", failedIds, errors);
             log.warn("批量审核部分失败，成功{}张，失败{}张：{}", success, ids.size() - success, errors);
         } else {
             log.info("批量审核完成，成功{}张", success);
@@ -511,19 +526,29 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "凭证ID列表不能为空");
         }
         int success = 0;
-        List<String> errors = new java.util.ArrayList<>();
+        // 失败项ID与原因并行收集，便于运维定位具体失败凭证
+        List<Long> failedIds = new ArrayList<>();
+        List<String> errors = new ArrayList<>();
 
         for (Long id : ids) {
             Voucher voucher = this.getById(id);
             if (voucher == null) {
+                failedIds.add(id);
                 errors.add("凭证ID=" + id + " 不存在");
                 continue;
             }
             // IDOR治理:校验当前用户对该凭证所属账套的访问权(OWNER/ACCOUNTANT/VIEWER)
             // 反审核为状态变更(非删除/资金类操作)，会计员(ACCOUNTANT)应可反审核凭证
-            accountSetAccessService.checkAccess(voucher.getAccountSetId());
+            try {
+                accountSetAccessService.checkAccess(voucher.getAccountSetId());
+            } catch (BusinessException e) {
+                failedIds.add(id);
+                errors.add("凭证" + voucher.getVoucherNo() + " 无访问权限:" + e.getMessage());
+                continue;
+            }
             // 只有已审核且未过账的凭证才能反审核
             if (voucher.getStatus() == null || voucher.getStatus() != 1) {
+                failedIds.add(id);
                 errors.add("凭证" + voucher.getVoucherNo() + " 非已审核状态，不能反审核");
                 continue;
             }
@@ -533,13 +558,16 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             // 使用updateById保留@Version乐观锁(OptimisticLockerInnerInterceptor仅拦截updateById(entity))
             boolean updated = this.updateById(voucher);
             if (!updated) {
+                failedIds.add(id);
                 errors.add("凭证" + voucher.getVoucherNo() + " 反审核失败(并发冲突)，请重试");
                 continue;
             }
             success++;
         }
 
-        if (!errors.isEmpty()) {
+        // 汇总输出失败明细:返回值仅为成功数,失败项ID与原因通过日志透传,便于调用方/运维定位
+        if (!failedIds.isEmpty()) {
+            log.warn("批量反审核失败项: failedIds={}, errors={}", failedIds, errors);
             log.warn("批量反审核部分失败，成功{}张，失败{}张：{}", success, ids.size() - success, errors);
         } else {
             log.info("批量反审核完成，成功{}张", success);
@@ -1209,16 +1237,27 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         newVoucher.setTotalDebit(original.getTotalCredit() != null ? original.getTotalCredit() : BigDecimal.ZERO);
         newVoucher.setTotalCredit(original.getTotalDebit() != null ? original.getTotalDebit() : BigDecimal.ZERO);
         newVoucher.setAttachmentCount(original.getAttachmentCount());
-        // 红冲凭证直接设为已过账(status=2)，使余额立即抵消。
+        // 红冲凭证由系统自动过账(status=2)，使余额立即抵消原凭证发生额。
         // 原实现只生成status=0凭证，不调用updateAccountBalance，原凭证余额原封不动，
         // 抵消依赖用户事后手动审核+过账，极易被遗漏导致余额持续错误且无告警。
+        //
+        // 审核分离限制说明(已知P2):
+        // 红冲凭证为特殊冲销操作，业务上由系统自动过账，不经过审核流程，
+        // auditBy/postBy 均为操作人(currentUserId)，绕过"制单人≠审核人"约束。
+        // 这与 auditVoucher 中的制单人≠审核人校验形成业务语义差异:
+        //   - 普通审核流程要求职责分离,防止单人既制单又审核
+        //   - 红冲是冲销操作,操作人需对冲销结果负责,系统自动过账保证余额即时抵消
+        // 若业务要求严格审核分离,可改为生成 status=1(已审核未过账)凭证交由他人过账,
+        // 但会改变红冲业务语义(余额不会立即抵消),需配合前端提示用户后续过账。
         Long currentUserId = SecurityUtils.getCurrentUserId();
         newVoucher.setStatus(2);
         newVoucher.setAuditBy(currentUserId);
         newVoucher.setAuditTime(LocalDateTime.now());
         newVoucher.setPostBy(currentUserId);
         newVoucher.setPostTime(LocalDateTime.now());
-        newVoucher.setSource(0);
+        // source=2 标识"系统红冲"凭证(0-手工录入 1-系统结转 2-系统红冲),
+        // 便于报表/审计按来源筛选红冲凭证,与手工录入凭证区分
+        newVoucher.setSource(2);
 
         // 生成凭证号+save整体重试,防止并发下凭证号唯一索引冲突(与createVoucher一致)
         String newVoucherNo = null;

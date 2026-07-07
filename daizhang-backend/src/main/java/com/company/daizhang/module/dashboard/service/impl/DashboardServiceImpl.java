@@ -175,13 +175,17 @@ public class DashboardServiceImpl implements DashboardService {
             size = 10;
         }
         List<TodoItemVO> all = loadAllTodoItems();
-        int total = all.size();
-        int fromIndex = Math.min((page - 1) * size, total);
-        int toIndex = Math.min(fromIndex + size, total);
+        // total 改用各待办表 selectCount 之和: loadAllTodoItems 每表 LIMIT 500,
+        // 合并列表上限1500条,超过时列表大小不再反映真实总数,导致分页总数失真。
+        // 注: 数据查询仍保留 LIMIT 500 防OOM,故超出1500条的深分页可能返回空页(已知限制)。
+        long total = countAllTodoItems();
+        int listSize = all.size();
+        int fromIndex = Math.min((page - 1) * size, listSize);
+        int toIndex = Math.min(fromIndex + size, listSize);
         List<TodoItemVO> pageList = fromIndex < toIndex
                 ? new ArrayList<>(all.subList(fromIndex, toIndex))
                 : new ArrayList<>();
-        return new PageResult<>(pageList, (long) total, page, size);
+        return new PageResult<>(pageList, total, page, size);
     }
 
     /**
@@ -230,6 +234,31 @@ public class DashboardServiceImpl implements DashboardService {
         todoItems.addAll(buildTaxTodos(undeclaredTaxes, accountSets));
         todoItems.sort(Comparator.comparing(TodoItemVO::getCreateTime, Comparator.nullsLast(Comparator.reverseOrder())));
         return todoItems;
+    }
+
+    /**
+     * 统计全部待办的真实总数(各待办表 selectCount 之和)。
+     * loadAllTodoItems 出于防OOM对每表 LIMIT 500,合并列表上限1500,
+     * 超过时无法反映真实总数,故分页 total 改用各表 count 求和(条件与查询一致,不含LIMIT)。
+     */
+    private long countAllTodoItems() {
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+
+        LambdaQueryWrapper<ServiceTask> taskWrapper = new LambdaQueryWrapper<>();
+        applyAccessFilter(taskWrapper, ServiceTask::getAccountSetId, accessibleIds);
+        taskWrapper.lt(ServiceTask::getTaskStatus, 2);
+
+        LambdaQueryWrapper<Voucher> voucherWrapper = new LambdaQueryWrapper<>();
+        applyAccessFilter(voucherWrapper, Voucher::getAccountSetId, accessibleIds);
+        voucherWrapper.eq(Voucher::getStatus, 0);
+
+        LambdaQueryWrapper<TaxDeclaration> taxWrapper = new LambdaQueryWrapper<>();
+        applyAccessFilter(taxWrapper, TaxDeclaration::getAccountSetId, accessibleIds);
+        taxWrapper.eq(TaxDeclaration::getStatus, 0);
+
+        return serviceTaskMapper.selectCount(taskWrapper)
+                + voucherMapper.selectCount(voucherWrapper)
+                + taxDeclarationMapper.selectCount(taxWrapper);
     }
 
     private DashboardSummary buildSummary(long totalAccountSets, long activeAccountSets,

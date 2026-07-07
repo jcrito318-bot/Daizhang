@@ -143,6 +143,7 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
         }
         // IDOR治理:校验当前用户对该合同所属账套的所有者权限
         accountSetAccessService.checkOwner(contract.getAccountSetId());
+        // 注意:ContractUpdateRequest不含contractNo字段,合同编号不可通过update修改,无需查重
         // 保存原状态,防止copyProperties覆盖status绕过状态机(状态变更只能走专用接口)
         Integer originalStatus = contract.getStatus();
         // 使用ignoreNullValue避免Hutool默认拷贝null导致部分更新时字段被置空
@@ -318,11 +319,13 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
         ContractVO vo = new ContractVO();
         BeanUtil.copyProperties(contract, vo);
 
-        // 填充客户名称
+        // 填充客户名称(客户可能已被删除产生孤儿数据,需兜底避免展示null)
         if (contract.getCustomerId() != null) {
             Customer customer = customerMapper.selectById(contract.getCustomerId());
             if (customer != null) {
                 vo.setCustomerName(customer.getCustomerName());
+            } else {
+                vo.setCustomerName("（客户已删除）");
             }
         }
 

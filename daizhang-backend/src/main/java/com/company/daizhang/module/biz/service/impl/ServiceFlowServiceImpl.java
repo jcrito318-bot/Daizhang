@@ -223,6 +223,10 @@ public class ServiceFlowServiceImpl extends ServiceImpl<ServiceFlowNodeMapper, S
         }
         // IDOR治理:校验当前用户对该任务所属账套的所有者权限
         accountSetAccessService.checkOwner(existing.getAccountSetId());
+        // 已完成任务不允许重新指派,避免产生"已完成但assignee是新人"的矛盾数据影响工时统计
+        if (existing.getTaskStatus() != null && existing.getTaskStatus() == 2) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "已完成任务不允许重新指派");
+        }
         existing.setAssigneeId(assigneeId);
         existing.setAssigneeName(assigneeName);
         // 分配后状态置为进行中

@@ -148,9 +148,10 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         // IDOR治理:校验当前用户对目标账套的所有者权限(写操作用checkOwner)
         accountSetAccessService.checkOwner(request.getAccountSetId());
 
-        // 检查编码是否已存在
+        // 检查编码是否已存在(按账套内唯一,多租户场景下不同账套允许相同客户编码)
         LambdaQueryWrapper<Customer> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Customer::getCustomerCode, request.getCustomerCode());
+        wrapper.eq(Customer::getCustomerCode, request.getCustomerCode())
+               .eq(Customer::getAccountSetId, request.getAccountSetId());
         if (this.count(wrapper) > 0) {
             throw new BusinessException(400, "客户编码已存在");
         }
@@ -303,7 +304,12 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
             }
         }
         profile.setTotalPaidAmount(totalPaid);
-        profile.setTotalUnpaidAmount(totalContractAmount.subtract(totalPaid));
+        // 未收款=合同总额-已收款,口径不一致(合同总额仅统计执行中,收款统计全部)可能为负,负值归零兜底,与buildRiskInfo保持一致
+        BigDecimal totalUnpaidAmount = totalContractAmount.subtract(totalPaid);
+        if (totalUnpaidAmount.compareTo(BigDecimal.ZERO) < 0) {
+            totalUnpaidAmount = BigDecimal.ZERO;
+        }
+        profile.setTotalUnpaidAmount(totalUnpaidAmount);
 
         // 查询本月凭证数
         int voucherCount = 0;

@@ -1576,9 +1576,20 @@ public class LedgerServiceImpl implements LedgerService {
                     .collect(Collectors.toList());
 
             // 期初余额累计
+            // 已知限制：beginningBalance 为开户时设置的静态字段（BankAccount 无 year 字段），无年度关联。
+            // 跨年度对账时该字段仍是开户年度的期初，加上今年全年流水会导致对方余额错误，
+            // 跨年度对账需用户手动调整期初余额。
             BigDecimal beginningTotal = bankAccounts.stream()
                     .map(a -> a.getBeginningBalance() != null ? a.getBeginningBalance() : BigDecimal.ZERO)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
+            // 跨年度对账告警：若查询年度与银行账户开户年度不同，提示用户期初余额可能不准确
+            for (BankAccount ba : bankAccounts) {
+                if (ba.getOpenDate() != null && ba.getOpenDate().getYear() != year) {
+                    log.warn("银行对账期初告警：查询年度{}与银行账户{}开户年度{}不一致，beginningBalance为开户期初，"
+                                    + "跨年度对方余额可能不准确，请用户手动调整期初余额",
+                            year, ba.getAccountNumber(), ba.getOpenDate().getYear());
+                }
+            }
 
             if (accountNumbers.isEmpty()) {
                 // 银行账户未登记账号，仅以期初余额作为对方余额
@@ -1590,6 +1601,12 @@ public class LedgerServiceImpl implements LedgerService {
                         ? LocalDate.of(year, month, 1).withDayOfMonth(LocalDate.of(year, month, 1).lengthOfMonth())
                         : LocalDate.of(year, 12, 31);
 
+                // 已知限制：BankTransaction 实体无 auxiliaryId 字段，对方余额（银行流水）仅按
+                // bankAccount 账号 + 日期汇总，不区分辅助核算。而账面余额按 subjectId + auxiliaryId 过滤，
+                // 若一个银行科目下挂多个辅助核算，对方余额是全部客户的流水合计，与账面余额不可比。
+                // 多辅助核算场景需用户注意口径差异。
+                log.warn("银行对账口径告警：对方余额按银行账号汇总，不区分辅助核算（auxiliaryId={}），"
+                                + "多辅助核算场景下对方余额为全部客户流水合计，与账面余额不可比", auxiliaryId);
                 LambdaQueryWrapper<BankTransaction> bankTxnWrapper = new LambdaQueryWrapper<>();
                 bankTxnWrapper.in(BankTransaction::getBankAccount, accountNumbers)
                         .ge(BankTransaction::getTransactionDate, startDate)

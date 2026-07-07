@@ -3,6 +3,7 @@ package com.company.daizhang.module.report.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.company.daizhang.common.exception.BusinessException;
+import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.module.accountset.entity.AccountBalance;
 import com.company.daizhang.module.accountset.entity.AccountPeriod;
 import com.company.daizhang.module.accountset.mapper.AccountBalanceMapper;
@@ -591,6 +592,11 @@ public class ReportServiceImpl implements ReportService {
         }
 
         // 1. 查询该账套该期间所有已过账凭证（status=2）
+        // 已知限制: 此处仅查询当月(eq year + eq month),暂不支持本年累计(1~month 累计金额)。
+        // 利润表 IncomeStatementVO 含本年累计字段,而 CashFlowStatementVO 无对应字段;
+        // 受当前改动范围限制不可修改 VO,故本年累计暂未实现。
+        // 后续在 CashFlowStatementVO 增加 yearToDate* 字段后,可在此追加
+        // le(month) 的累计查询并填充(与当月逻辑一致,仅汇总区间不同)。
         LambdaQueryWrapper<Voucher> voucherWrapper = new LambdaQueryWrapper<>();
         voucherWrapper.eq(Voucher::getAccountSetId, accountSetId)
                 .eq(Voucher::getYear, year)
@@ -1226,6 +1232,12 @@ public class ReportServiceImpl implements ReportService {
     private void exportReportPdf(Long accountSetId, Integer year, Integer month,
                                  String reportType, String reportName, HttpServletResponse response) {
         String html = generatePrintHtml(accountSetId, year, month, reportType);
+        // HTML 与 PDF 字节流将同时驻留内存,科目数量过大时存在 OOM 风险;
+        // 此处以 HTML 体积作为数据量代理,超过阈值告警(行数在通用导出入口不可得,故用 HTML 长度)。
+        if (html.length() > 5_000_000) {
+            log.warn("PDF导出数据量过大(HTML {} 字符, reportType={}),可能影响内存,建议改用Excel导出",
+                    html.length(), reportType);
+        }
         try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
             PdfRendererBuilder builder = new PdfRendererBuilder();
             builder.useFastMode();
@@ -1260,13 +1272,20 @@ public class ReportServiceImpl implements ReportService {
                 "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
                 "/usr/share/fonts/truetype/simsun.ttc"
         };
+        boolean fontLoaded = false;
         for (String path : fontPaths) {
             File f = new File(path);
             if (f.exists()) {
                 builder.useFont(f, "SimSun");
                 builder.useFont(f, "宋体");
+                fontLoaded = true;
                 return;
             }
+        }
+        if (!fontLoaded) {
+            log.error("PDF导出中文字体未找到,已尝试路径: {}", Arrays.toString(fontPaths));
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR.getCode(),
+                    "PDF导出失败：未找到中文字体，请安装文鼎宋体或文泉驿字体");
         }
     }
 

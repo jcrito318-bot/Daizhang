@@ -288,6 +288,22 @@ public class PeriodServiceImpl implements PeriodService {
                      .set(AccountPeriod::getCloseTime, null);
         accountPeriodMapper.update(null, updateWrapper);
 
+        // 已知限制：反结账未自动清理本期系统生成的结转凭证（source=1，含损益结转/成本结转）。
+        // 这些凭证已过账（status=2）并更新了科目余额（损益科目清零、本年利润累加等），
+        // 直接删除会导致余额混乱；安全删除需先按结转逻辑反向回滚余额，逻辑复杂且风险较高，故未自动清理。
+        // 如需修改本期凭证请先手动删除结转凭证并调整余额，否则重新结转会撞幂等校验。
+        LambdaQueryWrapper<Voucher> carryVoucherWrapper = new LambdaQueryWrapper<>();
+        carryVoucherWrapper.eq(Voucher::getAccountSetId, accountSetId)
+                .eq(Voucher::getYear, year)
+                .eq(Voucher::getMonth, month)
+                .eq(Voucher::getSource, 1);
+        Long carryVoucherCount = voucherMapper.selectCount(carryVoucherWrapper);
+        if (carryVoucherCount != null && carryVoucherCount > 0) {
+            log.warn("反结账告警：账套ID={}，期间={}-{} 存在{}张系统结转凭证（source=1），反结账未自动清理。"
+                            + "如需修改本期凭证请先手动删除结转凭证并调整余额，否则重新结转会撞幂等校验",
+                    accountSetId, year, month, carryVoucherCount);
+        }
+
         log.info("期末反结账成功，账套ID：{}，期间：{}-{}", accountSetId, year, month);
     }
 
@@ -934,13 +950,21 @@ public class PeriodServiceImpl implements PeriodService {
         voucher.setVoucherDate(period.getEndDate());
         voucher.setYear(year);
         voucher.setMonth(month);
-        voucher.setStatus(VoucherStatus.UNAUDITED.getCode());
+        // 与 carryForward 保持一致：成本结转凭证状态为 POSTED（已过账），避免 closePeriod
+        // 校验"未过账凭证"时阻断结账；UNAUDITED 会导致结账流程中断。
+        voucher.setStatus(VoucherStatus.POSTED.getCode());
         voucher.setSource(1);
         voucher.setTotalDebit(costAmount);
         voucher.setTotalCredit(costAmount);
         voucher.setAttachmentCount(0);
         // 凭证字不硬编码,由账套默认凭证字决定(避免不同账套凭证字ID不一致)
         voucher.setVoucherWordId(null);
+        // 与 carryForward 保持一致：填充审核/过账人与时间
+        Long currentUserId = SecurityUtils.getCurrentUserId();
+        voucher.setAuditBy(currentUserId);
+        voucher.setAuditTime(LocalDateTime.now());
+        voucher.setPostBy(currentUserId);
+        voucher.setPostTime(LocalDateTime.now());
 
         voucher.setVoucherNo(generateCarryVoucherNo(accountSetId, year, month));
 
@@ -967,6 +991,53 @@ public class PeriodServiceImpl implements PeriodService {
         creditDetail.setDebit(BigDecimal.ZERO);
         creditDetail.setCredit(costAmount);
         voucherDetailMapper.insert(creditDetail);
+
+        // 同步更新科目余额（参照 carryForward 中对 acc_account_balance 的更新）
+        // 借记主营业务成本：累加本期借方发生额、本年累计借方、期末借方
+        AccountBalance costBalance = balanceMap.get(costSubject.getId());
+        if (costBalance == null) {
+            costBalance = new AccountBalance();
+            costBalance.setAccountSetId(accountSetId);
+            costBalance.setSubjectId(costSubject.getId());
+            costBalance.setYear(year);
+            costBalance.setMonth(month);
+            costBalance.setBeginDebit(BigDecimal.ZERO);
+            costBalance.setBeginCredit(BigDecimal.ZERO);
+            costBalance.setPeriodDebit(BigDecimal.ZERO);
+            costBalance.setPeriodCredit(BigDecimal.ZERO);
+            costBalance.setYearDebit(BigDecimal.ZERO);
+            costBalance.setYearCredit(BigDecimal.ZERO);
+            costBalance.setEndDebit(BigDecimal.ZERO);
+            costBalance.setEndCredit(BigDecimal.ZERO);
+            accountBalanceMapper.insert(costBalance);
+        }
+        costBalance.setPeriodDebit((costBalance.getPeriodDebit() != null ? costBalance.getPeriodDebit() : BigDecimal.ZERO).add(costAmount));
+        costBalance.setYearDebit((costBalance.getYearDebit() != null ? costBalance.getYearDebit() : BigDecimal.ZERO).add(costAmount));
+        costBalance.setEndDebit((costBalance.getEndDebit() != null ? costBalance.getEndDebit() : BigDecimal.ZERO).add(costAmount));
+        accountBalanceMapper.updateById(costBalance);
+
+        // 贷记库存商品：累加本期贷方发生额、本年累计贷方、期末贷方
+        AccountBalance inventoryBalance = balanceMap.get(inventorySubject.getId());
+        if (inventoryBalance == null) {
+            inventoryBalance = new AccountBalance();
+            inventoryBalance.setAccountSetId(accountSetId);
+            inventoryBalance.setSubjectId(inventorySubject.getId());
+            inventoryBalance.setYear(year);
+            inventoryBalance.setMonth(month);
+            inventoryBalance.setBeginDebit(BigDecimal.ZERO);
+            inventoryBalance.setBeginCredit(BigDecimal.ZERO);
+            inventoryBalance.setPeriodDebit(BigDecimal.ZERO);
+            inventoryBalance.setPeriodCredit(BigDecimal.ZERO);
+            inventoryBalance.setYearDebit(BigDecimal.ZERO);
+            inventoryBalance.setYearCredit(BigDecimal.ZERO);
+            inventoryBalance.setEndDebit(BigDecimal.ZERO);
+            inventoryBalance.setEndCredit(BigDecimal.ZERO);
+            accountBalanceMapper.insert(inventoryBalance);
+        }
+        inventoryBalance.setPeriodCredit((inventoryBalance.getPeriodCredit() != null ? inventoryBalance.getPeriodCredit() : BigDecimal.ZERO).add(costAmount));
+        inventoryBalance.setYearCredit((inventoryBalance.getYearCredit() != null ? inventoryBalance.getYearCredit() : BigDecimal.ZERO).add(costAmount));
+        inventoryBalance.setEndCredit((inventoryBalance.getEndCredit() != null ? inventoryBalance.getEndCredit() : BigDecimal.ZERO).add(costAmount));
+        accountBalanceMapper.updateById(inventoryBalance);
 
         log.info("成本结转凭证生成成功，凭证ID：{}，成本金额：{}", voucher.getId(), costAmount);
         return voucher.getId();

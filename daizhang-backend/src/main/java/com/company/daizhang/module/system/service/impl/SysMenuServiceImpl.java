@@ -88,7 +88,18 @@ public class SysMenuServiceImpl extends ServiceImpl<SysMenuMapper, SysMenu> impl
                 throw new BusinessException(ErrorCode.MENU_PARENT_NOT_FOUND);
             }
         }
-        
+
+        // 业务校验：同父级下菜单path唯一(前端路由按path唯一映射,重复path会导致路由冲突)
+        // 仅当path非空时校验,目录/按钮类型可无path
+        if (StrUtil.isNotBlank(request.getPath())) {
+            Long count = this.count(new LambdaQueryWrapper<SysMenu>()
+                    .eq(SysMenu::getPath, request.getPath())
+                    .eq(request.getParentId() != null, SysMenu::getParentId, request.getParentId()));
+            if (count > 0) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "菜单路径已存在");
+            }
+        }
+
         SysMenu menu = new SysMenu();
         BeanUtil.copyProperties(request, menu);
         if (menu.getParentId() == null) {
@@ -153,7 +164,21 @@ public class SysMenuServiceImpl extends ServiceImpl<SysMenuMapper, SysMenu> impl
                 throw new BusinessException(ErrorCode.MENU_PARENT_NOT_FOUND);
             }
         }
-        
+
+        // 业务校验：同父级下菜单path唯一(前端路由按path唯一映射,重复path会导致路由冲突)
+        // 仅当path非空时校验,目录/按钮类型可无path。排除自身id,允许保留原path。
+        // 有效parentId:请求传入则用请求值,否则保留原menu的parentId
+        if (StrUtil.isNotBlank(request.getPath())) {
+            Long effectiveParentId = request.getParentId() != null ? request.getParentId() : menu.getParentId();
+            Long count = this.count(new LambdaQueryWrapper<SysMenu>()
+                    .eq(SysMenu::getPath, request.getPath())
+                    .eq(effectiveParentId != null, SysMenu::getParentId, effectiveParentId)
+                    .ne(SysMenu::getId, id));
+            if (count > 0) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR, "菜单路径已存在");
+            }
+        }
+
         BeanUtil.copyProperties(request, menu);
         this.updateById(menu);
         

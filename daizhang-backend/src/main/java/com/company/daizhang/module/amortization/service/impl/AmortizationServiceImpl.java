@@ -25,6 +25,8 @@ import com.company.daizhang.module.voucher.mapper.VoucherMapper;
 import com.company.daizhang.module.voucher.mapper.VoucherWordMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -50,6 +52,13 @@ public class AmortizationServiceImpl implements AmortizationService {
     private final SubjectMapper subjectMapper;
     private final AccountPeriodMapper accountPeriodMapper;
     private final VoucherWordMapper voucherWordMapper;
+
+    // 自注入代理引用：批量方法内部循环调用单条方法时，this.xxx() 是自调用，会绕过 Spring AOP 代理，
+    // 导致单条方法上的 @Transactional 失效。通过 self 代理调用确保事务传播生效，
+    // 使每条单据在独立事务中执行，单条失败仅回滚自身，不影响批次内其他单据。
+    @Lazy
+    @Autowired
+    private AmortizationService self;
 
     // 长期待摊费用对应科目编码（1801），管理费用（5602）
     // 注意：SubjectServiceImpl.initDefaultSubjects 中 1801=长期待摊费用, 1901=待处理财产损溢
@@ -346,7 +355,14 @@ public class AmortizationServiceImpl implements AmortizationService {
         // 校验会计期间
         AccountPeriod period = checkPeriodExists(accountSetId, year, month);
         checkPeriodNotClosed(period);
-        LocalDate voucherDate = LocalDate.of(year, month, period.getEndDate().getDayOfMonth());
+        // period.getEndDate() 可能为 null，此时使用月末日期作为凭证日期，避免 NPE
+        LocalDate voucherDate;
+        if (period.getEndDate() != null) {
+            voucherDate = LocalDate.of(year, month, period.getEndDate().getDayOfMonth());
+        } else {
+            LocalDate firstDayOfMonth = LocalDate.of(year, month, 1);
+            voucherDate = firstDayOfMonth.withDayOfMonth(firstDayOfMonth.lengthOfMonth());
+        }
 
         // 获取科目：贷方=长期待摊费用（取自Amortization.subjectId或按编码1801查询）
         Long creditSubjectId = amortization.getSubjectId();
@@ -404,10 +420,15 @@ public class AmortizationServiceImpl implements AmortizationService {
         List<Long> voucherIds = new ArrayList<>();
         for (Amortization amortization : list) {
             try {
-                Long voucherId = generateAmortizationVoucher(amortization.getId(), year, month);
+                // 通过 self 代理调用，使 generateAmortizationVoucher 上的 @Transactional 生效，
+                // 单条失败仅回滚自身，不影响批次内其他单据。
+                Long voucherId = self.generateAmortizationVoucher(amortization.getId(), year, month);
                 voucherIds.add(voucherId);
             } catch (BusinessException e) {
                 log.warn("批量生成摊销凭证跳过，摊销ID: {}, 原因: {}", amortization.getId(), e.getMessage());
+            } catch (Exception e) {
+                // 非业务异常也仅跳过当前单据并记录 error 日志，不中断整批
+                log.error("批量生成摊销凭证异常，摊销ID: {}", amortization.getId(), e);
             }
         }
         log.info("批量生成摊销凭证完成：accountSetId={}, year={}月={}, 成功数量={}",
