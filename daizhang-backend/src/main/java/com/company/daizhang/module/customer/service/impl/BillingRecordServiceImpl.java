@@ -13,8 +13,10 @@ import com.company.daizhang.module.customer.dto.BillingRecordQueryRequest;
 import com.company.daizhang.module.customer.dto.BillingRecordUpdateRequest;
 import com.company.daizhang.module.customer.entity.BillingRecord;
 import com.company.daizhang.module.customer.entity.Customer;
+import com.company.daizhang.module.customer.entity.ServiceContract;
 import com.company.daizhang.module.customer.mapper.BillingRecordMapper;
 import com.company.daizhang.module.customer.mapper.CustomerMapper;
+import com.company.daizhang.module.customer.mapper.ServiceContractMapper;
 import com.company.daizhang.module.customer.service.BillingRecordService;
 import com.company.daizhang.module.customer.vo.BillingRecordVO;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +41,7 @@ public class BillingRecordServiceImpl implements BillingRecordService {
 
     private final BillingRecordMapper billingRecordMapper;
     private final CustomerMapper customerMapper;
+    private final ServiceContractMapper contractMapper;
     private final AccountSetAccessService accountSetAccessService;
 
     private static final BigDecimal DEFAULT_TAX_RATE = new BigDecimal("0.06");
@@ -125,6 +128,38 @@ public class BillingRecordServiceImpl implements BillingRecordService {
         }
         // IDOR治理:校验当前用户对该开票记录所属账套的所有者权限(写操作用checkOwner)
         accountSetAccessService.checkOwner(customer.getAccountSetId());
+
+        // 若指定了合同,校验合同归属、状态及开票金额上限
+        if (request.getContractId() != null) {
+            ServiceContract contract = contractMapper.selectById(request.getContractId());
+            if (contract == null) {
+                throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "合同不存在");
+            }
+            // 校验合同归属:合同必须归属于当前客户
+            if (contract.getCustomerId() == null
+                    || !contract.getCustomerId().equals(request.getCustomerId())) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "合同不属于该客户，不能关联");
+            }
+            // 校验合同状态:仅执行中(1)的合同允许开票
+            if (contract.getStatus() == null || contract.getStatus() != 1) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "合同当前状态不允许开票");
+            }
+            // 校验开票金额上限:该合同已开票金额 + 本次金额 ≤ 合同总额(排除已作废的开票记录)
+            BigDecimal contractAmount = contract.getAmount() != null ? contract.getAmount() : BigDecimal.ZERO;
+            LambdaQueryWrapper<BillingRecord> billedWrapper = new LambdaQueryWrapper<>();
+            billedWrapper.eq(BillingRecord::getContractId, request.getContractId())
+                    .ne(BillingRecord::getStatus, 2);
+            BigDecimal billedAmount = BigDecimal.ZERO;
+            for (BillingRecord b : billingRecordMapper.selectList(billedWrapper)) {
+                if (b.getAmount() != null) {
+                    billedAmount = billedAmount.add(b.getAmount());
+                }
+            }
+            BigDecimal thisAmount = request.getAmount() != null ? request.getAmount() : BigDecimal.ZERO;
+            if (billedAmount.add(thisAmount).compareTo(contractAmount) > 0) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "开票金额超过合同总额，无法创建");
+            }
+        }
 
         BillingRecord record = new BillingRecord();
         BeanUtil.copyProperties(request, record);

@@ -11,9 +11,13 @@ import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.customer.dto.ContractCreateRequest;
 import com.company.daizhang.module.customer.dto.ContractQueryRequest;
 import com.company.daizhang.module.customer.dto.ContractUpdateRequest;
+import com.company.daizhang.module.customer.entity.BillingRecord;
 import com.company.daizhang.module.customer.entity.Customer;
+import com.company.daizhang.module.customer.entity.PaymentRecord;
 import com.company.daizhang.module.customer.entity.ServiceContract;
+import com.company.daizhang.module.customer.mapper.BillingRecordMapper;
 import com.company.daizhang.module.customer.mapper.CustomerMapper;
+import com.company.daizhang.module.customer.mapper.PaymentRecordMapper;
 import com.company.daizhang.module.customer.mapper.ServiceContractMapper;
 import com.company.daizhang.module.customer.service.ContractService;
 import com.company.daizhang.module.customer.vo.ContractRenewalReminderVO;
@@ -38,6 +42,8 @@ import java.util.stream.Collectors;
 public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, ServiceContract> implements ContractService {
 
     private final CustomerMapper customerMapper;
+    private final BillingRecordMapper billingRecordMapper;
+    private final PaymentRecordMapper paymentRecordMapper;
     private final AccountSetAccessService accountSetAccessService;
 
     @Override
@@ -72,6 +78,13 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
 
     @Override
     public List<ContractVO> listContractsByCustomerId(Long customerId) {
+        // IDOR治理:校验当前用户对该客户所属账套的访问权(读操作用checkAccess)
+        Customer customer = customerMapper.selectById(customerId);
+        if (customer == null) {
+            throw new BusinessException(404, "客户不存在");
+        }
+        accountSetAccessService.checkAccess(customer.getAccountSetId());
+
         LambdaQueryWrapper<ServiceContract> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(ServiceContract::getCustomerId, customerId)
                .orderByDesc(ServiceContract::getCreateTime);
@@ -101,6 +114,8 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
         if (customer == null) {
             throw new BusinessException(404, "客户不存在");
         }
+        // IDOR治理:校验当前用户对该客户所属账套的所有者权限(写操作用checkOwner)
+        accountSetAccessService.checkOwner(customer.getAccountSetId());
 
         // 检查合同编号是否已存在
         LambdaQueryWrapper<ServiceContract> wrapper = new LambdaQueryWrapper<>();
@@ -167,6 +182,32 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
         if (contract.getStatus() == null || contract.getStatus() != 1) {
             throw new BusinessException("合同当前状态不允许此操作");
         }
+
+        // 校验是否存在未完成的开票/收款记录,避免完结合同后产生悬空业务记录
+        // 1.未作废(status!=2)的开票记录视为未完成
+        LambdaQueryWrapper<BillingRecord> billingWrapper = new LambdaQueryWrapper<>();
+        billingWrapper.eq(BillingRecord::getContractId, id).ne(BillingRecord::getStatus, 2);
+        if (billingRecordMapper.selectCount(billingWrapper) > 0) {
+            throw new BusinessException("合同存在未完成的开票/收款记录，无法完结");
+        }
+        // 2.未被任何开票记录引用的收款记录视为未关联/未完成
+        LambdaQueryWrapper<PaymentRecord> paymentWrapper = new LambdaQueryWrapper<>();
+        paymentWrapper.eq(PaymentRecord::getContractId, id);
+        List<PaymentRecord> payments = paymentRecordMapper.selectList(paymentWrapper);
+        if (!payments.isEmpty()) {
+            List<Long> paymentIds = payments.stream()
+                    .map(PaymentRecord::getId)
+                    .collect(Collectors.toList());
+            LambdaQueryWrapper<BillingRecord> linkedWrapper = new LambdaQueryWrapper<>();
+            linkedWrapper.in(BillingRecord::getPaymentRecordId, paymentIds);
+            Set<Long> linkedIds = billingRecordMapper.selectList(linkedWrapper).stream()
+                    .map(BillingRecord::getPaymentRecordId)
+                    .collect(Collectors.toSet());
+            if (payments.stream().anyMatch(p -> !linkedIds.contains(p.getId()))) {
+                throw new BusinessException("合同存在未完成的开票/收款记录，无法完结");
+            }
+        }
+
         contract.setStatus(2);
         this.updateById(contract);
     }
@@ -198,6 +239,18 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
         // IDOR治理:校验当前用户对该合同所属账套的所有者权限
         accountSetAccessService.checkOwner(contract.getAccountSetId());
 
+        // 校验是否存在关联的开票/收款记录,避免删除后产生外键悬空
+        LambdaQueryWrapper<BillingRecord> billingWrapper = new LambdaQueryWrapper<>();
+        billingWrapper.eq(BillingRecord::getContractId, id);
+        if (billingRecordMapper.selectCount(billingWrapper) > 0) {
+            throw new BusinessException("合同存在关联的开票记录，无法删除");
+        }
+        LambdaQueryWrapper<PaymentRecord> paymentWrapper = new LambdaQueryWrapper<>();
+        paymentWrapper.eq(PaymentRecord::getContractId, id);
+        if (paymentRecordMapper.selectCount(paymentWrapper) > 0) {
+            throw new BusinessException("合同存在关联的收款记录，无法删除");
+        }
+
         this.removeById(id);
     }
 
@@ -216,6 +269,16 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
                .eq(ServiceContract::getStatus, 1)
                .le(ServiceContract::getEndDate, thresholdDate)
                .orderByAsc(ServiceContract::getEndDate);
+
+        // IDOR治理:仅返回当前用户可访问账套下的合同(超级管理员返回null表示不限制)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds != null) {
+            if (accessibleIds.isEmpty()) {
+                return Collections.emptyList();
+            }
+            wrapper.in(ServiceContract::getAccountSetId, accessibleIds);
+        }
+
         List<ServiceContract> contracts = this.list(wrapper);
 
         List<ContractRenewalReminderVO> reminders = new ArrayList<>();

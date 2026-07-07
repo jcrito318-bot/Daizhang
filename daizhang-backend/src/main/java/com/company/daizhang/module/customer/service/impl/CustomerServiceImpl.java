@@ -14,10 +14,12 @@ import com.company.daizhang.module.biz.mapper.ServiceTaskMapper;
 import com.company.daizhang.module.customer.dto.CustomerCreateRequest;
 import com.company.daizhang.module.customer.dto.CustomerQueryRequest;
 import com.company.daizhang.module.customer.dto.CustomerUpdateRequest;
+import com.company.daizhang.module.customer.entity.BillingRecord;
 import com.company.daizhang.module.customer.entity.Customer;
 import com.company.daizhang.module.customer.entity.PaymentRecord;
 import com.company.daizhang.module.customer.entity.ServiceContract;
 import com.company.daizhang.module.customer.entity.ServiceReport;
+import com.company.daizhang.module.customer.mapper.BillingRecordMapper;
 import com.company.daizhang.module.customer.mapper.CustomerMapper;
 import com.company.daizhang.module.customer.mapper.PaymentRecordMapper;
 import com.company.daizhang.module.customer.mapper.ServiceContractMapper;
@@ -60,6 +62,7 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
 
     private final ServiceContractMapper serviceContractMapper;
     private final PaymentRecordMapper paymentRecordMapper;
+    private final BillingRecordMapper billingRecordMapper;
     private final VoucherMapper voucherMapper;
     private final InputInvoiceMapper inputInvoiceMapper;
     private final OutputInvoiceMapper outputInvoiceMapper;
@@ -206,6 +209,12 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         reportWrapper.eq(ServiceReport::getCustomerId, id);
         if (serviceReportMapper.selectCount(reportWrapper) > 0) {
             throw new BusinessException(400, "客户存在关联业务记录，无法删除，请先处理关联数据");
+        }
+
+        LambdaQueryWrapper<BillingRecord> billingWrapper = new LambdaQueryWrapper<>();
+        billingWrapper.eq(BillingRecord::getCustomerId, id);
+        if (billingRecordMapper.selectCount(billingWrapper) > 0) {
+            throw new BusinessException(400, "客户存在开票记录，无法删除");
         }
 
         this.removeById(id);

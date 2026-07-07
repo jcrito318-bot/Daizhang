@@ -88,6 +88,9 @@ public class VoucherTemplateServiceImpl extends ServiceImpl<VoucherTemplateMappe
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createTemplate(VoucherTemplateRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限(写操作)
+        accountSetAccessService.checkOwner(request.getAccountSetId());
+
         // 业务校验：模板明细不能为空
         if (request.getDetails() == null || request.getDetails().isEmpty()) {
             throw new BusinessException(ErrorCode.VOUCHER_TEMPLATE_DETAIL_EMPTY);
@@ -120,7 +123,11 @@ public class VoucherTemplateServiceImpl extends ServiceImpl<VoucherTemplateMappe
         }
 
         // 更新模板
+        // copyProperties前保存原accountSetId, copy后还原, 不允许通过update修改所属账套
+        // (否则新accountSetId未鉴权, 可将模板偷换到他人账套)
+        Long originalAccountSetId = template.getAccountSetId();
         BeanUtil.copyProperties(request, template);
+        template.setAccountSetId(originalAccountSetId);
         template.setId(id);
         this.updateById(template);
 
@@ -164,7 +171,9 @@ public class VoucherTemplateServiceImpl extends ServiceImpl<VoucherTemplateMappe
         if (template == null) {
             throw new BusinessException(ErrorCode.VOUCHER_TEMPLATE_NOT_FOUND);
         }
-        // IDOR治理:校验当前用户对该账套的所有者权限
+        // IDOR治理:校验当前用户对模板所属账套的访问权(读模板内容)
+        accountSetAccessService.checkAccess(template.getAccountSetId());
+        // IDOR治理:校验当前用户对目标账套的所有者权限(写操作)
         accountSetAccessService.checkOwner(accountSetId);
 
         // 查询模板明细

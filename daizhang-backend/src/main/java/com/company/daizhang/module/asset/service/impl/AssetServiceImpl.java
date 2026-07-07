@@ -419,24 +419,50 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
             details.add(creditDisposal);
         }
 
-        // 差额计入资产处置损益：净收入(收入-净值)>0 贷方资产处置损益；净损失 借方资产处置损益
+        // 差额计入资产处置损益：需同时记录"固定资产清理"对冲行,确保凭证借贷平衡
+        // 收益时(diff=收入-净值>0): 借固定资产清理(diff), 贷资产处置损益(diff)
+        // 损失时(diff=净值-收入>0): 借资产处置损益(diff), 贷固定资产清理(diff)
+        // 这样固定资产清理账户最终余额为0(借方净值+借方收益冲销 = 贷方收入+贷方损失冲销),凭证借贷平衡
         BigDecimal diff = income.subtract(netValue);
-        if (diff.compareTo(BigDecimal.ZERO) != 0) {
-            VoucherDetailRequest gainLossDetail = new VoucherDetailRequest();
-            gainLossDetail.setLineNo(lineNo++);
-            gainLossDetail.setSummary("资产处置损益-" + assetDesc);
-            gainLossDetail.setSubjectId(gainLossSubjectId);
-            if (diff.compareTo(BigDecimal.ZERO) > 0) {
-                // 净收益：贷方资产处置损益
-                gainLossDetail.setDebit(BigDecimal.ZERO);
-                gainLossDetail.setCredit(diff);
-            } else {
-                // 净损失：借方资产处置损益（取绝对值）
-                gainLossDetail.setDebit(diff.negate());
-                gainLossDetail.setCredit(BigDecimal.ZERO);
-            }
-            gainLossDetail.setSortOrder(lineNo - 1);
-            details.add(gainLossDetail);
+        if (diff.compareTo(BigDecimal.ZERO) > 0) {
+            // 净收益：借固定资产清理, 贷资产处置损益
+            VoucherDetailRequest debitDisposalGain = new VoucherDetailRequest();
+            debitDisposalGain.setLineNo(lineNo++);
+            debitDisposalGain.setSummary("资产处置损益-" + assetDesc);
+            debitDisposalGain.setSubjectId(disposalSubjectId);
+            debitDisposalGain.setDebit(diff);
+            debitDisposalGain.setCredit(BigDecimal.ZERO);
+            debitDisposalGain.setSortOrder(lineNo - 1);
+            details.add(debitDisposalGain);
+
+            VoucherDetailRequest creditGainLoss = new VoucherDetailRequest();
+            creditGainLoss.setLineNo(lineNo++);
+            creditGainLoss.setSummary("资产处置损益-" + assetDesc);
+            creditGainLoss.setSubjectId(gainLossSubjectId);
+            creditGainLoss.setDebit(BigDecimal.ZERO);
+            creditGainLoss.setCredit(diff);
+            creditGainLoss.setSortOrder(lineNo - 1);
+            details.add(creditGainLoss);
+        } else if (diff.compareTo(BigDecimal.ZERO) < 0) {
+            // 净损失：借资产处置损益, 贷固定资产清理
+            BigDecimal lossAmount = diff.negate();
+            VoucherDetailRequest debitLoss = new VoucherDetailRequest();
+            debitLoss.setLineNo(lineNo++);
+            debitLoss.setSummary("资产处置损益-" + assetDesc);
+            debitLoss.setSubjectId(gainLossSubjectId);
+            debitLoss.setDebit(lossAmount);
+            debitLoss.setCredit(BigDecimal.ZERO);
+            debitLoss.setSortOrder(lineNo - 1);
+            details.add(debitLoss);
+
+            VoucherDetailRequest creditDisposalLoss = new VoucherDetailRequest();
+            creditDisposalLoss.setLineNo(lineNo++);
+            creditDisposalLoss.setSummary("资产处置损益-" + assetDesc);
+            creditDisposalLoss.setSubjectId(disposalSubjectId);
+            creditDisposalLoss.setDebit(BigDecimal.ZERO);
+            creditDisposalLoss.setCredit(lossAmount);
+            creditDisposalLoss.setSortOrder(lineNo - 1);
+            details.add(creditDisposalLoss);
         }
 
         voucherRequest.setDetails(details);
@@ -444,10 +470,10 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         // 6. 调用凭证服务创建凭证（内部校验会计期间、借贷平衡），直接返回新凭证ID
         Long voucherId = voucherService.createVoucher(voucherRequest);
 
-        // 7. 更新资产状态为已处置(2)，并清零净值/累计折旧
+        // 7. 更新资产状态为已处置(2)，并清零净值/月折旧额
+        // 保留处置时的实际累计折旧值,不覆盖为原值,避免歪曲历史折旧数据
         asset.setStatus(2);
         asset.setNetValue(BigDecimal.ZERO);
-        asset.setAccumulatedDeprecation(originalValue);
         asset.setMonthlyDepreciation(BigDecimal.ZERO);
         if (StrUtil.isNotBlank(remark)) {
             asset.setRemark(remark);
@@ -579,15 +605,25 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
             }
 
             BigDecimal depreciationAmount;
-            if ("双倍余额递减法".equals(latest.getDepreciationMethod())) {
-                // 双倍余额递减法:基于当前净值计算,体现递减特性(原实现用原值,丧失递减)
+            String method = latest.getDepreciationMethod();
+            if ("双倍余额递减法".equals(method) || "年数总和法".equals(method)) {
+                // 双倍余额递减法/年数总和法:基于当前净值/累计折旧/已使用月数每月重新计算,
+                // 避免用资产创建时计算的陈旧月折旧额(latest.getMonthlyDepreciation)导致丧失递减特性
                 Integer usefulLife = latest.getUsefulLife();
                 if (usefulLife == null || usefulLife <= 0) {
                     continue;
                 }
-                BigDecimal rate = BigDecimal.valueOf(2).divide(BigDecimal.valueOf(usefulLife), 4, RoundingMode.HALF_UP);
-                depreciationAmount = assetNetValue.multiply(rate)
-                        .divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP);
+                BigDecimal originalVal = latest.getPurchaseAmount() != null ? latest.getPurchaseAmount() : BigDecimal.ZERO;
+                depreciationAmount = calculateMonthlyDepreciation(
+                        originalVal,
+                        assetNetValue,
+                        residualValue,
+                        usefulLife,
+                        method
+                );
+                if (depreciationAmount == null || depreciationAmount.compareTo(BigDecimal.ZERO) <= 0) {
+                    continue; // 当月折旧额为0或负,数据异常或已提足,跳过
+                }
             } else {
                 depreciationAmount = latest.getMonthlyDepreciation();
                 if (depreciationAmount == null) {
@@ -804,19 +840,27 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
 
     /**
      * 查询累计折旧科目ID（编码1602：累计折旧）
-     * 查不到时使用默认值1L并记录警告日志
+     * 查不到时抛业务异常（与 disposeAsset 中 requireSubject 处理方式一致）
      */
     private Long getAccumulatedDepreciationSubjectId(Long accountSetId) {
         // SubjectServiceImpl.initDefaultSubjects 中 1602=累计折旧, 1702=累计摊销
-        return getSubjectIdByCode(accountSetId, "1602", 1L, "累计折旧");
+        Long subjectId = getSubjectIdByCode(accountSetId, "1602", null, "累计折旧");
+        if (subjectId == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "累计折旧科目(1602)未找到，请先初始化科目");
+        }
+        return subjectId;
     }
 
     /**
      * 查询折旧费用科目ID（编码5602：管理费用-折旧）
-     * 查不到时使用默认值2L并记录警告日志
+     * 查不到时抛业务异常（与 disposeAsset 中 requireSubject 处理方式一致）
      */
     private Long getDepreciationExpenseSubjectId(Long accountSetId) {
-        return getSubjectIdByCode(accountSetId, "5602", 2L, "折旧费用");
+        Long subjectId = getSubjectIdByCode(accountSetId, "5602", null, "折旧费用");
+        if (subjectId == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "折旧费用科目(5602)未找到，请先初始化科目");
+        }
+        return subjectId;
     }
 
     /**
@@ -860,7 +904,38 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         } else if ("双倍余额递减法".equals(depreciationMethod)) {
             // 双倍余额递减法：年折旧率 = 2 / 使用年限 * 100%
             // 月折旧额 = 当前净值 * 年折旧率 / 12 (基于净值,体现递减特性;净值缺省回退原值)
+            // 最后两年(剩余月数<=24)改为直线法,符合会计准则
             BigDecimal baseValue = (netValue != null ? netValue : purchaseAmount);
+            BigDecimal remainingNet = baseValue.subtract(residualValue);
+            if (remainingNet.compareTo(BigDecimal.ZERO) <= 0) {
+                return BigDecimal.ZERO;
+            }
+            int totalMonths = usefulLife * 12;
+            // 已使用月数：用累计折旧(原值-净值)按双倍余额递减逐月累计公式反推
+            BigDecimal accumulated = purchaseAmount.subtract(baseValue);
+            int usedMonths = 0;
+            if (accumulated.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal rate = BigDecimal.valueOf(2).divide(BigDecimal.valueOf(usefulLife), 4, RoundingMode.HALF_UP);
+                BigDecimal runningNet = purchaseAmount;
+                for (int k = 1; k <= totalMonths; k++) {
+                    BigDecimal monthlyDep = runningNet.multiply(rate)
+                            .divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP);
+                    runningNet = runningNet.subtract(monthlyDep);
+                    if (purchaseAmount.subtract(runningNet).compareTo(accumulated) > 0) {
+                        usedMonths = k - 1;
+                        break;
+                    }
+                    usedMonths = k;
+                }
+            }
+            int remainingMonths = totalMonths - usedMonths;
+            if (remainingMonths <= 0) {
+                return BigDecimal.ZERO;
+            }
+            if (remainingMonths <= 24) {
+                // 直线法：(净值-残值)/剩余月数
+                return remainingNet.divide(BigDecimal.valueOf(remainingMonths), 2, RoundingMode.HALF_UP);
+            }
             BigDecimal rate = BigDecimal.valueOf(2).divide(BigDecimal.valueOf(usefulLife), 4, RoundingMode.HALF_UP);
             return baseValue.multiply(rate)
                     .divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP);
@@ -869,49 +944,55 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
             return purchaseAmount.subtract(residualValue)
                     .divide(BigDecimal.valueOf(usefulLife).multiply(BigDecimal.valueOf(12)), 2, RoundingMode.HALF_UP);
         } else if ("年数总和法".equals(depreciationMethod)) {
-            // 年数总和法(SYD)：月折旧额 = (原值 - 残值) × 尚可使用月数 / 使用年限月数总和
+            // 年数总和法(SYD)：年折旧额 = (原值 - 残值) × 尚可使用年数 / 使用年限年数总和
+            // 月折旧额 = 年折旧额 / 12 (基于会计准则使用年数总和而非月数总和)
             BigDecimal baseValue = (netValue != null ? netValue : purchaseAmount);
-            // 总月数 n = 使用年限 × 12
-            int totalMonths = usefulLife * 12;
-            // 使用年限月数总和 = n×(n+1)/2
-            BigDecimal sumOfMonths = BigDecimal.valueOf(totalMonths)
-                    .multiply(BigDecimal.valueOf(totalMonths + 1))
-                    .divide(BigDecimal.valueOf(2), 0, RoundingMode.HALF_UP);
             BigDecimal depreciableBase = purchaseAmount.subtract(residualValue);
             // 剩余净值 = 原值 - 残值 - 累计折旧 = 净值 - 残值
             BigDecimal remainingNet = baseValue.subtract(residualValue);
             if (depreciableBase.compareTo(BigDecimal.ZERO) <= 0
-                    || sumOfMonths.compareTo(BigDecimal.ZERO) <= 0
                     || remainingNet.compareTo(BigDecimal.ZERO) <= 0) {
                 return BigDecimal.ZERO;
             }
-            // 已使用月数：本方法无开始折旧日期入参，用累计折旧(原值-净值)按SYD累计公式反推
-            // 累计 k 个月折旧 = 可折旧基数 × k×(2n-k+1)/(2×月数总和)
+            // 使用年限年数总和 = n×(n+1)/2
+            int sumOfYears = usefulLife * (usefulLife + 1) / 2;
+            int totalMonths = usefulLife * 12;
+            // 已使用月数：用累计折旧(原值-净值)按SYD年数公式逐月反推
             BigDecimal accumulated = purchaseAmount.subtract(baseValue);
             int usedMonths = 0;
             if (accumulated.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal cumulative = BigDecimal.ZERO;
                 for (int k = 1; k <= totalMonths; k++) {
-                    BigDecimal cumulative = depreciableBase
-                            .multiply(BigDecimal.valueOf(k))
-                            .multiply(BigDecimal.valueOf(2L * totalMonths - k + 1))
-                            .divide(BigDecimal.valueOf(2), 10, RoundingMode.HALF_UP)
-                            .divide(sumOfMonths, 10, RoundingMode.HALF_UP);
-                    if (cumulative.compareTo(accumulated) >= 0) {
+                    // 第k个月所属年份(0基):前12个月属第1年(remainingYears=n),依此类推
+                    int usedYearsForMonth = (k - 1) / 12;
+                    int remainingYearsForMonth = usefulLife - usedYearsForMonth;
+                    if (remainingYearsForMonth <= 0) {
+                        usedMonths = k - 1;
+                        break;
+                    }
+                    BigDecimal monthlyDep = depreciableBase
+                            .multiply(BigDecimal.valueOf(remainingYearsForMonth))
+                            .divide(BigDecimal.valueOf(sumOfYears), 10, RoundingMode.HALF_UP)
+                            .divide(BigDecimal.valueOf(12), 10, RoundingMode.HALF_UP);
+                    cumulative = cumulative.add(monthlyDep);
+                    if (cumulative.compareTo(accumulated) > 0) {
                         usedMonths = k - 1;
                         break;
                     }
                     usedMonths = k;
                 }
             }
-            // 尚可使用月数 = 总月数 - 已使用月数
-            int remainingMonths = totalMonths - usedMonths;
-            if (remainingMonths <= 0) {
+            // 已使用年数(已折旧月数/12取整),尚可使用年数
+            int usedYears = usedMonths / 12;
+            int remainingYears = usefulLife - usedYears;
+            if (remainingYears <= 0) {
                 return BigDecimal.ZERO;
             }
-            // 月折旧额 = (原值 - 残值) × 尚可使用月数 / 使用年限月数总和
+            // 月折旧额 = (原值 - 残值) × 尚可使用年数 / 年数总和 / 12
             BigDecimal monthlyDepreciation = depreciableBase
-                    .multiply(BigDecimal.valueOf(remainingMonths))
-                    .divide(sumOfMonths, 2, RoundingMode.HALF_UP);
+                    .multiply(BigDecimal.valueOf(remainingYears))
+                    .divide(BigDecimal.valueOf(sumOfYears), 2, RoundingMode.HALF_UP)
+                    .divide(BigDecimal.valueOf(12), 2, RoundingMode.HALF_UP);
             // 月折旧额不能超过剩余净值（原值-残值-累计折旧）
             if (monthlyDepreciation.compareTo(remainingNet) > 0) {
                 monthlyDepreciation = remainingNet;

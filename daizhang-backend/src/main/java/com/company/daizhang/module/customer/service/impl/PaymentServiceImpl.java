@@ -1,6 +1,7 @@
 package com.company.daizhang.module.customer.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.bean.copier.CopyOptions;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -11,9 +12,11 @@ import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.customer.dto.PaymentCreateRequest;
 import com.company.daizhang.module.customer.dto.PaymentQueryRequest;
 import com.company.daizhang.module.customer.dto.PaymentUpdateRequest;
+import com.company.daizhang.module.customer.entity.BillingRecord;
 import com.company.daizhang.module.customer.entity.Customer;
 import com.company.daizhang.module.customer.entity.PaymentRecord;
 import com.company.daizhang.module.customer.entity.ServiceContract;
+import com.company.daizhang.module.customer.mapper.BillingRecordMapper;
 import com.company.daizhang.module.customer.mapper.CustomerMapper;
 import com.company.daizhang.module.customer.mapper.PaymentRecordMapper;
 import com.company.daizhang.module.customer.mapper.ServiceContractMapper;
@@ -23,6 +26,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
@@ -37,6 +41,7 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
 
     private final CustomerMapper customerMapper;
     private final ServiceContractMapper contractMapper;
+    private final BillingRecordMapper billingRecordMapper;
     private final AccountSetAccessService accountSetAccessService;
 
     @Override
@@ -159,6 +164,24 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
                     || !contract.getCustomerId().equals(request.getCustomerId())) {
                 throw new BusinessException(403, "合同不属于该客户，不能关联");
             }
+            // 校验合同状态:仅执行中(1)的合同允许新增收款
+            if (contract.getStatus() == null || contract.getStatus() != 1) {
+                throw new BusinessException("合同当前状态不允许新增收款");
+            }
+            // 校验收款金额上限:该合同已收款金额 + 本次金额 ≤ 合同总额
+            BigDecimal contractAmount = contract.getAmount() != null ? contract.getAmount() : BigDecimal.ZERO;
+            LambdaQueryWrapper<PaymentRecord> paidWrapper = new LambdaQueryWrapper<>();
+            paidWrapper.eq(PaymentRecord::getContractId, request.getContractId());
+            BigDecimal paidAmount = BigDecimal.ZERO;
+            for (PaymentRecord p : this.list(paidWrapper)) {
+                if (p.getAmount() != null) {
+                    paidAmount = paidAmount.add(p.getAmount());
+                }
+            }
+            BigDecimal thisAmount = request.getAmount() != null ? request.getAmount() : BigDecimal.ZERO;
+            if (paidAmount.add(thisAmount).compareTo(contractAmount) > 0) {
+                throw new BusinessException("收款金额超过合同总额，无法创建");
+            }
         }
 
         PaymentRecord payment = new PaymentRecord();
@@ -193,7 +216,7 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
             }
         }
 
-        BeanUtil.copyProperties(request, payment);
+        BeanUtil.copyProperties(request, payment, CopyOptions.create().ignoreNullValue());
         this.updateById(payment);
     }
 
@@ -210,6 +233,13 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
             throw new BusinessException(404, "客户不存在");
         }
         accountSetAccessService.checkOwner(customer.getAccountSetId());
+
+        // 校验是否被开票记录引用,避免删除后产生外键悬空
+        LambdaQueryWrapper<BillingRecord> billingWrapper = new LambdaQueryWrapper<>();
+        billingWrapper.eq(BillingRecord::getPaymentRecordId, id);
+        if (billingRecordMapper.selectCount(billingWrapper) > 0) {
+            throw new BusinessException("该收款记录已被开票记录引用，无法删除");
+        }
 
         this.removeById(id);
     }

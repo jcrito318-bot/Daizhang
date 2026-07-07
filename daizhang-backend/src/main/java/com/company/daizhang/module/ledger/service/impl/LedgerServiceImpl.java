@@ -177,6 +177,8 @@ public class LedgerServiceImpl implements LedgerService {
         }
         detailWrapper.orderByAsc(VoucherDetail::getSortOrder);
         List<VoucherDetail> details = voucherDetailMapper.selectList(detailWrapper);
+        // Java层按凭证维度重新排序,跨凭证查询时sortOrder会重复,需先按凭证顺序排序
+        sortDetailsByVoucherOrder(details, vouchers);
 
         // 构建凭证ID到凭证的映射
         Map<Long, Voucher> voucherMap = vouchers.stream()
@@ -572,6 +574,8 @@ public class LedgerServiceImpl implements LedgerService {
                 .in(VoucherDetail::getSubjectId, subjectIds);
         detailWrapper.orderByAsc(VoucherDetail::getSortOrder);
         List<VoucherDetail> details = voucherDetailMapper.selectList(detailWrapper);
+        // Java层按凭证维度重新排序,跨凭证查询时sortOrder会重复,需先按凭证顺序排序
+        sortDetailsByVoucherOrder(details, vouchers);
 
         // 构建凭证ID到凭证的映射
         Map<Long, Voucher> voucherMap = vouchers.stream()
@@ -994,6 +998,8 @@ public class LedgerServiceImpl implements LedgerService {
                     .eq(VoucherDetail::getAuxiliaryId, auxiliaryId);
             detailWrapper.orderByAsc(VoucherDetail::getSortOrder);
             details = voucherDetailMapper.selectList(detailWrapper);
+            // Java层按凭证维度重新排序,跨凭证查询时sortOrder会重复,需先按凭证顺序排序
+            sortDetailsByVoucherOrder(details, vouchers);
         }
 
         // 构建明细列表并计算余额
@@ -1384,6 +1390,8 @@ public class LedgerServiceImpl implements LedgerService {
                 .isNotNull(VoucherDetail::getAuxiliaryId);
         detailWrapper.orderByAsc(VoucherDetail::getSortOrder);
         List<VoucherDetail> details = voucherDetailMapper.selectList(detailWrapper);
+        // Java层按凭证维度重新排序,跨凭证查询时sortOrder会重复,需先按凭证顺序排序
+        sortDetailsByVoucherOrder(details, vouchers);
 
         // 按辅助核算项目分组
         Map<Long, List<VoucherDetail>> auxiliaryGroupMap = details.stream()
@@ -1539,6 +1547,8 @@ public class LedgerServiceImpl implements LedgerService {
                     .eq(VoucherDetail::getAuxiliaryId, auxiliaryId);
             detailWrapper.orderByAsc(VoucherDetail::getSortOrder);
             details = voucherDetailMapper.selectList(detailWrapper);
+            // Java层按凭证维度重新排序,跨凭证查询时sortOrder会重复,需先按凭证顺序排序
+            sortDetailsByVoucherOrder(details, vouchers);
         }
 
         // 银企对账：从银行流水计算对方余额，并收集已核对的凭证ID集合
@@ -2011,6 +2021,26 @@ public class LedgerServiceImpl implements LedgerService {
     }
 
     /**
+     * 按凭证日期+凭证号顺序对凭证明细重新排序(同凭证内按sortOrder)。
+     * sortOrder 是每张凭证从1开始,跨凭证查询时直接按sortOrder排序会乱序(数据库返回顺序不定),
+     * 需先按凭证维度(voucherDate, voucherNo)排序,同凭证内再按sortOrder排序。
+     *
+     * @param details         待排序的凭证明细
+     * @param sortedVouchers  已按 voucherDate, voucherNo 排序的凭证列表
+     */
+    private void sortDetailsByVoucherOrder(List<VoucherDetail> details, List<Voucher> sortedVouchers) {
+        if (details == null || details.isEmpty() || sortedVouchers == null || sortedVouchers.isEmpty()) {
+            return;
+        }
+        Map<Long, Integer> voucherOrderMap = new HashMap<>();
+        for (int i = 0; i < sortedVouchers.size(); i++) {
+            voucherOrderMap.put(sortedVouchers.get(i).getId(), i);
+        }
+        details.sort(Comparator.comparingInt((VoucherDetail d) -> voucherOrderMap.getOrDefault(d.getVoucherId(), Integer.MAX_VALUE))
+                .thenComparingInt(VoucherDetail::getSortOrder));
+    }
+
+    /**
      * 查询已过账的凭证明细
      */
     private List<VoucherDetail> queryPostedVoucherDetails(Long accountSetId, Long subjectId, Integer year, Integer month) {
@@ -2032,8 +2062,10 @@ public class LedgerServiceImpl implements LedgerService {
         LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
         detailWrapper.in(VoucherDetail::getVoucherId, voucherIds)
                 .eq(VoucherDetail::getSubjectId, subjectId);
-        detailWrapper.orderByAsc(VoucherDetail::getSortOrder);
-        return voucherDetailMapper.selectList(detailWrapper);
+        List<VoucherDetail> details = voucherDetailMapper.selectList(detailWrapper);
+        // Java层按凭证维度重新排序,跨凭证查询时sortOrder会重复,需先按凭证顺序排序
+        sortDetailsByVoucherOrder(details, vouchers);
+        return details;
     }
 
     /**

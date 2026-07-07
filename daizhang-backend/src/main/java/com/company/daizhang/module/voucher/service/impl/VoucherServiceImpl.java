@@ -160,7 +160,7 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         checkPeriodNotClosed(period);
         
         // 校验凭证明细并计算借贷合计
-        BigDecimal[] totals = validateDetailsAndGetTotals(request.getDetails());
+        BigDecimal[] totals = validateDetailsAndGetTotals(request.getDetails(), request.getAccountSetId());
         BigDecimal totalDebit = totals[0];
         BigDecimal totalCredit = totals[1];
 
@@ -168,7 +168,7 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         if (totalDebit.compareTo(totalCredit) != 0) {
             throw new BusinessException(ErrorCode.VOUCHER_BALANCE_ERROR);
         }
-        
+
         // 验证借贷合计不能为零
         if (totalDebit.compareTo(BigDecimal.ZERO) == 0) {
             throw new BusinessException(ErrorCode.VOUCHER_DEBIT_CREDIT_BOTH_ZERO);
@@ -239,7 +239,7 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         checkPeriodNotClosed(period);
 
         // 校验凭证明细并计算借贷合计
-        BigDecimal[] totals = validateDetailsAndGetTotals(request.getDetails());
+        BigDecimal[] totals = validateDetailsAndGetTotals(request.getDetails(), voucher.getAccountSetId());
         BigDecimal totalDebit = totals[0];
         BigDecimal totalCredit = totals[1];
 
@@ -247,7 +247,7 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         if (totalDebit.compareTo(totalCredit) != 0) {
             throw new BusinessException(ErrorCode.VOUCHER_BALANCE_ERROR);
         }
-        
+
         // 验证借贷合计不能为零
         if (totalDebit.compareTo(BigDecimal.ZERO) == 0) {
             throw new BusinessException(ErrorCode.VOUCHER_DEBIT_CREDIT_BOTH_ZERO);
@@ -271,7 +271,10 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         }
         voucher.setTotalDebit(totalDebit);
         voucher.setTotalCredit(totalCredit);
-        this.updateById(voucher);
+        boolean updated = this.updateById(voucher);
+        if (!updated) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "凭证更新失败(并发冲突)，请重试");
+        }
 
         // 删除旧明细
         LambdaQueryWrapper<VoucherDetail> deleteWrapper = new LambdaQueryWrapper<>();
@@ -368,8 +371,11 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         voucher.setStatus(1);
         voucher.setAuditBy(currentUserId);
         voucher.setAuditTime(LocalDateTime.now());
-        this.updateById(voucher);
-        
+        boolean updated = this.updateById(voucher);
+        if (!updated) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "凭证更新失败(并发冲突)，请重试");
+        }
+
         log.info("审核凭证成功，凭证ID: {}, 凭证号: {}, 审核人: {}", id, voucher.getVoucherNo(), currentUserId);
     }
 
@@ -530,7 +536,10 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         voucher.setStatus(2);
         voucher.setPostBy(SecurityUtils.getCurrentUserId());
         voucher.setPostTime(LocalDateTime.now());
-        this.updateById(voucher);
+        boolean updated = this.updateById(voucher);
+        if (!updated) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "凭证更新失败(并发冲突)，请重试");
+        }
 
         log.info("过账凭证成功，凭证ID: {}, 凭证号: {}", id, voucher.getVoucherNo());
     }
@@ -783,7 +792,10 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             throw new BusinessException("已过账凭证不能直接作废，请先反过账");
         }
         voucher.setStatus(3);
-        this.updateById(voucher);
+        boolean updated = this.updateById(voucher);
+        if (!updated) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "凭证更新失败(并发冲突)，请重试");
+        }
         log.info("作废凭证成功，凭证ID: {}, 凭证号: {}", id, voucher.getVoucherNo());
     }
 
@@ -994,8 +1006,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         if (original == null) {
             throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
         }
-        // IDOR治理:校验当前用户对该凭证所属账套的访问权
-        accountSetAccessService.checkAccess(original.getAccountSetId());
+        // IDOR治理:复制为写操作(生成新凭证),与createVoucher一致使用checkOwner
+        accountSetAccessService.checkOwner(original.getAccountSetId());
 
         // 校验目标期间存在且未结账（复制等同于在原期间新建凭证，须遵守期间约束）
         AccountPeriod period = checkPeriodExists(original.getAccountSetId(), original.getYear(), original.getMonth());
@@ -1228,7 +1240,11 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             // 业务校验：科目必须存在且启用
             Subject subject = subjectMapper.selectById(detail.getSubjectId());
             if (subject == null || subject.getStatus() != 1) {
-                throw new BusinessException(ErrorCode.VOUCHER_SUBJECT_INVALID);
+                throw new BusinessException(ErrorCode.VOUCHER_SUBJECT_INVALID.getCode(), "科目不存在或已禁用");
+            }
+            // 校验科目归属当前账套，防止跨账套科目污染余额数据
+            if (!subject.getAccountSetId().equals(request.getAccountSetId())) {
+                throw new BusinessException(ErrorCode.VOUCHER_SUBJECT_INVALID.getCode(), "科目不属于当前账套");
             }
             totalDebit = totalDebit.add(detail.getDebit());
             totalCredit = totalCredit.add(detail.getCredit());
@@ -1271,6 +1287,10 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             throw new BusinessException("该凭证不是草稿，无法提交");
         }
 
+        // 业务校验：草稿创建后期间可能已被结账,提交前需复检期间是否已结账,
+        // 否则会得到已结账期间内的正式凭证
+        checkPeriodNotClosed(checkPeriodExists(voucher.getAccountSetId(), voucher.getYear(), voucher.getMonth()));
+
         // 业务校验：提交前验证借贷平衡
         if (voucher.getTotalDebit() == null || voucher.getTotalCredit() == null
                 || voucher.getTotalDebit().compareTo(voucher.getTotalCredit()) != 0) {
@@ -1284,7 +1304,10 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
 
         // 转为正常凭证：draftStatus=0
         voucher.setDraftStatus(0);
-        this.updateById(voucher);
+        boolean updated = this.updateById(voucher);
+        if (!updated) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "凭证更新失败(并发冲突)，请重试");
+        }
 
         log.info("提交凭证草稿成功，凭证ID: {}, 凭证号: {}", id, voucher.getVoucherNo());
     }
@@ -1325,10 +1348,10 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     /**
      * 校验凭证明细并计算借贷合计
      */
-    private BigDecimal[] validateDetailsAndGetTotals(List<VoucherDetailRequest> details) {
+    private BigDecimal[] validateDetailsAndGetTotals(List<VoucherDetailRequest> details, Long accountSetId) {
         BigDecimal totalDebit = BigDecimal.ZERO;
         BigDecimal totalCredit = BigDecimal.ZERO;
-        
+
         for (VoucherDetailRequest detail : details) {
             // 业务校验：摘要不能为空
             if (StrUtil.isBlank(detail.getSummary())) {
@@ -1371,13 +1394,17 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             // 业务校验：科目必须存在且启用
             Subject subject = subjectMapper.selectById(detail.getSubjectId());
             if (subject == null || subject.getStatus() != 1) {
-                throw new BusinessException(ErrorCode.VOUCHER_SUBJECT_INVALID);
+                throw new BusinessException(ErrorCode.VOUCHER_SUBJECT_INVALID.getCode(), "科目不存在或已禁用");
             }
-            
+            // 校验科目归属当前账套，防止跨账套科目污染余额数据
+            if (!subject.getAccountSetId().equals(accountSetId)) {
+                throw new BusinessException(ErrorCode.VOUCHER_SUBJECT_INVALID.getCode(), "科目不属于当前账套");
+            }
+
             totalDebit = totalDebit.add(detail.getDebit());
             totalCredit = totalCredit.add(detail.getCredit());
         }
-        
+
         return new BigDecimal[]{totalDebit, totalCredit};
     }
 

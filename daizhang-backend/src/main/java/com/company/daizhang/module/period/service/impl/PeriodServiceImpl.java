@@ -215,7 +215,33 @@ public class PeriodServiceImpl implements PeriodService {
             return result;
         }
 
-        // 5. 更新会计期间状态为已结账
+        // 5. 校验本期损益类科目是否已结转
+        // 试算平衡在损益类科目有余额时仍成立(借贷必等),但资产负债表"资产=负债+所有者权益"会不平衡(差额=未结转的净利润)
+        // 结账前需校验损益类科目(收入类/费用类)期末余额已清零(已结转至本年利润)
+        LambdaQueryWrapper<Subject> profitLossSubjectWrapper = new LambdaQueryWrapper<>();
+        profitLossSubjectWrapper.eq(Subject::getAccountSetId, accountSetId)
+                                .eq(Subject::getCategory, "损益");
+        List<Subject> profitLossSubjects = subjectMapper.selectList(profitLossSubjectWrapper);
+        if (!profitLossSubjects.isEmpty()) {
+            List<Long> profitLossSubjectIds = profitLossSubjects.stream()
+                    .map(Subject::getId).collect(Collectors.toList());
+            LambdaQueryWrapper<AccountBalance> profitLossBalanceWrapper = new LambdaQueryWrapper<>();
+            profitLossBalanceWrapper.eq(AccountBalance::getAccountSetId, accountSetId)
+                                    .eq(AccountBalance::getYear, year)
+                                    .eq(AccountBalance::getMonth, month)
+                                    .in(AccountBalance::getSubjectId, profitLossSubjectIds);
+            List<AccountBalance> profitLossBalances = accountBalanceMapper.selectList(profitLossBalanceWrapper);
+            for (AccountBalance balance : profitLossBalances) {
+                BigDecimal endDebit = balance.getEndDebit() != null ? balance.getEndDebit() : BigDecimal.ZERO;
+                BigDecimal endCredit = balance.getEndCredit() != null ? balance.getEndCredit() : BigDecimal.ZERO;
+                if (endDebit.compareTo(BigDecimal.ZERO) != 0 || endCredit.compareTo(BigDecimal.ZERO) != 0) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                            "本期损益类科目未结转，请先执行损益结转后再结账");
+                }
+            }
+        }
+
+        // 6. 更新会计期间状态为已结账
         period.setStatus(PeriodStatus.CLOSED.getCode());
         period.setCloseBy(SecurityUtils.getCurrentUserId());
         period.setCloseTime(LocalDateTime.now());

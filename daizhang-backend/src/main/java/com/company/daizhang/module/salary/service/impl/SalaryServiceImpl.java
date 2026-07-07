@@ -770,7 +770,9 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
             currentMonthTaxableIncome = BigDecimal.ZERO;
         }
 
-        // 查询本年度截至上月已确认/已发放的工资表,累加应纳税所得额和已预扣税额
+        // 查询本年度截至上月的工资表(草稿/已确认/已发放),累加应纳税所得额和已预扣税额
+        // 包含草稿(0)以支持跨月累计预扣:calculateSalary 生成的草稿工资表也参与累计,
+        // 避免一次性计算多月薪资时个税丧失累计预扣效果
         BigDecimal yearToDateTaxableIncome = BigDecimal.ZERO;
         BigDecimal yearToDateWithheldTax = BigDecimal.ZERO;
         if (employeeId != null && year != null && month != null && month > 1) {
@@ -778,7 +780,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
             wrapper.eq(SalarySheet::getEmployeeId, employeeId)
                    .eq(SalarySheet::getYear, year)
                    .lt(SalarySheet::getMonth, month)
-                   .in(SalarySheet::getStatus, 1, 2); // 已确认或已发放
+                   .in(SalarySheet::getStatus, 0, 1, 2); // 草稿/已确认/已发放
             List<SalarySheet> historySheets = salarySheetMapper.selectList(wrapper);
             for (SalarySheet hs : historySheets) {
                 if (hs.getTaxableIncome() != null) {

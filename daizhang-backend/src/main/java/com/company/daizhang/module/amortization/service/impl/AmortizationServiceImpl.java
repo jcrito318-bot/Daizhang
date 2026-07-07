@@ -335,6 +335,14 @@ public class AmortizationServiceImpl implements AmortizationService {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "月摊销额为零，无法生成凭证");
         }
 
+        // 本次实际摊销额 = min(月摊销额, 剩余待摊),凭证金额应与实际摊销额一致,避免账实不符
+        BigDecimal remainingAmount = amortization.getRemainingAmount() != null
+                ? amortization.getRemainingAmount() : BigDecimal.ZERO;
+        BigDecimal actualAmount = monthlyAmount.min(remainingAmount);
+        if (actualAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "剩余待摊金额为零,无需生成凭证");
+        }
+
         // 校验会计期间
         AccountPeriod period = checkPeriodExists(accountSetId, year, month);
         checkPeriodNotClosed(period);
@@ -351,43 +359,37 @@ public class AmortizationServiceImpl implements AmortizationService {
         String summary = "长期待摊费用摊销-" + (StrUtil.isBlank(amortization.getAmortizationName())
                 ? "未命名" : amortization.getAmortizationName());
 
-        // 创建凭证
-        Voucher voucher = buildVoucher(accountSetId, voucherDate, year, month, monthlyAmount);
+        // 创建凭证(凭证金额=实际摊销额,保证账实一致)
+        Voucher voucher = buildVoucher(accountSetId, voucherDate, year, month, actualAmount);
         voucherMapper.insert(voucher);
 
         // 创建凭证明细
         List<VoucherDetail> details = new ArrayList<>();
-        // 借：管理费用 月摊销额
-        details.add(buildDetail(voucher.getId(), 1, summary, debitSubjectId, monthlyAmount, BigDecimal.ZERO));
-        // 贷：长期待摊费用 月摊销额
-        details.add(buildDetail(voucher.getId(), 2, summary, creditSubjectId, BigDecimal.ZERO, monthlyAmount));
+        // 借：管理费用 实际摊销额
+        details.add(buildDetail(voucher.getId(), 1, summary, debitSubjectId, actualAmount, BigDecimal.ZERO));
+        // 贷：长期待摊费用 实际摊销额
+        details.add(buildDetail(voucher.getId(), 2, summary, creditSubjectId, BigDecimal.ZERO, actualAmount));
         for (VoucherDetail detail : details) {
             voucherDetailMapper.insert(detail);
         }
 
-        // 同步更新摊销金额(此前只创建凭证不更新金额,与amortize形成断裂)
+        // 同步更新摊销金额(凭证金额=实际摊销额,保证账实一致)
         BigDecimal amortizedAmount = amortization.getAmortizedAmount() != null
                 ? amortization.getAmortizedAmount() : BigDecimal.ZERO;
-        BigDecimal remainingAmount = amortization.getRemainingAmount() != null
-                ? amortization.getRemainingAmount() : BigDecimal.ZERO;
-        // 本次摊销额 = min(月摊销额, 剩余待摊),防止已摊销额超过待摊总额
-        BigDecimal actualAmount = monthlyAmount.min(remainingAmount);
-        if (actualAmount.compareTo(BigDecimal.ZERO) > 0) {
-            amortization.setAmortizedAmount(amortizedAmount.add(actualAmount));
-            BigDecimal newRemaining = remainingAmount.subtract(actualAmount);
-            if (newRemaining.compareTo(BigDecimal.ZERO) <= 0) {
-                amortization.setRemainingAmount(BigDecimal.ZERO);
-                amortization.setStatus(1);
-            } else {
-                amortization.setRemainingAmount(newRemaining);
-            }
-            // 标记本期间已摊销,防止重复摊销
-            amortization.setLastAmortizedPeriod(currentPeriod);
-            amortizationMapper.updateById(amortization);
+        amortization.setAmortizedAmount(amortizedAmount.add(actualAmount));
+        BigDecimal newRemaining = remainingAmount.subtract(actualAmount);
+        if (newRemaining.compareTo(BigDecimal.ZERO) <= 0) {
+            amortization.setRemainingAmount(BigDecimal.ZERO);
+            amortization.setStatus(1);
+        } else {
+            amortization.setRemainingAmount(newRemaining);
         }
+        // 标记本期间已摊销,防止重复摊销
+        amortization.setLastAmortizedPeriod(currentPeriod);
+        amortizationMapper.updateById(amortization);
 
         log.info("长期待摊费用摊销凭证生成成功：摊销ID={}, 凭证ID={}, 凭证号={}, 金额={}",
-                id, voucher.getId(), voucher.getVoucherNo(), monthlyAmount);
+                id, voucher.getId(), voucher.getVoucherNo(), actualAmount);
         return voucher.getId();
     }
 
