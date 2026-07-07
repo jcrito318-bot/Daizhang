@@ -743,6 +743,66 @@ public class PeriodServiceImpl implements PeriodService {
                          .eq(AccountBalance::getMonth, 12);
         List<AccountBalance> decBalances = accountBalanceMapper.selectList(decBalanceWrapper);
 
+        // 4.1 年末结转"本年利润(3103)"至"利润分配-未分配利润(3104)"
+        // 按会计准则,本年利润科目年末应结转到"利润分配-未分配利润",本年利润年末无余额
+        // 否则下年度1月本年利润科目有期初余额(上年累计净利润),资产负债表"本年利润"项目反映累计利润而非当年利润
+        Subject profitSubject = subjects.stream()
+                .filter(s -> "3103".equals(s.getCode()))
+                .findFirst().orElse(null);
+        Subject retainedEarningsSubject = subjects.stream()
+                .filter(s -> "3104".equals(s.getCode()))
+                .findFirst().orElse(null);
+        if (profitSubject != null && retainedEarningsSubject != null) {
+            AccountBalance profitDecBalance = decBalances.stream()
+                    .filter(b -> profitSubject.getId().equals(b.getSubjectId()))
+                    .findFirst().orElse(null);
+            if (profitDecBalance != null) {
+                BigDecimal profitEndCredit = profitDecBalance.getEndCredit() != null ? profitDecBalance.getEndCredit() : BigDecimal.ZERO;
+                BigDecimal profitEndDebit = profitDecBalance.getEndDebit() != null ? profitDecBalance.getEndDebit() : BigDecimal.ZERO;
+                // 本年利润年末余额(贷方为正表示盈利)
+                BigDecimal profitNet = profitEndCredit.subtract(profitEndDebit);
+                if (profitNet.compareTo(BigDecimal.ZERO) != 0) {
+                    // 获取或创建利润分配3104的年末余额
+                    AccountBalance retainedDecBalance = decBalances.stream()
+                            .filter(b -> retainedEarningsSubject.getId().equals(b.getSubjectId()))
+                            .findFirst().orElse(null);
+                    if (retainedDecBalance == null) {
+                        retainedDecBalance = new AccountBalance();
+                        retainedDecBalance.setAccountSetId(accountSetId);
+                        retainedDecBalance.setSubjectId(retainedEarningsSubject.getId());
+                        retainedDecBalance.setYear(fromYear);
+                        retainedDecBalance.setMonth(12);
+                        retainedDecBalance.setBeginDebit(BigDecimal.ZERO);
+                        retainedDecBalance.setBeginCredit(BigDecimal.ZERO);
+                        retainedDecBalance.setPeriodDebit(BigDecimal.ZERO);
+                        retainedDecBalance.setPeriodCredit(BigDecimal.ZERO);
+                        retainedDecBalance.setEndDebit(BigDecimal.ZERO);
+                        retainedDecBalance.setEndCredit(BigDecimal.ZERO);
+                        retainedDecBalance.setYearDebit(BigDecimal.ZERO);
+                        retainedDecBalance.setYearCredit(BigDecimal.ZERO);
+                        accountBalanceMapper.insert(retainedDecBalance);
+                        decBalances.add(retainedDecBalance);
+                    }
+                    BigDecimal absAmount = profitNet.abs();
+                    if (profitNet.compareTo(BigDecimal.ZERO) > 0) {
+                        // 盈利:借3103贷3104,利润分配年末贷方余额相应增加
+                        retainedDecBalance.setEndCredit(
+                                (retainedDecBalance.getEndCredit() != null ? retainedDecBalance.getEndCredit() : BigDecimal.ZERO).add(profitNet));
+                    } else {
+                        // 亏损:借3104贷3103,利润分配年末借方余额相应增加(代表减少)
+                        retainedDecBalance.setEndDebit(
+                                (retainedDecBalance.getEndDebit() != null ? retainedDecBalance.getEndDebit() : BigDecimal.ZERO).add(absAmount));
+                    }
+                    accountBalanceMapper.updateById(retainedDecBalance);
+                    // 3103本年利润年末余额清零
+                    profitDecBalance.setEndDebit(BigDecimal.ZERO);
+                    profitDecBalance.setEndCredit(BigDecimal.ZERO);
+                    accountBalanceMapper.updateById(profitDecBalance);
+                    log.info("年末结转本年利润至利润分配完成，账套ID：{}，年度：{}，净利润：{}", accountSetId, fromYear, profitNet);
+                }
+            }
+        }
+
         // 为下一年创建各月份的科目余额记录
         for (Subject subject : subjects) {
             // 找到该科目fromYear 12月的期末余额

@@ -9,6 +9,8 @@ import com.company.daizhang.common.constant.CommonConstant;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.entity.UserAccountSet;
+import com.company.daizhang.module.accountset.mapper.UserAccountSetMapper;
 import com.company.daizhang.module.system.dto.UserCreateRequest;
 import com.company.daizhang.module.system.dto.UserQueryRequest;
 import com.company.daizhang.module.system.dto.UserUpdateRequest;
@@ -28,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -42,11 +45,23 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     private final SysUserRoleMapper userRoleMapper;
     private final SysRoleMapper roleMapper;
     private final PasswordEncoder passwordEncoder;
-    
+    private final UserAccountSetMapper userAccountSetMapper;
+
     // 手机号正则
     private static final Pattern PHONE_PATTERN = Pattern.compile("^1[3-9]\\d{9}$");
     // 邮箱正则
     private static final Pattern EMAIL_PATTERN = Pattern.compile("^[\\w-]+(\\.[\\w-]+)*@[\\w-]+(\\.[\\w-]+)+$");
+
+    /**
+     * 已禁用用户的时间戳记录(userId -> 禁用时间戳毫秒)。
+     * <p>
+     * 用于缓解 JWT 无状态下"禁用用户后已签发 token 在过期前仍有效"的问题:
+     * 禁用用户时记录时间戳,启用时移除。生产环境建议由 JwtAuthenticationFilter
+     * 在校验 token 时一并检查用户是否在本记录中(或查询 sys_user.status),
+     * 并配合短 token 有效期或 Redis 黑名单(按 userId 维度)以彻底失效 token。
+     * 当前 TokenBlacklist 仅按 token 字符串存储,无法按 userId 批量失效。
+     */
+    private static final ConcurrentHashMap<Long, Long> DISABLED_USER_TIME = new ConcurrentHashMap<>();
     
     @Override
     public PageResult<UserVO> pageUsers(UserQueryRequest request) {
@@ -232,12 +247,17 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         }
         
         this.removeById(id);
-        
+
         // 删除用户角色关联
         LambdaQueryWrapper<SysUserRole> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SysUserRole::getUserId, id);
         userRoleMapper.delete(wrapper);
-        
+
+        // 删除用户账套关联,避免遗留孤儿关系记录影响权限判定(IDOR)
+        LambdaQueryWrapper<UserAccountSet> accountSetWrapper = new LambdaQueryWrapper<>();
+        accountSetWrapper.eq(UserAccountSet::getUserId, id);
+        userAccountSetMapper.delete(accountSetWrapper);
+
         log.info("删除用户成功，用户ID: {}, 用户名: {}", id, user.getUsername());
     }
     
@@ -292,10 +312,23 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         if (user == null) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND);
         }
-        
+
         user.setStatus(status);
         this.updateById(user);
-        
+
+        // 禁用用户(status=0)时记录禁用时间戳,并告警提示已签发的 JWT 仍有效。
+        // JWT 无状态,当前 TokenBlacklist 仅按 token 字符串存储(用于登出),无法按 userId 批量失效,
+        // 因此已签发 token 在过期前仍可访问。生产环境建议由 JwtAuthenticationFilter 校验用户禁用状态,
+        // 或使用按 userId 维度的 Redis 黑名单与短 token 有效期彻底失效。
+        if (status == 0) {
+            DISABLED_USER_TIME.put(id, System.currentTimeMillis());
+            log.warn("用户已被禁用,用户ID: {}. 注意: 由于 JWT 无状态,该用户已签发的 token 在过期前仍有效; "
+                    + "建议在 JwtAuthenticationFilter 中校验用户禁用状态或使用 Redis 黑名单", id);
+        } else {
+            // 重新启用时移除禁用记录
+            DISABLED_USER_TIME.remove(id);
+        }
+
         log.info("更新用户状态成功，用户ID: {}, 状态: {}", id, status);
     }
     

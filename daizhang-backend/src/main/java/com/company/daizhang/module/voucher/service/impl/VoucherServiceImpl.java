@@ -36,6 +36,7 @@ import com.company.daizhang.module.voucher.vo.VoucherDetailVO;
 import com.company.daizhang.module.voucher.vo.VoucherVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -174,18 +175,34 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             throw new BusinessException(ErrorCode.VOUCHER_DEBIT_CREDIT_BOTH_ZERO);
         }
 
-        // 生成凭证号
-        String voucherNo = generateVoucherNo(request.getAccountSetId(), request.getYear(), request.getMonth());
-
-        // 保存凭证
+        // 保存凭证(生成凭证号+save整体重试,防止并发下凭证号唯一索引冲突)
+        // generateVoucherNo采用"查max序号+1+拼接"模式无行锁,并发下两事务可能生成相同凭证号,
+        // 第二个save撞唯一索引抛DuplicateKeyException,故捕获后重新生成号码并重试。
         Voucher voucher = new Voucher();
         BeanUtil.copyProperties(request, voucher);
-        voucher.setVoucherNo(voucherNo);
         voucher.setTotalDebit(totalDebit);
         voucher.setTotalCredit(totalCredit);
         voucher.setStatus(0);
         voucher.setSource(0);
-        this.save(voucher);
+
+        String voucherNo = null;
+        int maxRetry = 3;
+        for (int attempt = 0; attempt < maxRetry; attempt++) {
+            voucherNo = generateVoucherNo(request.getAccountSetId(), request.getYear(), request.getMonth());
+            voucher.setVoucherNo(voucherNo);
+            try {
+                this.save(voucher);
+                break;
+            } catch (DuplicateKeyException e) {
+                if (attempt == maxRetry - 1) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                            "凭证号生成失败(并发冲突)，请重试");
+                }
+                log.warn("凭证号冲突,第{}次重试: {}", attempt + 1, voucherNo);
+                // 重置voucher的id(save可能已部分设置),以便下次save重新插入
+                voucher.setId(null);
+            }
+        }
 
         // 保存凭证明细
         saveDetails(voucher.getId(), request.getDetails());
@@ -398,13 +415,13 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         voucher.setStatus(0);
         voucher.setAuditBy(null);
         voucher.setAuditTime(null);
-        // 使用LambdaUpdateWrapper显式set null，避免MyBatis-Plus默认NOT_NULL策略不更新null字段
-        LambdaUpdateWrapper<Voucher> updateWrapper = new LambdaUpdateWrapper<>();
-        updateWrapper.eq(Voucher::getId, id)
-                     .set(Voucher::getStatus, 0)
-                     .set(Voucher::getAuditBy, null)
-                     .set(Voucher::getAuditTime, null);
-        this.update(updateWrapper);
+        // 使用updateById保留@Version乐观锁(OptimisticLockerInnerInterceptor仅拦截updateById(entity),
+        // 不拦截update(wrapper))。限制:MyBatis-Plus默认NOT_NULL策略不会将null字段写入UPDATE SET子句,
+        // auditBy/auditTime的清空依赖实体字段策略;此处优先保证并发安全,与auditVoucher保持一致。
+        boolean updated = this.updateById(voucher);
+        if (!updated) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "凭证更新失败(并发冲突)，请重试");
+        }
 
         log.info("反审核凭证成功，凭证ID: {}, 凭证号: {}", id, voucher.getVoucherNo());
     }
@@ -474,8 +491,9 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                 errors.add("凭证ID=" + id + " 不存在");
                 continue;
             }
-            // IDOR治理:校验当前用户对该凭证所属账套的所有者权限
-            accountSetAccessService.checkOwner(voucher.getAccountSetId());
+            // IDOR治理:校验当前用户对该凭证所属账套的访问权(OWNER/ACCOUNTANT/VIEWER)
+            // 反审核为状态变更(非删除/资金类操作)，会计员(ACCOUNTANT)应可反审核凭证
+            accountSetAccessService.checkAccess(voucher.getAccountSetId());
             // 只有已审核且未过账的凭证才能反审核
             if (voucher.getStatus() == null || voucher.getStatus() != 1) {
                 errors.add("凭证" + voucher.getVoucherNo() + " 非已审核状态，不能反审核");
@@ -484,13 +502,12 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             voucher.setStatus(0);
             voucher.setAuditBy(null);
             voucher.setAuditTime(null);
-            // 使用LambdaUpdateWrapper显式set null
-            LambdaUpdateWrapper<Voucher> updateWrapper = new LambdaUpdateWrapper<>();
-            updateWrapper.eq(Voucher::getId, voucher.getId())
-                         .set(Voucher::getStatus, 0)
-                         .set(Voucher::getAuditBy, null)
-                         .set(Voucher::getAuditTime, null);
-            this.update(updateWrapper);
+            // 使用updateById保留@Version乐观锁(OptimisticLockerInnerInterceptor仅拦截updateById(entity))
+            boolean updated = this.updateById(voucher);
+            if (!updated) {
+                errors.add("凭证" + voucher.getVoucherNo() + " 反审核失败(并发冲突)，请重试");
+                continue;
+            }
             success++;
         }
 
@@ -578,13 +595,13 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         voucher.setStatus(1);
         voucher.setPostBy(null);
         voucher.setPostTime(null);
-        // 使用LambdaUpdateWrapper显式set null,避免MyBatis-Plus默认NOT_NULL策略不更新null字段
-        LambdaUpdateWrapper<Voucher> updateWrapper = new LambdaUpdateWrapper<>();
-        updateWrapper.eq(Voucher::getId, voucher.getId())
-                     .set(Voucher::getStatus, 1)
-                     .set(Voucher::getPostBy, null)
-                     .set(Voucher::getPostTime, null);
-        this.update(updateWrapper);
+        // 使用updateById保留@Version乐观锁(OptimisticLockerInnerInterceptor仅拦截updateById(entity),
+        // 不拦截update(wrapper))。限制:MyBatis-Plus默认NOT_NULL策略不会将null字段写入UPDATE SET子句,
+        // postBy/postTime的清空依赖实体字段策略;此处优先保证并发安全,与postVoucher保持一致。
+        boolean updated = this.updateById(voucher);
+        if (!updated) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "凭证更新失败(并发冲突)，请重试");
+        }
 
         log.info("反过账凭证成功，凭证ID: {}, 凭证号: {}", id, voucher.getVoucherNo());
     }
@@ -727,6 +744,20 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         BigDecimal prevEndCredit = currentBalance.getEndCredit() != null ? currentBalance.getEndCredit() : BigDecimal.ZERO;
 
         for (AccountBalance bal : subsequentBalances) {
+            // 校验后续期间是否已结账:已结账期间的余额快照不可改写(结账冻结不变量),
+            // 需先反结账该期间才能反过账。整个unpostVoucher为@Transactional,此处抛异常会回滚已改动的余额。
+            LambdaQueryWrapper<AccountPeriod> periodWrapper = new LambdaQueryWrapper<>();
+            periodWrapper.eq(AccountPeriod::getAccountSetId, accountSetId)
+                         .eq(AccountPeriod::getYear, bal.getYear())
+                         .eq(AccountPeriod::getMonth, bal.getMonth());
+            AccountPeriod subsequentPeriod = accountPeriodMapper.selectOne(periodWrapper);
+            if (subsequentPeriod != null && subsequentPeriod.getStatus() != null
+                    && subsequentPeriod.getStatus() == 1) {
+                throw new BusinessException(ErrorCode.PERIOD_CLOSED,
+                        "反过账会影响已结账期间(" + bal.getYear() + "-"
+                                + String.format("%02d", bal.getMonth()) + ")，请先反结账");
+            }
+
             // 期初余额 = 上一期间冲减后的期末余额（级联传播）
             bal.setBeginDebit(prevEndDebit);
             bal.setBeginCredit(prevEndCredit);
@@ -1019,14 +1050,10 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                      .orderByAsc(VoucherDetail::getSortOrder);
         List<VoucherDetail> originalDetails = voucherDetailMapper.selectList(detailWrapper);
 
-        // 生成新凭证号
-        String newVoucherNo = generateVoucherNo(original.getAccountSetId(), original.getYear(), original.getMonth());
-
         // 创建新凭证（status=0未审核，source=0手工录入）
         Voucher newVoucher = new Voucher();
         newVoucher.setAccountSetId(original.getAccountSetId());
         newVoucher.setVoucherWordId(original.getVoucherWordId());
-        newVoucher.setVoucherNo(newVoucherNo);
         newVoucher.setVoucherDate(original.getVoucherDate());
         newVoucher.setYear(original.getYear());
         newVoucher.setMonth(original.getMonth());
@@ -1035,7 +1062,25 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         newVoucher.setAttachmentCount(original.getAttachmentCount());
         newVoucher.setStatus(0);
         newVoucher.setSource(0);
-        this.save(newVoucher);
+
+        // 生成凭证号+save整体重试,防止并发下凭证号唯一索引冲突(与createVoucher一致)
+        String newVoucherNo = null;
+        int maxRetry = 3;
+        for (int attempt = 0; attempt < maxRetry; attempt++) {
+            newVoucherNo = generateVoucherNo(original.getAccountSetId(), original.getYear(), original.getMonth());
+            newVoucher.setVoucherNo(newVoucherNo);
+            try {
+                this.save(newVoucher);
+                break;
+            } catch (DuplicateKeyException e) {
+                if (attempt == maxRetry - 1) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                            "凭证号生成失败(并发冲突)，请重试");
+                }
+                log.warn("凭证号冲突,第{}次重试: {}", attempt + 1, newVoucherNo);
+                newVoucher.setId(null);
+            }
+        }
 
         // 复制所有明细行，金额相同
         for (int i = 0; i < originalDetails.size(); i++) {
@@ -1101,15 +1146,11 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                      .orderByAsc(VoucherDetail::getSortOrder);
         List<VoucherDetail> originalDetails = voucherDetailMapper.selectList(detailWrapper);
 
-        // 生成新凭证号（基于目标期间）
-        String newVoucherNo = generateVoucherNo(original.getAccountSetId(), revYear, revMonth);
-
         // 创建红冲凭证：借贷方金额互换，相当于取负
         // 互换后：新借方合计 = 原贷方合计，新贷方合计 = 原借方合计
         Voucher newVoucher = new Voucher();
         newVoucher.setAccountSetId(original.getAccountSetId());
         newVoucher.setVoucherWordId(original.getVoucherWordId());
-        newVoucher.setVoucherNo(newVoucherNo);
         // 跨期红冲时凭证日期调整为目标期间首日，避免凭证日期与期间不一致
         newVoucher.setVoucherDate(LocalDate.of(revYear, revMonth, 1));
         newVoucher.setYear(revYear);
@@ -1127,7 +1168,25 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         newVoucher.setPostBy(currentUserId);
         newVoucher.setPostTime(LocalDateTime.now());
         newVoucher.setSource(0);
-        this.save(newVoucher);
+
+        // 生成凭证号+save整体重试,防止并发下凭证号唯一索引冲突(与createVoucher一致)
+        String newVoucherNo = null;
+        int maxRetry = 3;
+        for (int attempt = 0; attempt < maxRetry; attempt++) {
+            newVoucherNo = generateVoucherNo(original.getAccountSetId(), revYear, revMonth);
+            newVoucher.setVoucherNo(newVoucherNo);
+            try {
+                this.save(newVoucher);
+                break;
+            } catch (DuplicateKeyException e) {
+                if (attempt == maxRetry - 1) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                            "凭证号生成失败(并发冲突)，请重试");
+                }
+                log.warn("凭证号冲突,第{}次重试: {}", attempt + 1, newVoucherNo);
+                newVoucher.setId(null);
+            }
+        }
 
         // 复制明细行，借方和贷方金额互换，摘要加"[红冲]原凭证号"
         String reversePrefix = "[红冲]" + original.getVoucherNo() + " ";

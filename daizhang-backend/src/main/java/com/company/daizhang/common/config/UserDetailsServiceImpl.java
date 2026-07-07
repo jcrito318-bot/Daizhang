@@ -54,17 +54,15 @@ public class UserDetailsServiceImpl implements UserDetailsService {
         Set<String> permissions = new HashSet<>();
         // 加载用户角色编码作为 Spring Security 角色权限(ROLE_ 前缀),
         // 用于支持 @PreAuthorize("hasRole('XXX')") 方法级权限校验(高危接口治理)
+        // 超级管理员通过 sys_user_role + sys_role 表中实际的 ADMIN 角色记录获得 ROLE_ADMIN 权限,
+        // 不再硬编码 id=1 赋予 "*" 通配权限(Spring Security 的 hasRole 是精确匹配,"*" 无法命中
+        // @PreAuthorize("hasRole('ADMIN')")),避免数据库重置后首位非admin用户(id=1)被误判为超管。
         loadRoleAuthorities(user.getId(), permissions);
-        // 超级管理员(id=1)拥有全部权限,避免admin因菜单未配置而被锁死
-        if (user.getId() != null && user.getId() == 1L) {
-            permissions.add("*");
-        } else {
-            List<SysMenu> menus = sysMenuMapper.selectMenusByUserId(user.getId());
-            if (menus != null) {
-                for (SysMenu menu : menus) {
-                    if (menu.getPermission() != null && !menu.getPermission().isEmpty()) {
-                        permissions.add(menu.getPermission());
-                    }
+        List<SysMenu> menus = sysMenuMapper.selectMenusByUserId(user.getId());
+        if (menus != null) {
+            for (SysMenu menu : menus) {
+                if (menu.getPermission() != null && !menu.getPermission().isEmpty()) {
+                    permissions.add(menu.getPermission());
                 }
             }
         }

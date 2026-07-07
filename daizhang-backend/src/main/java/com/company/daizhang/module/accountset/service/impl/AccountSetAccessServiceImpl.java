@@ -14,6 +14,9 @@ import com.company.daizhang.module.system.entity.SysUser;
 import com.company.daizhang.module.system.mapper.SysUserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,7 +27,8 @@ import java.util.stream.Collectors;
  * 账套数据级授权服务实现(IDOR越权治理)
  * <p>
  * 设计要点:
- * 1. admin(id=1)为超级管理员,对所有账套有完全访问权(兜底,保证系统初始化时不会锁死)
+ * 1. 超级管理员基于 ROLE_ADMIN 角色判定(由 UserDetailsServiceImpl 通过 sys_user_role + sys_role 加载),
+ *    对所有账套有完全访问权(兜底,保证系统初始化时不会锁死)
  * 2. 普通用户须在 sys_user_account_set 表中存在关联记录才可访问对应账套
  * 3. 创建账套时自动绑定 OWNER 关系(AccountSetServiceImpl.createAccountSet 调用 bindOwner)
  */
@@ -37,12 +41,24 @@ public class AccountSetAccessServiceImpl implements AccountSetAccessService {
     private final AccountSetMapper accountSetMapper;
     private final SysUserMapper sysUserMapper;
 
-    /** 超级管理员用户ID(id=1的admin用户),对所有账套有完全访问权 */
-    private static final Long SUPER_ADMIN_USER_ID = 1L;
-
     /** 合法的账套角色类型 */
     private static final Set<String> VALID_ROLE_TYPES =
             Collections.unmodifiableSet(new HashSet<>(Arrays.asList("OWNER", "ACCOUNTANT", "VIEWER")));
+
+    /**
+     * 判断当前登录用户是否为超级管理员。
+     * 基于 SecurityContext 中的 ROLE_ADMIN 角色判定,而非硬编码用户ID,
+     * 避免数据库重置后首位非admin用户(id=1)绕过IDOR校验。
+     */
+    private boolean isSuperAdmin() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) {
+            return false;
+        }
+        return auth.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .anyMatch("ROLE_ADMIN"::equals);
+    }
 
     @Override
     public void checkAccess(Long accountSetId) {
@@ -54,7 +70,7 @@ public class AccountSetAccessServiceImpl implements AccountSetAccessService {
             throw new BusinessException(ErrorCode.UNAUTHORIZED);
         }
         // 超级管理员放行
-        if (SUPER_ADMIN_USER_ID.equals(userId)) {
+        if (isSuperAdmin()) {
             return;
         }
         // 普通用户校验关联记录
@@ -74,7 +90,7 @@ public class AccountSetAccessServiceImpl implements AccountSetAccessService {
             throw new BusinessException(ErrorCode.UNAUTHORIZED);
         }
         // 超级管理员放行
-        if (SUPER_ADMIN_USER_ID.equals(userId)) {
+        if (isSuperAdmin()) {
             return;
         }
         // 校验OWNER关系
@@ -95,7 +111,7 @@ public class AccountSetAccessServiceImpl implements AccountSetAccessService {
             return Collections.emptySet();
         }
         // 超级管理员可访问全部账套(返回null表示不限制,调用方需特殊处理)
-        if (SUPER_ADMIN_USER_ID.equals(userId)) {
+        if (isSuperAdmin()) {
             return null;
         }
         LambdaQueryWrapper<UserAccountSet> wrapper = new LambdaQueryWrapper<>();
@@ -233,7 +249,7 @@ public class AccountSetAccessServiceImpl implements AccountSetAccessService {
             throw new BusinessException(ErrorCode.UNAUTHORIZED);
         }
         // 管理员可查任意用户,普通用户只能查自己
-        if (!SUPER_ADMIN_USER_ID.equals(currentUserId) && !currentUserId.equals(userId)) {
+        if (!isSuperAdmin() && !currentUserId.equals(userId)) {
             throw new BusinessException(ErrorCode.FORBIDDEN, "只能查询自己的账套权限");
         }
         if (userId == null) {

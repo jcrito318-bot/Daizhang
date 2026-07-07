@@ -109,11 +109,14 @@ public class AuthController {
     @Operation(summary = "获取当前用户信息")
     public Result<UserVO> getUserInfo() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication == null || !authentication.isAuthenticated()) {
-            return Result.error(401, "未登录");
+        Object principal = authentication != null ? authentication.getPrincipal() : null;
+        // 匿名用户经 AnonymousAuthenticationFilter 后 isAuthenticated() 返回 true,
+        // principal 为字符串 "anonymousUser",直接强转会抛 ClassCastException → 500,
+        // 需校验 principal 类型,非 SecurityUserDetails 视为未登录
+        if (!(principal instanceof SecurityUserDetails)) {
+            return Result.error(401, "未登录或登录已过期");
         }
-
-        SecurityUserDetails userDetails = (SecurityUserDetails) authentication.getPrincipal();
+        SecurityUserDetails userDetails = (SecurityUserDetails) principal;
 
         // 从数据库查询完整用户信息
         UserVO userVO = sysUserService.getUserById(userDetails.getUserId());

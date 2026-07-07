@@ -23,7 +23,6 @@ import java.util.stream.Collectors;
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(BusinessException.class)
-    @ResponseStatus(HttpStatus.OK)
     public Result<Void> handleBusinessException(BusinessException e, HttpServletResponse response) {
         log.error("业务异常: {}", e.getMessage());
         // FORBIDDEN 业务异常需返回 403 状态码,便于前端/网关识别越权;

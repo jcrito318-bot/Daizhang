@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.common.utils.SecurityUtils;
 import com.company.daizhang.module.system.entity.SysOperationLog;
 import com.company.daizhang.module.system.mapper.SysOperationLogMapper;
 import com.company.daizhang.module.system.service.SysOperationLogService;
@@ -49,6 +50,11 @@ public class SysOperationLogServiceImpl extends ServiceImpl<SysOperationLogMappe
 
     @Override
     public void cleanOperationLogs(Integer keepDays) {
+        // 先记录审计日志(记录"谁在什么时间清理了多少天的日志"),保证审计链条完整。
+        // 须在清理之前插入;keepDays为空(全表清理)时该记录会被一并删除,故清理后再补写一条。
+        baseMapper.insert(buildCleanAuditLog(keepDays));
+        log.info("操作日志清理审计已记录,操作人: {}, keepDays: {}", SecurityUtils.getCurrentUsername(), keepDays);
+
         LambdaQueryWrapper<SysOperationLog> wrapper = new LambdaQueryWrapper<>();
         // keepDays为空则不加条件，清理全部；否则清理 keepDays 天前的日志
         if (keepDays != null) {
@@ -58,6 +64,25 @@ public class SysOperationLogServiceImpl extends ServiceImpl<SysOperationLogMappe
         long count = this.count(wrapper);
         this.baseMapper.delete(wrapper);
         log.info("清理操作日志完成，保留天数: {}, 清理数量: {}", keepDays, count);
+
+        // 全表清理(keepDays为空)会删除先插入的审计记录,需重新写入以保证审计链条完整
+        if (keepDays == null) {
+            baseMapper.insert(buildCleanAuditLog(keepDays));
+            log.info("全表清理后重新写入审计记录,操作人: {}", SecurityUtils.getCurrentUsername());
+        }
+    }
+
+    /**
+     * 构建一条"清理操作日志"的审计记录。
+     */
+    private SysOperationLog buildCleanAuditLog(Integer keepDays) {
+        SysOperationLog auditLog = new SysOperationLog();
+        auditLog.setUserId(SecurityUtils.getCurrentUserId());
+        auditLog.setUsername(SecurityUtils.getCurrentUsername());
+        auditLog.setOperation("清理操作日志");
+        auditLog.setParams("keepDays=" + keepDays);
+        auditLog.setCreateTime(LocalDateTime.now());
+        return auditLog;
     }
 
     private LocalDateTime parseStartDate(String dateStr) {
