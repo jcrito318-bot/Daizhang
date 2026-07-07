@@ -1,10 +1,12 @@
 package com.company.daizhang.module.inventory.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.utils.SecurityUtils;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.inventory.dto.*;
 import com.company.daizhang.module.inventory.entity.*;
 import com.company.daizhang.module.inventory.mapper.*;
@@ -20,12 +22,14 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Set;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class InventoryServiceImpl implements InventoryService {
 
+    private final AccountSetAccessService accountSetAccessService;
     private final InventoryItemMapper itemMapper;
     private final InventoryStockMapper stockMapper;
     private final InventoryInMapper inMapper;
@@ -36,7 +40,7 @@ public class InventoryServiceImpl implements InventoryService {
     @Override
     public Page<InventoryItem> getItemPage(InventoryItemQueryRequest request) {
         LambdaQueryWrapper<InventoryItem> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(InventoryItem::getAccountSetId, request.getAccountSetId());
+        applyAccountSetFilter(wrapper, InventoryItem::getAccountSetId, request.getAccountSetId());
         if (request.getItemCode() != null) {
             wrapper.like(InventoryItem::getItemCode, request.getItemCode());
         }
@@ -56,7 +60,12 @@ public class InventoryServiceImpl implements InventoryService {
 
     @Override
     public InventoryItem getItemById(Long id) {
-        return itemMapper.selectById(id);
+        InventoryItem item = itemMapper.selectById(id);
+        if (item == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+        }
+        accountSetAccessService.checkAccess(item.getAccountSetId());
+        return item;
     }
 
     @Override
@@ -82,8 +91,9 @@ public class InventoryServiceImpl implements InventoryService {
     public void updateItem(InventoryItemUpdateRequest request) {
         InventoryItem item = itemMapper.selectById(request.getId());
         if (item == null) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "商品不存在");
+            throw new BusinessException(ErrorCode.NOT_FOUND);
         }
+        accountSetAccessService.checkOwner(item.getAccountSetId());
         if (request.getItemName() != null) item.setItemName(request.getItemName());
         if (request.getSpecification() != null) item.setSpecification(request.getSpecification());
         if (request.getUnit() != null) item.setUnit(request.getUnit());
@@ -97,13 +107,18 @@ public class InventoryServiceImpl implements InventoryService {
 
     @Override
     public void deleteItem(Long id) {
+        InventoryItem item = itemMapper.selectById(id);
+        if (item == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+        }
+        accountSetAccessService.checkOwner(item.getAccountSetId());
         itemMapper.deleteById(id);
     }
 
     @Override
     public Page<InventoryStock> getStockPage(InventoryStockQueryRequest request) {
         LambdaQueryWrapper<InventoryStock> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(InventoryStock::getAccountSetId, request.getAccountSetId());
+        applyAccountSetFilter(wrapper, InventoryStock::getAccountSetId, request.getAccountSetId());
         if (request.getItemId() != null) {
             wrapper.eq(InventoryStock::getItemId, request.getItemId());
         }
@@ -121,7 +136,7 @@ public class InventoryServiceImpl implements InventoryService {
     @Override
     public List<InventoryStock> getStockList(InventoryStockQueryRequest request) {
         LambdaQueryWrapper<InventoryStock> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(InventoryStock::getAccountSetId, request.getAccountSetId());
+        applyAccountSetFilter(wrapper, InventoryStock::getAccountSetId, request.getAccountSetId());
         if (request.getItemId() != null) {
             wrapper.eq(InventoryStock::getItemId, request.getItemId());
         }
@@ -137,7 +152,7 @@ public class InventoryServiceImpl implements InventoryService {
     @Override
     public Page<InventoryIn> getInPage(InventoryInQueryRequest request) {
         LambdaQueryWrapper<InventoryIn> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(InventoryIn::getAccountSetId, request.getAccountSetId());
+        applyAccountSetFilter(wrapper, InventoryIn::getAccountSetId, request.getAccountSetId());
         if (request.getInNo() != null) {
             wrapper.like(InventoryIn::getInNo, request.getInNo());
         }
@@ -161,11 +176,13 @@ public class InventoryServiceImpl implements InventoryService {
     @Override
     public InventoryIn getInById(Long id) {
         InventoryIn in = inMapper.selectById(id);
-        if (in != null) {
-            LambdaQueryWrapper<InventoryInDetail> detailWrapper = new LambdaQueryWrapper<>();
-            detailWrapper.eq(InventoryInDetail::getInId, id);
-            in.setDetails(inDetailMapper.selectList(detailWrapper));
+        if (in == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
         }
+        accountSetAccessService.checkAccess(in.getAccountSetId());
+        LambdaQueryWrapper<InventoryInDetail> detailWrapper = new LambdaQueryWrapper<>();
+        detailWrapper.eq(InventoryInDetail::getInId, id);
+        in.setDetails(inDetailMapper.selectList(detailWrapper));
         return in;
     }
 
@@ -227,8 +244,9 @@ public class InventoryServiceImpl implements InventoryService {
     public void updateIn(InventoryInUpdateRequest request) {
         InventoryIn in = inMapper.selectById(request.getId());
         if (in == null) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "入库单不存在");
+            throw new BusinessException(ErrorCode.NOT_FOUND);
         }
+        accountSetAccessService.checkOwner(in.getAccountSetId());
         if (in.getStatus() != 0) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "已审核的入库单不可修改");
         }
@@ -276,7 +294,11 @@ public class InventoryServiceImpl implements InventoryService {
     @Transactional(rollbackFor = Exception.class)
     public void deleteIn(Long id) {
         InventoryIn in = inMapper.selectById(id);
-        if (in != null && in.getStatus() != 0) {
+        if (in == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+        }
+        accountSetAccessService.checkOwner(in.getAccountSetId());
+        if (in.getStatus() != 0) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "已审核的入库单不可删除");
         }
         LambdaQueryWrapper<InventoryInDetail> detailWrapper = new LambdaQueryWrapper<>();
@@ -290,8 +312,9 @@ public class InventoryServiceImpl implements InventoryService {
     public void auditIn(Long id) {
         InventoryIn in = inMapper.selectById(id);
         if (in == null) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "入库单不存在");
+            throw new BusinessException(ErrorCode.NOT_FOUND);
         }
+        accountSetAccessService.checkOwner(in.getAccountSetId());
         if (in.getStatus() != null && in.getStatus() == 1) {
             return;
         }
@@ -318,7 +341,7 @@ public class InventoryServiceImpl implements InventoryService {
     @Override
     public Page<InventoryOut> getOutPage(InventoryOutQueryRequest request) {
         LambdaQueryWrapper<InventoryOut> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(InventoryOut::getAccountSetId, request.getAccountSetId());
+        applyAccountSetFilter(wrapper, InventoryOut::getAccountSetId, request.getAccountSetId());
         if (request.getOutNo() != null) {
             wrapper.like(InventoryOut::getOutNo, request.getOutNo());
         }
@@ -342,11 +365,13 @@ public class InventoryServiceImpl implements InventoryService {
     @Override
     public InventoryOut getOutById(Long id) {
         InventoryOut out = outMapper.selectById(id);
-        if (out != null) {
-            LambdaQueryWrapper<InventoryOutDetail> detailWrapper = new LambdaQueryWrapper<>();
-            detailWrapper.eq(InventoryOutDetail::getOutId, id);
-            out.setDetails(outDetailMapper.selectList(detailWrapper));
+        if (out == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
         }
+        accountSetAccessService.checkAccess(out.getAccountSetId());
+        LambdaQueryWrapper<InventoryOutDetail> detailWrapper = new LambdaQueryWrapper<>();
+        detailWrapper.eq(InventoryOutDetail::getOutId, id);
+        out.setDetails(outDetailMapper.selectList(detailWrapper));
         return out;
     }
 
@@ -411,8 +436,9 @@ public class InventoryServiceImpl implements InventoryService {
     public void updateOut(InventoryOutUpdateRequest request) {
         InventoryOut out = outMapper.selectById(request.getId());
         if (out == null) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "出库单不存在");
+            throw new BusinessException(ErrorCode.NOT_FOUND);
         }
+        accountSetAccessService.checkOwner(out.getAccountSetId());
         if (out.getStatus() != 0) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "已审核的出库单不可修改");
         }
@@ -460,7 +486,11 @@ public class InventoryServiceImpl implements InventoryService {
     @Transactional(rollbackFor = Exception.class)
     public void deleteOut(Long id) {
         InventoryOut out = outMapper.selectById(id);
-        if (out != null && out.getStatus() != 0) {
+        if (out == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+        }
+        accountSetAccessService.checkOwner(out.getAccountSetId());
+        if (out.getStatus() != 0) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "已审核的出库单不可删除");
         }
         LambdaQueryWrapper<InventoryOutDetail> detailWrapper = new LambdaQueryWrapper<>();
@@ -474,8 +504,9 @@ public class InventoryServiceImpl implements InventoryService {
     public void auditOut(Long id) {
         InventoryOut out = outMapper.selectById(id);
         if (out == null) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "出库单不存在");
+            throw new BusinessException(ErrorCode.NOT_FOUND);
         }
+        accountSetAccessService.checkOwner(out.getAccountSetId());
         if (out.getStatus() != null && out.getStatus() == 1) {
             return;
         }
@@ -556,7 +587,12 @@ public class InventoryServiceImpl implements InventoryService {
 
     private void saveOrUpdateStock(InventoryStock stock) {
         if (stock.getId() != null) {
-            stockMapper.updateById(stock);
+            // 乐观锁更新:InventoryStock.version + OptimisticLockerInnerInterceptor。
+            // 并发审核时另一事务已改 version,本次 updateById 影响行数为0,抛异常回滚避免丢更新
+            int rows = stockMapper.updateById(stock);
+            if (rows == 0) {
+                throw new BusinessException(ErrorCode.CONCURRENT_UPDATE_FAILED, "库存数据已被修改，请重试");
+            }
         } else {
             stockMapper.insert(stock);
         }
@@ -626,5 +662,30 @@ public class InventoryServiceImpl implements InventoryService {
 
     private BigDecimal nvl(BigDecimal val) {
         return val != null ? val : BigDecimal.ZERO;
+    }
+
+    /**
+     * 分页/列表查询的账套访问过滤(IDOR治理):
+     * - accountSetId 非空: checkAccess 校验后按该账套精确过滤
+     * - accountSetId 为空: 按当前用户可访问账套集合过滤(超级管理员返回null表示不限制;
+     *   空集合表示无权限,注入永不命中条件避免 MyBatis-Plus 对空集合in跳过导致越权)
+     */
+    private <T> void applyAccountSetFilter(LambdaQueryWrapper<T> wrapper,
+                                           SFunction<T, Long> accountSetIdColumn,
+                                           Long accountSetId) {
+        if (accountSetId != null) {
+            accountSetAccessService.checkAccess(accountSetId);
+            wrapper.eq(accountSetIdColumn, accountSetId);
+            return;
+        }
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds == null) {
+            return;
+        }
+        if (accessibleIds.isEmpty()) {
+            wrapper.eq(accountSetIdColumn, -1L);
+            return;
+        }
+        wrapper.in(accountSetIdColumn, accessibleIds);
     }
 }

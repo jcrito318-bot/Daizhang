@@ -47,6 +47,7 @@ public class AssetChangeRecordController {
 
     @Operation(summary = "创建资产变动记录")
     @PostMapping
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER)
     public Result<Void> create(@Valid @RequestBody AssetChangeRecordRequest request) {
         assetChangeRecordService.createRecord(request);
         return Result.success();
@@ -54,6 +55,8 @@ public class AssetChangeRecordController {
 
     @Operation(summary = "删除资产变动记录")
     @DeleteMapping("/{id}")
+    // 入参为记录ID，accountSetId 由 Service 层 checkOwner 兜底校验
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> delete(@PathVariable Long id) {
         assetChangeRecordService.deleteRecord(id);
         return Result.success();

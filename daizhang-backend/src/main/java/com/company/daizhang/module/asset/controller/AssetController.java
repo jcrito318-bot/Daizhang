@@ -12,6 +12,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -112,6 +113,16 @@ public class AssetController {
     public Result<Void> changeAssetStatus(@Valid @RequestBody AssetStatusChangeRequest request) {
         assetService.changeAssetStatus(request);
         return Result.success();
+    }
+
+    @Operation(summary = "资产处置（清理/报废/出售/捐赠）")
+    @PostMapping("/{id}/dispose")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
+    public Result<Long> disposeAsset(@PathVariable Long id,
+                                     @RequestParam Integer disposeType,
+                                     @RequestParam(required = false) BigDecimal disposeAmount,
+                                     @RequestParam(required = false) String remark) {
+        return Result.success(assetService.disposeAsset(id, disposeType, disposeAmount, remark));
     }
 
     // ==================== 折旧管理 ====================

@@ -91,6 +91,26 @@ public interface ReportService {
     String generatePrintHtml(Long accountSetId, Integer year, Integer month, String reportType);
 
     /**
+     * 导出资产负债表PDF
+     */
+    void exportBalanceSheetPdf(Long accountSetId, Integer year, Integer month, HttpServletResponse response);
+
+    /**
+     * 导出利润表PDF
+     */
+    void exportIncomeStatementPdf(Long accountSetId, Integer year, Integer month, HttpServletResponse response);
+
+    /**
+     * 导出现金流量表PDF
+     */
+    void exportCashFlowStatementPdf(Long accountSetId, Integer year, Integer month, HttpServletResponse response);
+
+    /**
+     * 导出科目余额表PDF
+     */
+    void exportSubjectBalanceTablePdf(Long accountSetId, Integer year, Integer month, HttpServletResponse response);
+
+    /**
      * 所有者权益变动表
      */
     EquityChangeStatementVO equityChangeStatement(Long accountSetId, Integer year, Integer month);
@@ -100,4 +120,24 @@ public interface ReportService {
      * 按部门辅助核算归集费用类科目（损益类借方）发生额
      */
     DepartmentExpenseReportVO departmentExpenseReport(Long accountSetId, Integer year, Integer month);
+
+    /**
+     * 导出所有者权益变动表Excel
+     */
+    void exportEquityChangeStatement(ReportQueryRequest request, HttpServletResponse response);
+
+    /**
+     * 导出所有者权益变动表PDF
+     */
+    void exportEquityChangeStatementPdf(ReportQueryRequest request, HttpServletResponse response);
+
+    /**
+     * 导出部门费用分析表Excel
+     */
+    void exportDepartmentExpense(ReportQueryRequest request, HttpServletResponse response);
+
+    /**
+     * 导出部门费用分析表PDF
+     */
+    void exportDepartmentExpensePdf(ReportQueryRequest request, HttpServletResponse response);
 }

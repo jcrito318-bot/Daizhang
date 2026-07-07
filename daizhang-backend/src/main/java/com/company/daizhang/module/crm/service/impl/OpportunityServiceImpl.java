@@ -6,7 +6,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
+import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.common.utils.SecurityUtils;
 import com.company.daizhang.module.crm.dto.OpportunityQueryRequest;
 import com.company.daizhang.module.crm.dto.OpportunityRequest;
 import com.company.daizhang.module.crm.entity.Opportunity;
@@ -42,6 +44,11 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
      */
     private static final List<String> VALID_STAGES = Arrays.asList("线索", "跟进", "报价", "谈判", "成交", "流失");
 
+    /**
+     * 超级管理员用户ID(与AccountSetAccessService框架一致,id=1的admin对所有数据有完全访问权)
+     */
+    private static final Long SUPER_ADMIN_USER_ID = 1L;
+
     @Override
     public PageResult<OpportunityVO> pageOpportunities(OpportunityQueryRequest request) {
         Page<Opportunity> page = new Page<>(request.getPageNum(), request.getPageSize());
@@ -51,6 +58,15 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
                .eq(StrUtil.isNotBlank(request.getStage()), Opportunity::getStage, request.getStage())
                .eq(request.getAssigneeId() != null, Opportunity::getAssigneeId, request.getAssigneeId())
                .orderByDesc(Opportunity::getCreateTime);
+
+        // IDOR治理:非管理员仅能查看自己负责的商机(纯CRM无账套关联,按经办人归属)
+        Long currentUserId = SecurityUtils.getCurrentUserId();
+        if (currentUserId == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+        if (!SUPER_ADMIN_USER_ID.equals(currentUserId)) {
+            wrapper.eq(Opportunity::getAssigneeId, currentUserId);
+        }
 
         Page<Opportunity> result = this.page(page, wrapper);
 
@@ -67,6 +83,8 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         if (opportunity == null) {
             throw new BusinessException(404, "商机不存在");
         }
+        // IDOR治理:校验当前用户对该商机的访问权(按经办人归属)
+        checkOpportunityAccess(opportunity);
         return convertToVO(opportunity);
     }
 
@@ -86,6 +104,15 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         if (opportunity.getExpectedAmount() == null) {
             opportunity.setExpectedAmount(BigDecimal.ZERO);
         }
+        // IDOR治理:非管理员创建商机时,强制经办人为当前用户,防止越权为他人创建商机
+        Long currentUserId = SecurityUtils.getCurrentUserId();
+        if (currentUserId == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+        if (!SUPER_ADMIN_USER_ID.equals(currentUserId)) {
+            opportunity.setAssigneeId(currentUserId);
+            opportunity.setAssigneeName(null);
+        }
         // 根据负责人ID填充负责人姓名
         fillAssigneeName(opportunity);
         this.save(opportunity);
@@ -100,6 +127,8 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         if (opportunity == null) {
             throw new BusinessException(404, "商机不存在");
         }
+        // IDOR治理:校验当前用户对该商机的所有者权限(按经办人归属)
+        checkOpportunityAccess(opportunity);
 
         // 校验阶段
         validateStage(request.getStage());
@@ -121,6 +150,8 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         if (opportunity == null) {
             throw new BusinessException(404, "商机不存在");
         }
+        // IDOR治理:校验当前用户对该商机的所有者权限(按经办人归属)
+        checkOpportunityAccess(opportunity);
         this.removeById(id);
         log.info("删除商机成功，商机ID: {}", id);
     }
@@ -128,10 +159,16 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void changeStage(Long id, String stage) {
+        // 阶段不能为空,防止清空商机阶段导致销售漏斗统计错误
+        if (StrUtil.isBlank(stage)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "商机阶段不能为空");
+        }
         Opportunity opportunity = this.getById(id);
         if (opportunity == null) {
             throw new BusinessException(404, "商机不存在");
         }
+        // IDOR治理:校验当前用户对该商机的所有者权限(按经办人归属)
+        checkOpportunityAccess(opportunity);
         // 校验阶段
         validateStage(stage);
 
@@ -142,8 +179,16 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
 
     @Override
     public OpportunityStatisticsVO getStatistics() {
-        // 查询全部商机
-        List<Opportunity> list = this.list();
+        // IDOR治理:非管理员仅统计自己负责的商机(纯CRM无账套关联,按经办人归属)
+        LambdaQueryWrapper<Opportunity> wrapper = new LambdaQueryWrapper<>();
+        Long currentUserId = SecurityUtils.getCurrentUserId();
+        if (currentUserId == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+        if (!SUPER_ADMIN_USER_ID.equals(currentUserId)) {
+            wrapper.eq(Opportunity::getAssigneeId, currentUserId);
+        }
+        List<Opportunity> list = this.list(wrapper);
 
         OpportunityStatisticsVO vo = new OpportunityStatisticsVO();
         vo.setTotalCount((long) list.size());
@@ -186,6 +231,23 @@ public class OpportunityServiceImpl extends ServiceImpl<OpportunityMapper, Oppor
         vo.setTotalWonAmount(totalWonAmount);
 
         return vo;
+    }
+
+    /**
+     * IDOR治理:校验当前用户对商机的访问权(纯CRM无账套关联,按经办人归属)
+     * 超级管理员放行,否则仅经办人本人可访问/操作
+     */
+    private void checkOpportunityAccess(Opportunity opportunity) {
+        Long currentUserId = SecurityUtils.getCurrentUserId();
+        if (currentUserId == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+        if (SUPER_ADMIN_USER_ID.equals(currentUserId)) {
+            return;
+        }
+        if (opportunity.getAssigneeId() == null || !currentUserId.equals(opportunity.getAssigneeId())) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "无权操作该商机");
+        }
     }
 
     /**

@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -36,6 +37,7 @@ public class DepartmentController {
 
     @Operation(summary = "创建部门")
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> create(@Valid @RequestBody DepartmentRequest request) {
         Department entity = new Department();
         BeanUtil.copyProperties(request, entity);
@@ -45,6 +47,7 @@ public class DepartmentController {
 
     @Operation(summary = "更新部门")
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody DepartmentRequest request) {
         Department entity = new Department();
         BeanUtil.copyProperties(request, entity);
@@ -55,6 +58,7 @@ public class DepartmentController {
 
     @Operation(summary = "删除部门")
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         departmentService.deleteDepartment(id);
         return Result.success();

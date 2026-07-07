@@ -42,6 +42,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -64,6 +65,9 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
 
     @Override
     public PageResult<VoucherVO> pageVouchers(VoucherQueryRequest request) {
+        // IDOR治理:校验当前用户对该账套的访问权
+        accountSetAccessService.checkAccess(request.getAccountSetId());
+
         Page<Voucher> page = new Page<>(request.getPageNum(), request.getPageSize());
 
         LambdaQueryWrapper<Voucher> wrapper = new LambdaQueryWrapper<>();
@@ -112,7 +116,10 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void createVoucher(VoucherCreateRequest request) {
+    public Long createVoucher(VoucherCreateRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限
+        accountSetAccessService.checkOwner(request.getAccountSetId());
+
         // 业务校验：凭证日期不能为空
         if (request.getVoucherDate() == null) {
             throw new BusinessException(ErrorCode.VOUCHER_DATE_BLANK);
@@ -182,8 +189,9 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
 
         // 保存凭证明细
         saveDetails(voucher.getId(), request.getDetails());
-        
+
         log.info("创建凭证成功，凭证号: {}, 借贷合计: {}", voucherNo, totalDebit);
+        return voucher.getId();
     }
 
     @Override
@@ -291,6 +299,24 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             throw new BusinessException(ErrorCode.VOUCHER_ALREADY_AUDITED);
         }
 
+        // 删除前判断是否需要renumber：仅当删除的凭证不是当前期间未审核凭证中序号最大的那张，
+        // 才会因断号触发重新编号；若删除的是最后一张，序号仍连续，无需renumber，
+        // 同时可避免renumberVouchers两步UPDATE在事务可见性下偶发的唯一索引冲突
+        LambdaQueryWrapper<Voucher> checkWrapper = new LambdaQueryWrapper<>();
+        checkWrapper.eq(Voucher::getAccountSetId, voucher.getAccountSetId())
+                    .eq(Voucher::getYear, voucher.getYear())
+                    .eq(Voucher::getMonth, voucher.getMonth())
+                    .eq(Voucher::getStatus, 0);
+        List<Voucher> allUnaudited = this.list(checkWrapper);
+        int deletedSeq = extractVoucherSequence(voucher.getVoucherNo());
+        int maxSeq = allUnaudited.stream()
+                .map(Voucher::getVoucherNo)
+                .filter(StrUtil::isNotBlank)
+                .mapToInt(this::extractVoucherSequence)
+                .max()
+                .orElse(0);
+        boolean needRenumber = deletedSeq < maxSeq;
+
         // 删除凭证明细
         LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
         detailWrapper.eq(VoucherDetail::getVoucherId, id);
@@ -298,11 +324,13 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
 
         // 删除凭证
         this.removeById(id);
-        
-        // 重新编号该期间的凭证（保证连续性）
-        renumberVouchers(voucher.getAccountSetId(), voucher.getYear(), voucher.getMonth());
-        
-        log.info("删除凭证成功，凭证ID: {}, 凭证号: {}", id, voucher.getVoucherNo());
+
+        // 重新编号该期间的凭证（保证连续性），仅在删除中间凭证导致断号时才执行
+        if (needRenumber) {
+            renumberVouchers(voucher.getAccountSetId(), voucher.getYear(), voucher.getMonth());
+        }
+
+        log.info("删除凭证成功，凭证ID: {}, 凭证号: {}, 是否重新编号: {}", id, voucher.getVoucherNo(), needRenumber);
     }
 
     @Override
@@ -312,8 +340,14 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         if (voucher == null) {
             throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
         }
-        // IDOR治理:校验当前用户对该凭证所属账套的所有者权限
-        accountSetAccessService.checkOwner(voucher.getAccountSetId());
+        // IDOR治理:校验当前用户对该凭证所属账套的访问权(OWNER/ACCOUNTANT/VIEWER)
+        // 审核为状态变更(非删除/资金类操作)，会计员(ACCOUNTANT)应可审核凭证
+        accountSetAccessService.checkAccess(voucher.getAccountSetId());
+
+        // 已作废的凭证不能审核
+        if (voucher.getStatus() != null && voucher.getStatus() == 3) {
+            throw new BusinessException(ErrorCode.VOUCHER_ALREADY_CANCELED, "已作废的凭证不能审核");
+        }
 
         // 不能重复审核
         if (voucher.getStatus() != 0) {
@@ -346,8 +380,9 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         if (voucher == null) {
             throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
         }
-        // IDOR治理:校验当前用户对该凭证所属账套的所有者权限
-        accountSetAccessService.checkOwner(voucher.getAccountSetId());
+        // IDOR治理:校验当前用户对该凭证所属账套的访问权(OWNER/ACCOUNTANT/VIEWER)
+        // 反审核为状态变更(非删除/资金类操作)，会计员(ACCOUNTANT)应可反审核凭证
+        accountSetAccessService.checkAccess(voucher.getAccountSetId());
 
         // 只有已审核且未过账的凭证才能反审核
         if (voucher.getStatus() != 1) {
@@ -385,8 +420,9 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                 errors.add("凭证ID=" + id + " 不存在");
                 continue;
             }
-            // IDOR治理:校验当前用户对该凭证所属账套的所有者权限
-            accountSetAccessService.checkOwner(voucher.getAccountSetId());
+            // IDOR治理:校验当前用户对该凭证所属账套的访问权(OWNER/ACCOUNTANT/VIEWER)
+            // 审核为状态变更(非删除/资金类操作)，会计员(ACCOUNTANT)应可审核凭证
+            accountSetAccessService.checkAccess(voucher.getAccountSetId());
             if (voucher.getStatus() != null && voucher.getStatus() != 0) {
                 errors.add("凭证" + voucher.getVoucherNo() + " 非未审核状态，不能审核");
                 continue;
@@ -497,6 +533,258 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         this.updateById(voucher);
 
         log.info("过账凭证成功，凭证ID: {}, 凭证号: {}", id, voucher.getVoucherNo());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void unpostVoucher(Long id) {
+        Voucher voucher = this.getById(id);
+        if (voucher == null) {
+            throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
+        }
+        // IDOR治理:校验当前用户对该凭证所属账套的所有者权限
+        accountSetAccessService.checkOwner(voucher.getAccountSetId());
+
+        // 只有已过账的凭证才能反过账
+        if (voucher.getStatus() == null || voucher.getStatus() != 2) {
+            throw new BusinessException("只有已过账凭证才能反过账");
+        }
+
+        // 校验凭证所属期间未结账,反过账会改写已结账期间余额,破坏结账快照(与过账同样约束)
+        AccountPeriod period = checkPeriodExists(voucher.getAccountSetId(), voucher.getYear(), voucher.getMonth());
+        checkPeriodNotClosed(period);
+
+        // 查询凭证明细
+        LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
+        detailWrapper.eq(VoucherDetail::getVoucherId, id)
+                     .orderByAsc(VoucherDetail::getSortOrder);
+        List<VoucherDetail> details = voucherDetailMapper.selectList(detailWrapper);
+
+        // 反向冲减各科目余额(与过账的正向更新相反,借贷发生额从余额中减去)
+        for (VoucherDetail detail : details) {
+            reverseAccountBalance(voucher, detail);
+        }
+
+        // 凭证状态回退到已审核,并清空过账人/过账时间
+        voucher.setStatus(1);
+        voucher.setPostBy(null);
+        voucher.setPostTime(null);
+        // 使用LambdaUpdateWrapper显式set null,避免MyBatis-Plus默认NOT_NULL策略不更新null字段
+        LambdaUpdateWrapper<Voucher> updateWrapper = new LambdaUpdateWrapper<>();
+        updateWrapper.eq(Voucher::getId, voucher.getId())
+                     .set(Voucher::getStatus, 1)
+                     .set(Voucher::getPostBy, null)
+                     .set(Voucher::getPostTime, null);
+        this.update(updateWrapper);
+
+        log.info("反过账凭证成功，凭证ID: {}, 凭证号: {}", id, voucher.getVoucherNo());
+    }
+
+    /**
+     * 反过账时反向冲减科目余额（与updateAccountBalance的正向更新相反，
+     * 将该凭证的借贷发生额从余额中减去，并按相同公式重算期末余额）
+     */
+    private void reverseAccountBalance(Voucher voucher, VoucherDetail detail) {
+        Long accountSetId = voucher.getAccountSetId();
+        Long subjectId = detail.getSubjectId();
+        Integer year = voucher.getYear();
+        Integer month = voucher.getMonth();
+
+        BigDecimal debit = detail.getDebit() != null ? detail.getDebit() : BigDecimal.ZERO;
+        BigDecimal credit = detail.getCredit() != null ? detail.getCredit() : BigDecimal.ZERO;
+        if (debit.compareTo(BigDecimal.ZERO) == 0 && credit.compareTo(BigDecimal.ZERO) == 0) {
+            return;
+        }
+
+        // 查询科目以获取余额方向
+        Subject subject = subjectMapper.selectById(subjectId);
+        Integer balanceDirection = subject != null && subject.getBalanceDirection() != null
+                ? subject.getBalanceDirection() : 1;
+
+        // 反过账时该期间该科目的余额记录必然存在(过账时已创建),直接查询
+        LambdaQueryWrapper<AccountBalance> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(AccountBalance::getAccountSetId, accountSetId)
+               .eq(AccountBalance::getSubjectId, subjectId)
+               .eq(AccountBalance::getYear, year)
+               .eq(AccountBalance::getMonth, month);
+        AccountBalance balance = accountBalanceMapper.selectOne(wrapper);
+        if (balance == null) {
+            // 余额记录不存在,说明数据已不一致,无法安全反过账
+            throw new BusinessException("科目余额记录不存在，无法反过账。科目ID：" + subjectId);
+        }
+
+        // 反向冲减本期发生额
+        BigDecimal newPeriodDebit = (balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO).subtract(debit);
+        BigDecimal newPeriodCredit = (balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO).subtract(credit);
+        balance.setPeriodDebit(newPeriodDebit);
+        balance.setPeriodCredit(newPeriodCredit);
+
+        // 重新计算期末余额(与正向更新同样的公式,基于冲减后的本期发生额)
+        // balanceDirection=1（借方余额）：endDebit = beginDebit + periodDebit - periodCredit
+        // balanceDirection=2（贷方余额）：endCredit = beginCredit + periodCredit - periodDebit
+        BigDecimal beginDebit = balance.getBeginDebit() != null ? balance.getBeginDebit() : BigDecimal.ZERO;
+        BigDecimal beginCredit = balance.getBeginCredit() != null ? balance.getBeginCredit() : BigDecimal.ZERO;
+        if (balanceDirection == 2) {
+            BigDecimal netCredit = beginCredit.add(newPeriodCredit).subtract(newPeriodDebit);
+            if (netCredit.compareTo(BigDecimal.ZERO) >= 0) {
+                balance.setEndCredit(netCredit);
+                balance.setEndDebit(BigDecimal.ZERO);
+            } else {
+                balance.setEndCredit(BigDecimal.ZERO);
+                balance.setEndDebit(netCredit.abs());
+            }
+        } else {
+            BigDecimal netDebit = beginDebit.add(newPeriodDebit).subtract(newPeriodCredit);
+            if (netDebit.compareTo(BigDecimal.ZERO) >= 0) {
+                balance.setEndDebit(netDebit);
+                balance.setEndCredit(BigDecimal.ZERO);
+            } else {
+                balance.setEndDebit(BigDecimal.ZERO);
+                balance.setEndCredit(netDebit.abs());
+            }
+        }
+
+        // 反向冲减本年发生额
+        BigDecimal newYearDebit = (balance.getYearDebit() != null ? balance.getYearDebit() : BigDecimal.ZERO).subtract(debit);
+        BigDecimal newYearCredit = (balance.getYearCredit() != null ? balance.getYearCredit() : BigDecimal.ZERO).subtract(credit);
+        balance.setYearDebit(newYearDebit);
+        balance.setYearCredit(newYearCredit);
+
+        // 检查乐观锁更新结果:并发反过账同一科目同一期间凭证时,version已被修改,updateById返回0
+        int updated = accountBalanceMapper.updateById(balance);
+        if (updated == 0) {
+            throw new BusinessException("科目余额更新失败(并发冲突)，请重试。科目ID：" + subjectId);
+        }
+
+        // P1级联修复：反过账当期后，后续期间的期初余额(beginDebit/beginCredit)仍保留冲减前的旧值，
+        // 需按当期冲减后的期末余额级联传播并重算后续期末余额，否则后续期间试算不平衡。
+        cascadeReverseSubsequentBalances(voucher, detail);
+    }
+
+    /**
+     * 反过账级联修复：将该凭证的反向冲减传播到凭证所在期间之后的所有后续期间。
+     * <p>
+     * 本项目没有独立的 period_balance/account_balance 期初余额表，各期间的期初余额
+     * 以 acc_account_balance.begin_debit/begin_credit 快照形式存储（首笔过账时从上期期末结转）。
+     * 反过账只冲减当期余额，后续期间的期初余额不会自动跟随变更，导致：
+     * 1) 后续期间期初余额虚高（仍含已反过账凭证的发生额）；
+     * 2) 后续期间期末余额（由期初+本期发生额推算）连带错误，试算不平衡、报表失真。
+     * <p>
+     * 级联策略：按年月升序遍历后续期间余额记录，将上一期间冲减后的期末余额作为下一期间的期初余额，
+     * 并按余额方向重算期末余额；同年度期间还需反向冲减本年累计发生额(year_debit/year_credit)。
+     * 注：会同步改写已结账后续期间的余额快照（按需求要求级联所有已结账/未结账期间）。
+     */
+    private void cascadeReverseSubsequentBalances(Voucher voucher, VoucherDetail detail) {
+        Long accountSetId = voucher.getAccountSetId();
+        Long subjectId = detail.getSubjectId();
+        Integer voucherYear = voucher.getYear();
+        Integer voucherMonth = voucher.getMonth();
+        BigDecimal debit = detail.getDebit() != null ? detail.getDebit() : BigDecimal.ZERO;
+        BigDecimal credit = detail.getCredit() != null ? detail.getCredit() : BigDecimal.ZERO;
+        if (debit.compareTo(BigDecimal.ZERO) == 0 && credit.compareTo(BigDecimal.ZERO) == 0) {
+            return;
+        }
+
+        // 查询科目余额方向
+        Subject subject = subjectMapper.selectById(subjectId);
+        Integer balanceDirection = subject != null && subject.getBalanceDirection() != null
+                ? subject.getBalanceDirection() : 1;
+
+        // 查询凭证所在期间之后的所有余额记录（同年后续月份 + 后续年度），按年月升序
+        LambdaQueryWrapper<AccountBalance> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(AccountBalance::getAccountSetId, accountSetId)
+               .eq(AccountBalance::getSubjectId, subjectId)
+               .and(w -> w.gt(AccountBalance::getYear, voucherYear)
+                          .or(ww -> ww.eq(AccountBalance::getYear, voucherYear)
+                                      .gt(AccountBalance::getMonth, voucherMonth)))
+               .orderByAsc(AccountBalance::getYear)
+               .orderByAsc(AccountBalance::getMonth);
+        List<AccountBalance> subsequentBalances = accountBalanceMapper.selectList(wrapper);
+        if (subsequentBalances == null || subsequentBalances.isEmpty()) {
+            return;
+        }
+
+        // 取当期冲减后的期末余额作为后续第一期的期初余额基准
+        LambdaQueryWrapper<AccountBalance> curWrapper = new LambdaQueryWrapper<>();
+        curWrapper.eq(AccountBalance::getAccountSetId, accountSetId)
+                  .eq(AccountBalance::getSubjectId, subjectId)
+                  .eq(AccountBalance::getYear, voucherYear)
+                  .eq(AccountBalance::getMonth, voucherMonth);
+        AccountBalance currentBalance = accountBalanceMapper.selectOne(curWrapper);
+        if (currentBalance == null) {
+            return;
+        }
+        BigDecimal prevEndDebit = currentBalance.getEndDebit() != null ? currentBalance.getEndDebit() : BigDecimal.ZERO;
+        BigDecimal prevEndCredit = currentBalance.getEndCredit() != null ? currentBalance.getEndCredit() : BigDecimal.ZERO;
+
+        for (AccountBalance bal : subsequentBalances) {
+            // 期初余额 = 上一期间冲减后的期末余额（级联传播）
+            bal.setBeginDebit(prevEndDebit);
+            bal.setBeginCredit(prevEndCredit);
+
+            // 同年度期间：反向冲减本年累计发生额（跨年度期间year_debit/year_credit从0重新累计，不调整）
+            if (bal.getYear() != null && bal.getYear().equals(voucherYear)) {
+                BigDecimal newYearDebit = (bal.getYearDebit() != null ? bal.getYearDebit() : BigDecimal.ZERO).subtract(debit);
+                BigDecimal newYearCredit = (bal.getYearCredit() != null ? bal.getYearCredit() : BigDecimal.ZERO).subtract(credit);
+                bal.setYearDebit(newYearDebit);
+                bal.setYearCredit(newYearCredit);
+            }
+
+            // 重算期末余额（基于新期初 + 原本期发生额 + 余额方向，与updateAccountBalance保持同公式）
+            BigDecimal periodDebit = bal.getPeriodDebit() != null ? bal.getPeriodDebit() : BigDecimal.ZERO;
+            BigDecimal periodCredit = bal.getPeriodCredit() != null ? bal.getPeriodCredit() : BigDecimal.ZERO;
+            if (balanceDirection == 2) {
+                BigDecimal netCredit = prevEndCredit.add(periodCredit).subtract(periodDebit);
+                if (netCredit.compareTo(BigDecimal.ZERO) >= 0) {
+                    bal.setEndCredit(netCredit);
+                    bal.setEndDebit(BigDecimal.ZERO);
+                } else {
+                    bal.setEndCredit(BigDecimal.ZERO);
+                    bal.setEndDebit(netCredit.abs());
+                }
+            } else {
+                BigDecimal netDebit = prevEndDebit.add(periodDebit).subtract(periodCredit);
+                if (netDebit.compareTo(BigDecimal.ZERO) >= 0) {
+                    bal.setEndDebit(netDebit);
+                    bal.setEndCredit(BigDecimal.ZERO);
+                } else {
+                    bal.setEndDebit(BigDecimal.ZERO);
+                    bal.setEndCredit(netDebit.abs());
+                }
+            }
+
+            int updated = accountBalanceMapper.updateById(bal);
+            if (updated == 0) {
+                throw new BusinessException("科目余额级联更新失败(并发冲突)，请重试。科目ID：" + subjectId);
+            }
+
+            // 传递本期期末作为下一期期初
+            prevEndDebit = bal.getEndDebit() != null ? bal.getEndDebit() : BigDecimal.ZERO;
+            prevEndCredit = bal.getEndCredit() != null ? bal.getEndCredit() : BigDecimal.ZERO;
+        }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void cancelVoucher(Long id) {
+        Voucher voucher = this.getById(id);
+        if (voucher == null) {
+            throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
+        }
+        // IDOR治理:校验当前用户对该凭证所属账套的所有者权限
+        accountSetAccessService.checkOwner(voucher.getAccountSetId());
+
+        // 已作废不能重复作废
+        if (voucher.getStatus() != null && voucher.getStatus() == 3) {
+            throw new BusinessException(ErrorCode.VOUCHER_ALREADY_CANCELED);
+        }
+        // 已过账凭证不能直接作废，需先反过账
+        if (voucher.getStatus() != null && voucher.getStatus() == 2) {
+            throw new BusinessException("已过账凭证不能直接作废，请先反过账");
+        }
+        voucher.setStatus(3);
+        this.updateById(voucher);
+        log.info("作废凭证成功，凭证ID: {}, 凭证号: {}", id, voucher.getVoucherNo());
     }
 
     /**
@@ -628,6 +916,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void rearrangeVoucherNo(Long accountSetId, Integer year, Integer month) {
+        // IDOR治理:校验当前用户对该账套的所有者权限
+        accountSetAccessService.checkOwner(accountSetId);
         // 业务校验：年度必须合理
         if (year == null || year < 1900 || year > 2099) {
             throw new BusinessException(ErrorCode.VOUCHER_YEAR_INVALID);
@@ -659,22 +949,18 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                     .eq(Voucher::getYear, year)
                     .eq(Voucher::getMonth, month)
                     .ne(Voucher::getStatus, 0)
-                    .notLike(Voucher::getVoucherNo, "TMP-%")
-                    // 按序号数值排序:序号超999时字符串排序会取错最大号,导致未审核凭证从错误序号开始编号
-                    .last("ORDER BY CAST(SUBSTRING_INDEX(voucher_no, '-', -1) AS UNSIGNED) DESC LIMIT 1");
+                    .notLike(Voucher::getVoucherNo, "TMP-%");
         List<Voucher> fixedVouchers = this.list(fixedWrapper);
         int sequence = 1;
         if (!fixedVouchers.isEmpty()) {
-            String maxFixedNo = fixedVouchers.get(0).getVoucherNo();
-            if (StrUtil.isNotBlank(maxFixedNo)) {
-                String[] parts = maxFixedNo.split("-");
-                if (parts.length == 3) {
-                    try {
-                        sequence = Integer.parseInt(parts[2]) + 1;
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-            }
+            // Java层提取序号取最大值,避免数据库CAST/SUBSTRING兼容性问题(凭证号含两个'-')
+            int maxSeq = fixedVouchers.stream()
+                    .map(Voucher::getVoucherNo)
+                    .filter(StrUtil::isNotBlank)
+                    .mapToInt(this::extractVoucherSequence)
+                    .max()
+                    .orElse(0);
+            sequence = maxSeq + 1;
         }
 
         // 第一步：把未审核凭证号改成临时号（避免唯一索引冲突）
@@ -876,6 +1162,9 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long saveDraft(VoucherCreateRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限
+        accountSetAccessService.checkOwner(request.getAccountSetId());
+
         // 业务校验：凭证日期不能为空
         if (request.getVoucherDate() == null) {
             throw new BusinessException(ErrorCode.VOUCHER_DATE_BLANK);
@@ -1100,21 +1389,19 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         wrapper.eq(Voucher::getAccountSetId, accountSetId)
                .eq(Voucher::getYear, year)
                .eq(Voucher::getMonth, month)
-               .notLike(Voucher::getVoucherNo, "TMP-%")
-               // 按序号数值排序,而非字符串排序:序号超999时"999"按字符串大于"1000",会取错最大号导致重号
-               .last("ORDER BY CAST(SUBSTRING_INDEX(voucher_no, '-', -1) AS UNSIGNED) DESC LIMIT 1");
-        Voucher lastVoucher = this.getOne(wrapper);
+               .notLike(Voucher::getVoucherNo, "TMP-%");
+        List<Voucher> vouchers = this.list(wrapper);
 
         int sequence = 1;
-        if (lastVoucher != null && StrUtil.isNotBlank(lastVoucher.getVoucherNo())) {
-            String lastVoucherNo = lastVoucher.getVoucherNo();
-            String[] parts = lastVoucherNo.split("-");
-            if (parts.length == 3) {
-                try {
-                    sequence = Integer.parseInt(parts[2]) + 1;
-                } catch (NumberFormatException ignored) {
-                }
-            }
+        if (vouchers != null && !vouchers.isEmpty()) {
+            // Java层提取序号取最大值,避免数据库CAST/SUBSTRING兼容性问题(凭证号含两个'-')
+            int maxSeq = vouchers.stream()
+                    .map(Voucher::getVoucherNo)
+                    .filter(StrUtil::isNotBlank)
+                    .mapToInt(this::extractVoucherSequence)
+                    .max()
+                    .orElse(0);
+            sequence = maxSeq + 1;
         }
 
         return String.format("%d-%02d-%03d", year, month, sequence);
@@ -1131,10 +1418,12 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         wrapper.eq(Voucher::getAccountSetId, accountSetId)
                .eq(Voucher::getYear, year)
                .eq(Voucher::getMonth, month)
-               .eq(Voucher::getStatus, 0)
-               // 按凭证日期、序号数值排序:序号超999时字符串排序会乱序,导致重新编号后凭证号顺序与日期错乱
-               .last("ORDER BY voucher_date ASC, CAST(SUBSTRING_INDEX(voucher_no, '-', -1) AS UNSIGNED) ASC");
+               .eq(Voucher::getStatus, 0);
         List<Voucher> vouchers = this.list(wrapper);
+        // 按凭证日期、序号数值排序:序号超999时字符串排序会乱序,导致重新编号后凭证号顺序与日期错乱
+        // Java层排序,避免数据库CAST/SUBSTRING兼容性问题(凭证号含两个'-')
+        vouchers.sort(Comparator.comparing(Voucher::getVoucherDate, Comparator.nullsLast(Comparator.naturalOrder()))
+                .thenComparingInt(v -> extractVoucherSequence(v.getVoucherNo())));
 
         if (vouchers.isEmpty()) {
             return;
@@ -1157,18 +1446,18 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                     .eq(Voucher::getYear, year)
                     .eq(Voucher::getMonth, month)
                     .ne(Voucher::getStatus, 0)
-                    .notLike(Voucher::getVoucherNo, "TMP-%")
-                    .last("ORDER BY CAST(SUBSTRING_INDEX(voucher_no, '-', -1) AS UNSIGNED) DESC LIMIT 1");
-        Voucher maxFixed = this.getOne(fixedWrapper);
+                    .notLike(Voucher::getVoucherNo, "TMP-%");
+        List<Voucher> fixedVouchers = this.list(fixedWrapper);
         int sequence = 1;
-        if (maxFixed != null && StrUtil.isNotBlank(maxFixed.getVoucherNo())) {
-            String[] parts = maxFixed.getVoucherNo().split("-");
-            if (parts.length == 3) {
-                try {
-                    sequence = Integer.parseInt(parts[2]) + 1;
-                } catch (NumberFormatException ignored) {
-                }
-            }
+        if (fixedVouchers != null && !fixedVouchers.isEmpty()) {
+            // Java层提取序号取最大值,避免数据库CAST/SUBSTRING兼容性问题(凭证号含两个'-')
+            int maxSeq = fixedVouchers.stream()
+                    .map(Voucher::getVoucherNo)
+                    .filter(StrUtil::isNotBlank)
+                    .mapToInt(this::extractVoucherSequence)
+                    .max()
+                    .orElse(0);
+            sequence = maxSeq + 1;
         }
         for (Voucher voucher : vouchers) {
             String newVoucherNo = String.format("%d-%02d-%03d", year, month, sequence);
@@ -1261,5 +1550,24 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         VoucherDetailVO vo = new VoucherDetailVO();
         BeanUtil.copyProperties(detail, vo);
         return vo;
+    }
+
+    /**
+     * 从凭证号中提取序号
+     * 凭证号格式：2026-01-001，取最后一个'-'后的部分
+     */
+    private int extractVoucherSequence(String voucherNo) {
+        if (StrUtil.isBlank(voucherNo)) {
+            return 0;
+        }
+        int lastDash = voucherNo.lastIndexOf('-');
+        if (lastDash < 0 || lastDash == voucherNo.length() - 1) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(voucherNo.substring(lastDash + 1));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 }

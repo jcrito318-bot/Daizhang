@@ -18,4 +18,11 @@ public interface SysOperationLogService extends IService<SysOperationLog> {
      * 保存操作日志
      */
     void saveLog(SysOperationLog log);
+
+    /**
+     * 清理操作日志
+     *
+     * @param keepDays 保留天数，清理该天数之前的日志；为空则清理全部
+     */
+    void cleanOperationLogs(Integer keepDays);
 }

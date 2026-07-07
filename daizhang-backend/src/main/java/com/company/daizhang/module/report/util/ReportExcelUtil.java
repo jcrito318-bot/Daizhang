@@ -4,6 +4,10 @@ import com.company.daizhang.module.report.vo.BalanceSheetItem;
 import com.company.daizhang.module.report.vo.BalanceSheetVO;
 import com.company.daizhang.module.report.vo.CashFlowItemVO;
 import com.company.daizhang.module.report.vo.CashFlowStatementVO;
+import com.company.daizhang.module.report.vo.DepartmentExpenseItem;
+import com.company.daizhang.module.report.vo.DepartmentExpenseReportVO;
+import com.company.daizhang.module.report.vo.EquityChangeItem;
+import com.company.daizhang.module.report.vo.EquityChangeStatementVO;
 import com.company.daizhang.module.report.vo.IncomeStatementItem;
 import com.company.daizhang.module.report.vo.IncomeStatementVO;
 import com.company.daizhang.module.report.vo.SubjectBalanceRow;
@@ -194,6 +198,139 @@ public class ReportExcelUtil {
             outputExcel(response, workbook, "科目余额表_" + year + "年" + month + "月.xlsx");
         } catch (IOException e) {
             log.error("导出科目余额表失败", e);
+            throw new RuntimeException("导出失败", e);
+        }
+    }
+
+    /**
+     * 导出所有者权益变动表
+     */
+    public void exportEquityChangeStatement(EquityChangeStatementVO data, Integer year, Integer month, HttpServletResponse response) {
+        try (Workbook workbook = new XSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("所有者权益变动表");
+
+            // 创建标题行样式
+            CellStyle headerStyle = workbook.createCellStyle();
+            Font headerFont = workbook.createFont();
+            headerFont.setBold(true);
+            headerStyle.setFont(headerFont);
+            headerStyle.setAlignment(HorizontalAlignment.CENTER);
+
+            // 标题
+            Row titleRow = sheet.createRow(0);
+            Cell titleCell = titleRow.createCell(0);
+            titleCell.setCellValue("所有者权益变动表 " + year + "年" + month + "月");
+            titleCell.setCellStyle(headerStyle);
+
+            // 表头
+            Row headerRow = sheet.createRow(2);
+            headerRow.createCell(0).setCellValue("项目");
+            headerRow.createCell(1).setCellValue("行次");
+            headerRow.createCell(2).setCellValue("年初余额");
+            headerRow.createCell(3).setCellValue("本年增加");
+            headerRow.createCell(4).setCellValue("本年减少");
+            headerRow.createCell(5).setCellValue("期末余额");
+            for (int i = 0; i < 6; i++) {
+                headerRow.getCell(i).setCellStyle(headerStyle);
+            }
+
+            // 数据行
+            int rowNum = 3;
+            if (data.getItems() != null) {
+                for (EquityChangeItem item : data.getItems()) {
+                    Row row = sheet.createRow(rowNum++);
+                    row.createCell(0).setCellValue(item.getItemName());
+                    row.createCell(1).setCellValue(item.getRowNo());
+                    row.createCell(2).setCellValue(item.getBeginningBalance() != null ? item.getBeginningBalance().doubleValue() : 0);
+                    row.createCell(3).setCellValue(item.getIncreaseAmount() != null ? item.getIncreaseAmount().doubleValue() : 0);
+                    row.createCell(4).setCellValue(item.getDecreaseAmount() != null ? item.getDecreaseAmount().doubleValue() : 0);
+                    row.createCell(5).setCellValue(item.getEndingBalance() != null ? item.getEndingBalance().doubleValue() : 0);
+                }
+            }
+
+            // 合计行
+            Row totalRow = sheet.createRow(rowNum);
+            totalRow.createCell(0).setCellValue("合计");
+            totalRow.createCell(2).setCellValue(data.getTotalBeginningBalance() != null ? data.getTotalBeginningBalance().doubleValue() : 0);
+            totalRow.createCell(3).setCellValue(data.getTotalIncrease() != null ? data.getTotalIncrease().doubleValue() : 0);
+            totalRow.createCell(4).setCellValue(data.getTotalDecrease() != null ? data.getTotalDecrease().doubleValue() : 0);
+            totalRow.createCell(5).setCellValue(data.getTotalEndingBalance() != null ? data.getTotalEndingBalance().doubleValue() : 0);
+
+            // 设置列宽
+            sheet.setColumnWidth(0, 25 * 256);
+            sheet.setColumnWidth(1, 10 * 256);
+            for (int i = 2; i < 6; i++) {
+                sheet.setColumnWidth(i, 15 * 256);
+            }
+
+            // 输出
+            outputExcel(response, workbook, "所有者权益变动表_" + year + "年" + month + "月.xlsx");
+        } catch (IOException e) {
+            log.error("导出所有者权益变动表失败", e);
+            throw new RuntimeException("导出失败", e);
+        }
+    }
+
+    /**
+     * 导出部门费用分析表
+     */
+    public void exportDepartmentExpense(DepartmentExpenseReportVO data, Integer year, Integer month, HttpServletResponse response) {
+        try (Workbook workbook = new XSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("部门费用分析表");
+
+            // 创建标题行样式
+            CellStyle headerStyle = workbook.createCellStyle();
+            Font headerFont = workbook.createFont();
+            headerFont.setBold(true);
+            headerStyle.setFont(headerFont);
+            headerStyle.setAlignment(HorizontalAlignment.CENTER);
+
+            // 标题
+            Row titleRow = sheet.createRow(0);
+            Cell titleCell = titleRow.createCell(0);
+            titleCell.setCellValue("部门费用分析表 " + year + "年" + month + "月");
+            titleCell.setCellStyle(headerStyle);
+
+            // 表头
+            Row headerRow = sheet.createRow(2);
+            headerRow.createCell(0).setCellValue("部门编码");
+            headerRow.createCell(1).setCellValue("部门名称");
+            headerRow.createCell(2).setCellValue("本期借方发生额");
+            headerRow.createCell(3).setCellValue("本年累计");
+            headerRow.createCell(4).setCellValue("占比(%)");
+            for (int i = 0; i < 5; i++) {
+                headerRow.getCell(i).setCellStyle(headerStyle);
+            }
+
+            // 数据行
+            int rowNum = 3;
+            if (data.getItems() != null) {
+                for (DepartmentExpenseItem item : data.getItems()) {
+                    Row row = sheet.createRow(rowNum++);
+                    row.createCell(0).setCellValue(item.getDepartmentCode() != null ? item.getDepartmentCode() : "");
+                    row.createCell(1).setCellValue(item.getDepartmentName() != null ? item.getDepartmentName() : "");
+                    row.createCell(2).setCellValue(item.getPeriodAmount() != null ? item.getPeriodAmount().doubleValue() : 0);
+                    row.createCell(3).setCellValue(item.getYearAmount() != null ? item.getYearAmount().doubleValue() : 0);
+                    row.createCell(4).setCellValue(item.getPercentage() != null ? item.getPercentage().doubleValue() : 0);
+                }
+            }
+
+            // 合计行
+            Row totalRow = sheet.createRow(rowNum);
+            totalRow.createCell(0).setCellValue("合计");
+            totalRow.createCell(2).setCellValue(data.getTotalExpense() != null ? data.getTotalExpense().doubleValue() : 0);
+
+            // 设置列宽
+            sheet.setColumnWidth(0, 15 * 256);
+            sheet.setColumnWidth(1, 20 * 256);
+            for (int i = 2; i < 5; i++) {
+                sheet.setColumnWidth(i, 18 * 256);
+            }
+
+            // 输出
+            outputExcel(response, workbook, "部门费用分析表_" + year + "年" + month + "月.xlsx");
+        } catch (IOException e) {
+            log.error("导出部门费用分析表失败", e);
             throw new RuntimeException("导出失败", e);
         }
     }

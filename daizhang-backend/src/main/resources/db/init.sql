@@ -282,7 +282,7 @@ CREATE TABLE `acc_voucher` (
   `update_by` BIGINT DEFAULT NULL COMMENT '更新人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_account_set_year_month_no` (`account_set_id`, `year`, `month`, `voucher_no`),
+  UNIQUE KEY `uk_account_set_year_month_no` (`account_set_id`, `year`, `month`, `voucher_no`, `deleted`),
   KEY `idx_voucher_date` (`voucher_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='凭证表';
 

@@ -1,6 +1,8 @@
 package com.company.daizhang.common.aspect;
 
 import com.company.daizhang.common.annotation.RequireAccountSetAccess;
+import com.company.daizhang.common.exception.BusinessException;
+import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,7 +46,13 @@ public class AccountSetAccessAspect {
 
         List<Long> accountSetIds = resolveAccountSetIds(method, joinPoint.getArgs());
         if (accountSetIds == null || accountSetIds.isEmpty()) {
-            log.warn("IDOR校验跳过: 方法{}未找到accountSetId参数", method.getName());
+            if (annotation.required()) {
+                // fail-closed: 无法解析accountSetId时拒绝访问,防止注解被静默绕过
+                log.error("IDOR校验失败: 方法{}未找到accountSetId参数,拒绝访问", method.getName());
+                throw new BusinessException(ErrorCode.FORBIDDEN, "无法解析账套ID，拒绝访问");
+            }
+            // required=false: 允许无accountSetId的合法场景(如按userId查询的列表接口),此时应由Service层兜底校验
+            log.warn("IDOR校验跳过: 方法{}未找到accountSetId参数(required=false)", method.getName());
             return joinPoint.proceed();
         }
 

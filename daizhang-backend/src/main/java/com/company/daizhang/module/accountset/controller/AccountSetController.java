@@ -60,7 +60,21 @@ public class AccountSetController {
         accountSetService.updateAccountSet(id, request);
         return Result.success();
     }
-    
+
+    @Operation(summary = "启用账套")
+    @PutMapping("/{id}/enable")
+    public Result<Void> enable(@PathVariable Long id) {
+        accountSetService.enableAccountSet(id);
+        return Result.success();
+    }
+
+    @Operation(summary = "停用账套")
+    @PutMapping("/{id}/disable")
+    public Result<Void> disable(@PathVariable Long id) {
+        accountSetService.disableAccountSet(id);
+        return Result.success();
+    }
+
     @Operation(summary = "删除账套")
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {

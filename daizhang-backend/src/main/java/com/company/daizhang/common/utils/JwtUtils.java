@@ -48,15 +48,14 @@ public class JwtUtils {
             throw new IllegalStateException("jwt.secret 长度不足32字节(HS256要求),当前长度: "
                     + secret.getBytes(StandardCharsets.UTF_8).length);
         }
-        // 已知弱密钥(代码库内默认值)仅告警,不阻断启动,避免破坏本地开发;
-        // 生产环境应通过环境变量 JWT_SECRET 覆盖
+        // 已知弱密钥(代码库默认值)直接拒绝启动,防止生产环境误用公开弱密钥导致JWT可被任意伪造
         for (String weak : KNOWN_WEAK_SECRETS) {
             if (weak.equals(secret)) {
                 log.warn("==========================================================");
                 log.warn("警告: jwt.secret 使用了已知弱密钥(代码库默认值),存在JWT伪造风险!");
-                log.warn("生产环境必须通过环境变量 JWT_SECRET 注入随机密钥(>=32字节)。");
+                log.warn("请通过环境变量 JWT_SECRET 注入随机密钥(>=32字节)。");
                 log.warn("==========================================================");
-                break;
+                throw new IllegalStateException("jwt.secret 使用了已知弱密钥，请通过环境变量 JWT_SECRET 设置随机密钥(>=32字节)");
             }
         }
         log.info("JWT密钥校验通过(长度{}字节)", secret.getBytes(StandardCharsets.UTF_8).length);

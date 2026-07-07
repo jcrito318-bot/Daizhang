@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -42,6 +43,7 @@ public class SysConfigController {
 
     @Operation(summary = "创建系统设置")
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> create(@Valid @RequestBody SysConfigRequest request) {
         sysConfigService.createConfig(request);
         return Result.success();
@@ -49,6 +51,7 @@ public class SysConfigController {
 
     @Operation(summary = "更新系统设置")
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody SysConfigRequest request) {
         sysConfigService.updateConfig(id, request);
         return Result.success();
@@ -56,6 +59,7 @@ public class SysConfigController {
 
     @Operation(summary = "删除系统设置")
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         sysConfigService.deleteConfig(id);
         return Result.success();

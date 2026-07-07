@@ -7,11 +7,14 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.customer.dto.BillingRecordCreateRequest;
 import com.company.daizhang.module.customer.dto.BillingRecordQueryRequest;
 import com.company.daizhang.module.customer.dto.BillingRecordUpdateRequest;
 import com.company.daizhang.module.customer.entity.BillingRecord;
+import com.company.daizhang.module.customer.entity.Customer;
 import com.company.daizhang.module.customer.mapper.BillingRecordMapper;
+import com.company.daizhang.module.customer.mapper.CustomerMapper;
 import com.company.daizhang.module.customer.service.BillingRecordService;
 import com.company.daizhang.module.customer.vo.BillingRecordVO;
 import lombok.RequiredArgsConstructor;
@@ -21,7 +24,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -33,6 +38,8 @@ import java.util.stream.Collectors;
 public class BillingRecordServiceImpl implements BillingRecordService {
 
     private final BillingRecordMapper billingRecordMapper;
+    private final CustomerMapper customerMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     private static final BigDecimal DEFAULT_TAX_RATE = new BigDecimal("0.06");
 
@@ -48,6 +55,19 @@ public class BillingRecordServiceImpl implements BillingRecordService {
                 .like(StrUtil.isNotBlank(request.getInvoiceNo()), BillingRecord::getInvoiceNo, request.getInvoiceNo())
                 .orderByDesc(BillingRecord::getBillingDate);
 
+        // IDOR治理:仅返回当前用户可访问账套下客户的开票记录(实体无accountSetId,通过customer关联链过滤)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds != null) {
+            if (accessibleIds.isEmpty()) {
+                return new PageResult<>(Collections.emptyList(), 0L, request.getPageNum(), request.getPageSize());
+            }
+            List<Long> customerIds = listAccessibleCustomerIds(accessibleIds);
+            if (customerIds.isEmpty()) {
+                return new PageResult<>(Collections.emptyList(), 0L, request.getPageNum(), request.getPageSize());
+            }
+            wrapper.in(BillingRecord::getCustomerId, customerIds);
+        }
+
         Page<BillingRecord> result = billingRecordMapper.selectPage(page, wrapper);
         List<BillingRecordVO> voList = result.getRecords().stream()
                 .map(this::convertToVO)
@@ -62,6 +82,12 @@ public class BillingRecordServiceImpl implements BillingRecordService {
         if (record == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "开票记录不存在");
         }
+        // IDOR治理:校验当前用户对该开票记录所属账套的访问权(读操作用checkAccess)
+        Customer customer = customerMapper.selectById(record.getCustomerId());
+        if (customer == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "客户不存在");
+        }
+        accountSetAccessService.checkAccess(customer.getAccountSetId());
         return convertToVO(record);
     }
 
@@ -70,6 +96,20 @@ public class BillingRecordServiceImpl implements BillingRecordService {
         LambdaQueryWrapper<BillingRecord> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(BillingRecord::getCustomerId, customerId)
                 .orderByDesc(BillingRecord::getBillingDate);
+
+        // IDOR治理:仅返回当前用户可访问账套下客户的开票记录(实体无accountSetId,通过customer关联链过滤)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds != null) {
+            if (accessibleIds.isEmpty()) {
+                return Collections.emptyList();
+            }
+            List<Long> customerIds = listAccessibleCustomerIds(accessibleIds);
+            if (customerIds.isEmpty()) {
+                return Collections.emptyList();
+            }
+            wrapper.in(BillingRecord::getCustomerId, customerIds);
+        }
+
         return billingRecordMapper.selectList(wrapper).stream()
                 .map(this::convertToVO)
                 .collect(Collectors.toList());
@@ -78,6 +118,14 @@ public class BillingRecordServiceImpl implements BillingRecordService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long createBillingRecord(BillingRecordCreateRequest request) {
+        // 校验客户是否存在
+        Customer customer = customerMapper.selectById(request.getCustomerId());
+        if (customer == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "客户不存在");
+        }
+        // IDOR治理:校验当前用户对该开票记录所属账套的所有者权限(写操作用checkOwner)
+        accountSetAccessService.checkOwner(customer.getAccountSetId());
+
         BillingRecord record = new BillingRecord();
         BeanUtil.copyProperties(request, record);
 
@@ -106,6 +154,12 @@ public class BillingRecordServiceImpl implements BillingRecordService {
         if (record == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "开票记录不存在");
         }
+        // IDOR治理:校验当前用户对该开票记录所属账套的所有者权限(写操作用checkOwner)
+        Customer customer = customerMapper.selectById(record.getCustomerId());
+        if (customer == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "客户不存在");
+        }
+        accountSetAccessService.checkOwner(customer.getAccountSetId());
         if (record.getStatus() != null && record.getStatus() == 2) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "已作废的开票记录不能更新");
         }
@@ -147,6 +201,12 @@ public class BillingRecordServiceImpl implements BillingRecordService {
         if (record == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "开票记录不存在");
         }
+        // IDOR治理:校验当前用户对该开票记录所属账套的所有者权限(写操作用checkOwner)
+        Customer customer = customerMapper.selectById(record.getCustomerId());
+        if (customer == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "客户不存在");
+        }
+        accountSetAccessService.checkOwner(customer.getAccountSetId());
         if (record.getStatus() != null && record.getStatus() == 1) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "已收款的开票记录不能删除");
         }
@@ -160,6 +220,12 @@ public class BillingRecordServiceImpl implements BillingRecordService {
         if (record == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "开票记录不存在");
         }
+        // IDOR治理:状态变更为高危操作,校验所有者权限
+        Customer customer = customerMapper.selectById(record.getCustomerId());
+        if (customer == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "客户不存在");
+        }
+        accountSetAccessService.checkOwner(customer.getAccountSetId());
         if (record.getStatus() != null && record.getStatus() == 2) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "开票记录已作废");
         }
@@ -177,12 +243,29 @@ public class BillingRecordServiceImpl implements BillingRecordService {
         if (record == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "开票记录不存在");
         }
+        // IDOR治理:状态变更为高危操作,校验所有者权限
+        Customer customer = customerMapper.selectById(record.getCustomerId());
+        if (customer == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "客户不存在");
+        }
+        accountSetAccessService.checkOwner(customer.getAccountSetId());
         if (record.getStatus() != null && record.getStatus() == 2) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "已作废的开票记录不能标记为已收款");
         }
         record.setStatus(1); // 已收款
         record.setPaymentRecordId(paymentRecordId);
         billingRecordMapper.updateById(record);
+    }
+
+    /**
+     * IDOR治理:查询指定账套集合下的客户ID集合(用于实体无accountSetId时按customerId过滤)
+     */
+    private List<Long> listAccessibleCustomerIds(Set<Long> accessibleIds) {
+        LambdaQueryWrapper<Customer> customerWrapper = new LambdaQueryWrapper<>();
+        customerWrapper.in(Customer::getAccountSetId, accessibleIds);
+        return customerMapper.selectList(customerWrapper).stream()
+                .map(Customer::getId)
+                .collect(Collectors.toList());
     }
 
     private BillingRecordVO convertToVO(BillingRecord record) {

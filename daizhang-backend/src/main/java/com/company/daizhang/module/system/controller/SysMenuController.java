@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -40,6 +41,7 @@ public class SysMenuController {
     
     @Operation(summary = "创建菜单")
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> create(@Valid @RequestBody MenuCreateRequest request) {
         menuService.createMenu(request);
         return Result.success();
@@ -47,6 +49,7 @@ public class SysMenuController {
     
     @Operation(summary = "更新菜单")
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody MenuUpdateRequest request) {
         menuService.updateMenu(id, request);
         return Result.success();
@@ -54,6 +57,7 @@ public class SysMenuController {
     
     @Operation(summary = "删除菜单")
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         menuService.deleteMenu(id);
         return Result.success();

@@ -267,7 +267,7 @@ CREATE TABLE IF NOT EXISTS `acc_voucher` (
   `update_by` BIGINT DEFAULT NULL COMMENT '更新人',
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_account_set_year_month_no` (`account_set_id`, `year`, `month`, `voucher_no`),
+  UNIQUE KEY `uk_account_set_year_month_no` (`account_set_id`, `year`, `month`, `voucher_no`, `deleted`),
   KEY `idx_voucher_date` (`voucher_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='凭证表';
 
@@ -1726,6 +1726,7 @@ CREATE TABLE IF NOT EXISTS `inv_stock` (
   `end_quantity` DECIMAL(18,4) DEFAULT 0 COMMENT '期末数量',
   `end_amount` DECIMAL(18,2) DEFAULT 0 COMMENT '期末金额',
   `unit_cost` DECIMAL(18,6) DEFAULT 0 COMMENT '单位成本',
+  `version` INT DEFAULT 0 COMMENT '乐观锁版本号',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_inv_stock_item_period` (`account_set_id`, `item_id`, `year`, `month`),
   KEY `idx_inv_stock_item` (`item_id`)
@@ -1746,6 +1747,7 @@ CREATE TABLE IF NOT EXISTS `inv_in` (
   `create_by` BIGINT COMMENT '创建人ID',
   `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
+  `voucher_id` BIGINT DEFAULT NULL COMMENT '关联凭证ID',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_inv_in_no` (`in_no`),
   KEY `idx_inv_in_account_set` (`account_set_id`),
@@ -1787,6 +1789,7 @@ CREATE TABLE IF NOT EXISTS `inv_out` (
   `create_by` BIGINT COMMENT '创建人ID',
   `create_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
+  `voucher_id` BIGINT DEFAULT NULL COMMENT '关联凭证ID',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_inv_out_no` (`out_no`),
   KEY `idx_inv_out_account_set` (`account_set_id`),

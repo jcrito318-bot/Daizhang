@@ -64,6 +64,7 @@ public enum ErrorCode {
     VOUCHER_MONTH_BLANK(3020, "月份不能为空"),
     VOUCHER_YEAR_INVALID(3021, "年度格式不正确"),
     VOUCHER_MONTH_INVALID(3022, "月份必须在1-12之间"),
+    VOUCHER_ALREADY_CANCELED(3023, "凭证已作废"),
     VOUCHER_TEMPLATE_NOT_FOUND(3031, "凭证模板不存在"),
     VOUCHER_TEMPLATE_DETAIL_EMPTY(3032, "凭证模板明细不能为空"),
 
@@ -113,7 +114,10 @@ public enum ErrorCode {
     LEDGER_YEAR_INVALID(5003, "年度格式不正确"),
     LEDGER_MONTH_INVALID(5004, "月份必须在1-12之间"),
     LEDGER_DATE_RANGE_INVALID(5005, "开始日期不能大于结束日期"),
-    LEDGER_SUBJECT_ID_BLANK(5006, "科目ID不能为空");
+    LEDGER_SUBJECT_ID_BLANK(5006, "科目ID不能为空"),
+
+    // 并发控制相关 6001-6099
+    CONCURRENT_UPDATE_FAILED(6001, "数据已被修改，请刷新后重试");
 
     private final Integer code;
     private final String message;

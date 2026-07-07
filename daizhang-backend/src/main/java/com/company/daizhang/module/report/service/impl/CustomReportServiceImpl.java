@@ -10,6 +10,7 @@ import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.module.accountset.entity.AccountBalance;
 import com.company.daizhang.module.accountset.mapper.AccountBalanceMapper;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.report.dto.CustomReportRequest;
 import com.company.daizhang.module.report.entity.CustomReport;
 import com.company.daizhang.module.report.entity.CustomReportItem;
@@ -42,6 +43,7 @@ public class CustomReportServiceImpl extends ServiceImpl<CustomReportMapper, Cus
     private final CustomReportItemMapper customReportItemMapper;
     private final AccountBalanceMapper accountBalanceMapper;
     private final SubjectMapper subjectMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Override
     public PageResult<CustomReportVO> pageReports(String reportName, int pageNum, int pageSize) {
@@ -165,6 +167,9 @@ public class CustomReportServiceImpl extends ServiceImpl<CustomReportMapper, Cus
         if (report == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "自定义报表不存在");
         }
+
+        // IDOR越权校验：账套读权限
+        accountSetAccessService.checkAccess(accountSetId);
 
         // 查询报表项目
         LambdaQueryWrapper<CustomReportItem> itemWrapper = new LambdaQueryWrapper<>();

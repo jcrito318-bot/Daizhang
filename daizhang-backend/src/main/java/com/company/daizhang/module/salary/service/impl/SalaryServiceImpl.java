@@ -10,11 +10,13 @@ import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.salary.dto.*;
 import com.company.daizhang.module.salary.entity.Employee;
+import com.company.daizhang.module.salary.entity.SalaryFormula;
 import com.company.daizhang.module.salary.entity.SalaryItem;
 import com.company.daizhang.module.salary.entity.SalarySheet;
 import com.company.daizhang.module.salary.mapper.EmployeeMapper;
 import com.company.daizhang.module.salary.mapper.SalaryItemMapper;
 import com.company.daizhang.module.salary.mapper.SalarySheetMapper;
+import com.company.daizhang.module.salary.service.SalaryFormulaService;
 import com.company.daizhang.module.salary.service.SalaryService;
 import com.company.daizhang.module.salary.service.SocialSecurityConfigService;
 import com.company.daizhang.module.salary.service.SpecialDeductionService;
@@ -35,6 +37,7 @@ import com.company.daizhang.module.voucher.mapper.VoucherWordMapper;
 import com.company.daizhang.module.voucher.service.VoucherService;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,13 +45,16 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
  * 薪资服务实现
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalarySheet> implements SalaryService {
@@ -64,6 +70,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
     private final VoucherService voucherService;
     private final VoucherWordMapper voucherWordMapper;
     private final SalaryExportUtil salaryExportUtil;
+    private final SalaryFormulaService salaryFormulaService;
 
     // ==================== 员工管理 ====================
 
@@ -701,8 +708,9 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
 
         salarySheet.setTaxableIncome(taxableIncome);
 
-        // 计算个人所得税（使用七级超额累进税率）
-        BigDecimal incomeTax = calculateIncomeTax(taxableIncome);
+        // 计算个人所得税（使用累计预扣预缴法,符合《个人所得税法》2019年起规定）
+        BigDecimal incomeTax = calculateIncomeTaxByCumulative(
+                salarySheet.getEmployeeId(), salarySheet.getYear(), salarySheet.getMonth(), taxableIncome);
         salarySheet.setIncomeTax(incomeTax);
 
         // 实发工资 = 应发工资 - 社保 - 公积金 - 个人所得税
@@ -711,36 +719,126 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
     }
 
     /**
-     * 计算个人所得税（七级超额累进税率）
+     * 计算个人所得税（月度七级超额累进税率）
+     * <p>注意:自2019年起工资薪金个税应按累计预扣预缴法计算,本方法保留仅供兼容,
+     * 实际计算流程已改用 {@link #calculateIncomeTaxByCumulative}。</p>
      */
-    private BigDecimal calculateIncomeTax(BigDecimal taxableIncome) {
-        if (taxableIncome.compareTo(BigDecimal.ZERO) <= 0) {
+    private BigDecimal calculateIncomeTax(BigDecimal monthlyTaxableIncome) {
+        if (monthlyTaxableIncome.compareTo(BigDecimal.ZERO) <= 0) {
             return BigDecimal.ZERO;
         }
 
         BigDecimal tax;
         // 税率表（月度）
-        if (taxableIncome.compareTo(new BigDecimal("3000")) <= 0) {
-            tax = taxableIncome.multiply(new BigDecimal("0.03"));
-        } else if (taxableIncome.compareTo(new BigDecimal("12000")) <= 0) {
-            tax = taxableIncome.multiply(new BigDecimal("0.10")).subtract(new BigDecimal("210"));
-        } else if (taxableIncome.compareTo(new BigDecimal("25000")) <= 0) {
-            tax = taxableIncome.multiply(new BigDecimal("0.20")).subtract(new BigDecimal("1410"));
-        } else if (taxableIncome.compareTo(new BigDecimal("35000")) <= 0) {
-            tax = taxableIncome.multiply(new BigDecimal("0.25")).subtract(new BigDecimal("2660"));
-        } else if (taxableIncome.compareTo(new BigDecimal("55000")) <= 0) {
-            tax = taxableIncome.multiply(new BigDecimal("0.30")).subtract(new BigDecimal("4410"));
-        } else if (taxableIncome.compareTo(new BigDecimal("80000")) <= 0) {
-            tax = taxableIncome.multiply(new BigDecimal("0.35")).subtract(new BigDecimal("7160"));
+        if (monthlyTaxableIncome.compareTo(new BigDecimal("3000")) <= 0) {
+            tax = monthlyTaxableIncome.multiply(new BigDecimal("0.03"));
+        } else if (monthlyTaxableIncome.compareTo(new BigDecimal("12000")) <= 0) {
+            tax = monthlyTaxableIncome.multiply(new BigDecimal("0.10")).subtract(new BigDecimal("210"));
+        } else if (monthlyTaxableIncome.compareTo(new BigDecimal("25000")) <= 0) {
+            tax = monthlyTaxableIncome.multiply(new BigDecimal("0.20")).subtract(new BigDecimal("1410"));
+        } else if (monthlyTaxableIncome.compareTo(new BigDecimal("35000")) <= 0) {
+            tax = monthlyTaxableIncome.multiply(new BigDecimal("0.25")).subtract(new BigDecimal("2660"));
+        } else if (monthlyTaxableIncome.compareTo(new BigDecimal("55000")) <= 0) {
+            tax = monthlyTaxableIncome.multiply(new BigDecimal("0.30")).subtract(new BigDecimal("4410"));
+        } else if (monthlyTaxableIncome.compareTo(new BigDecimal("80000")) <= 0) {
+            tax = monthlyTaxableIncome.multiply(new BigDecimal("0.35")).subtract(new BigDecimal("7160"));
         } else {
-            tax = taxableIncome.multiply(new BigDecimal("0.45")).subtract(new BigDecimal("15160"));
+            tax = monthlyTaxableIncome.multiply(new BigDecimal("0.45")).subtract(new BigDecimal("15160"));
         }
 
         return tax.setScale(2, RoundingMode.HALF_UP);
     }
 
     /**
+     * 按累计预扣预缴法计算本月应扣个人所得税
+     * <p>公式:
+     * <pre>
+     * 累计应纳税所得额 = 截至上月累计应纳税所得额 + 本月应纳税所得额
+     * 累计应预扣预缴税额 = 累计应纳税所得额 × 预扣率 - 速算扣除数
+     * 本月应预扣预缴税额 = 累计应预扣预缴税额 - 截至上月已预扣预缴税额(不能为负)
+     * </pre></p>
+     *
+     * @param employeeId                员工ID,用于查询本年度历史工资记录
+     * @param year                      年度
+     * @param month                     月份
+     * @param currentMonthTaxableIncome 本月应纳税所得额(已扣除5000起征点及专项附加扣除等)
+     * @return 本月应预扣预缴税额
+     */
+    private BigDecimal calculateIncomeTaxByCumulative(Long employeeId, Integer year, Integer month,
+                                                     BigDecimal currentMonthTaxableIncome) {
+        if (currentMonthTaxableIncome == null || currentMonthTaxableIncome.compareTo(BigDecimal.ZERO) <= 0) {
+            currentMonthTaxableIncome = BigDecimal.ZERO;
+        }
+
+        // 查询本年度截至上月已确认/已发放的工资表,累加应纳税所得额和已预扣税额
+        BigDecimal yearToDateTaxableIncome = BigDecimal.ZERO;
+        BigDecimal yearToDateWithheldTax = BigDecimal.ZERO;
+        if (employeeId != null && year != null && month != null && month > 1) {
+            LambdaQueryWrapper<SalarySheet> wrapper = new LambdaQueryWrapper<>();
+            wrapper.eq(SalarySheet::getEmployeeId, employeeId)
+                   .eq(SalarySheet::getYear, year)
+                   .lt(SalarySheet::getMonth, month)
+                   .in(SalarySheet::getStatus, 1, 2); // 已确认或已发放
+            List<SalarySheet> historySheets = salarySheetMapper.selectList(wrapper);
+            for (SalarySheet hs : historySheets) {
+                if (hs.getTaxableIncome() != null) {
+                    yearToDateTaxableIncome = yearToDateTaxableIncome.add(hs.getTaxableIncome());
+                }
+                if (hs.getIncomeTax() != null) {
+                    yearToDateWithheldTax = yearToDateWithheldTax.add(hs.getIncomeTax());
+                }
+            }
+        }
+
+        // 累计应纳税所得额 = 截至上月累计 + 本月
+        BigDecimal cumulativeTaxableIncome = yearToDateTaxableIncome.add(currentMonthTaxableIncome);
+        if (cumulativeTaxableIncome.compareTo(BigDecimal.ZERO) <= 0) {
+            return BigDecimal.ZERO;
+        }
+
+        // 按年度累计预扣率表计算累计应预扣预缴税额
+        BigDecimal cumulativeTax = calculateCumulativeTaxByAnnualTable(cumulativeTaxableIncome);
+
+        // 本月应预扣预缴税额 = 累计应预扣 - 已预扣(不能为负,避免累计已预扣超过应预扣时产生负税)
+        BigDecimal currentMonthTax = cumulativeTax.subtract(yearToDateWithheldTax);
+        if (currentMonthTax.compareTo(BigDecimal.ZERO) < 0) {
+            currentMonthTax = BigDecimal.ZERO;
+        }
+
+        return currentMonthTax.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * 按年度累计预扣率表(居民个人工资薪金)计算累计应预扣预缴税额
+     */
+    private BigDecimal calculateCumulativeTaxByAnnualTable(BigDecimal cumulativeTaxableIncome) {
+        BigDecimal tax;
+        if (cumulativeTaxableIncome.compareTo(new BigDecimal("36000")) <= 0) {
+            tax = cumulativeTaxableIncome.multiply(new BigDecimal("0.03"));
+        } else if (cumulativeTaxableIncome.compareTo(new BigDecimal("144000")) <= 0) {
+            tax = cumulativeTaxableIncome.multiply(new BigDecimal("0.10")).subtract(new BigDecimal("2520"));
+        } else if (cumulativeTaxableIncome.compareTo(new BigDecimal("300000")) <= 0) {
+            tax = cumulativeTaxableIncome.multiply(new BigDecimal("0.20")).subtract(new BigDecimal("16920"));
+        } else if (cumulativeTaxableIncome.compareTo(new BigDecimal("420000")) <= 0) {
+            tax = cumulativeTaxableIncome.multiply(new BigDecimal("0.25")).subtract(new BigDecimal("31920"));
+        } else if (cumulativeTaxableIncome.compareTo(new BigDecimal("660000")) <= 0) {
+            tax = cumulativeTaxableIncome.multiply(new BigDecimal("0.30")).subtract(new BigDecimal("52920"));
+        } else if (cumulativeTaxableIncome.compareTo(new BigDecimal("960000")) <= 0) {
+            tax = cumulativeTaxableIncome.multiply(new BigDecimal("0.35")).subtract(new BigDecimal("85920"));
+        } else {
+            tax = cumulativeTaxableIncome.multiply(new BigDecimal("0.45")).subtract(new BigDecimal("181920"));
+        }
+
+        if (tax.compareTo(BigDecimal.ZERO) < 0) {
+            tax = BigDecimal.ZERO;
+        }
+        return tax;
+    }
+
+    /**
      * 根据薪资项目计算各项金额
+     * <p>基本工资取自员工档案,社保公积金按配置计算,津贴/奖金/扣款等浮动项
+     * 通过薪资公式(SalaryFormula)动态求值。</p>
      */
     private void calculateSalaryItems(SalarySheet salarySheet, List<SalaryItem> salaryItems) {
         // 基本工资从员工档案取
@@ -751,7 +849,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         }
         salarySheet.setBaseSalary(baseSalary);
 
-        // 津贴/奖金/扣款默认0(暂未实现按薪资项目动态计算)
+        // 津贴/奖金/扣款默认0,后续若有公式则覆盖
         if (salarySheet.getAllowance() == null) {
             salarySheet.setAllowance(BigDecimal.ZERO);
         }
@@ -781,6 +879,142 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         }
         salarySheet.setSocialSecurity(socialSecurity);
         salarySheet.setHousingFund(housingFund);
+
+        // 按薪资项目公式动态计算:查询该账套启用的公式并求值
+        evaluateSalaryFormulas(salarySheet, salaryItems, baseSalary, socialSecurity, housingFund);
+    }
+
+    /**
+     * 查询账套启用的薪资公式并按优先级逐个求值,将结果回写到工资表对应字段
+     *
+     * @param salarySheet     工资表
+     * @param salaryItems     账套下启用的薪资项目
+     * @param baseSalary      已计算的基本工资
+     * @param socialSecurity  已计算的社保个人部分
+     * @param housingFund     已计算的公积金个人部分
+     */
+    private void evaluateSalaryFormulas(SalarySheet salarySheet, List<SalaryItem> salaryItems,
+                                        BigDecimal baseSalary, BigDecimal socialSecurity, BigDecimal housingFund) {
+        if (salarySheet.getAccountSetId() == null) {
+            return;
+        }
+
+        // 查询该账套启用的薪资公式,按优先级升序排序(优先级小的先算,支持公式链式引用)
+        LambdaQueryWrapper<SalaryFormula> formulaWrapper = new LambdaQueryWrapper<>();
+        formulaWrapper.eq(SalaryFormula::getAccountSetId, salarySheet.getAccountSetId())
+                      .eq(SalaryFormula::getStatus, 1)
+                      .orderByAsc(SalaryFormula::getPriority);
+        List<SalaryFormula> formulas = salaryFormulaService.list(formulaWrapper);
+        if (formulas.isEmpty()) {
+            return;
+        }
+
+        // 收集已配置薪资项目编码集合,公式目标项必须命中已配置项目才处理
+        Set<String> itemCodeSet = salaryItems.stream()
+                .map(SalaryItem::getItemCode)
+                .filter(c -> c != null && !c.trim().isEmpty())
+                .collect(Collectors.toSet());
+
+        // 构建公式上下文:包含当前已知的薪资项值(同时提供下划线和驼峰两种命名,兼容不同公式写法)
+        Map<String, BigDecimal> context = new HashMap<>();
+        context.put("base_salary", baseSalary);
+        context.put("baseSalary", baseSalary);
+        context.put("allowance", salarySheet.getAllowance());
+        context.put("bonus", salarySheet.getBonus());
+        context.put("deduction", salarySheet.getDeduction());
+        context.put("social_security", socialSecurity);
+        context.put("socialSecurity", socialSecurity);
+        context.put("housing_fund", housingFund);
+        context.put("housingFund", housingFund);
+
+        // 按优先级逐个求值,结果回写上下文以支持公式链式引用
+        for (SalaryFormula formula : formulas) {
+            String targetItem = formula.getTargetItem();
+            String expression = formula.getFormulaExpression();
+            if (targetItem == null || targetItem.trim().isEmpty()
+                    || expression == null || expression.trim().isEmpty()) {
+                continue;
+            }
+            // 仅处理目标项为已配置薪资项目的公式
+            if (!itemCodeSet.contains(targetItem)) {
+                continue;
+            }
+            try {
+                BigDecimal result = salaryFormulaService.evaluateFormula(expression, context);
+                if (result == null) {
+                    result = BigDecimal.ZERO;
+                }
+                // 回写上下文(同时写原编码和驼峰形式,方便后续公式引用)
+                context.put(targetItem, result);
+                context.put(toCamelCase(targetItem), result);
+                // 回写到工资表对应字段
+                applyFormulaResultToSheet(salarySheet, targetItem, result);
+            } catch (Exception e) {
+                // 公式计算异常(如除零、变量未定义)时记日志并跳过,不中断整体计算
+                log.warn("薪资公式计算失败,公式名称:{},目标项:{},表达式:{},错误:{}",
+                        formula.getFormulaName(), targetItem, expression, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * 将公式计算结果回写到工资表对应字段
+     * 支持下划线和驼峰命名的项目编码
+     */
+    private void applyFormulaResultToSheet(SalarySheet salarySheet, String itemCode, BigDecimal value) {
+        if (itemCode == null || value == null) {
+            return;
+        }
+        String code = itemCode.trim();
+        switch (code) {
+            case "base_salary":
+            case "baseSalary":
+                salarySheet.setBaseSalary(value);
+                break;
+            case "allowance":
+                salarySheet.setAllowance(value);
+                break;
+            case "bonus":
+                salarySheet.setBonus(value);
+                break;
+            case "deduction":
+                salarySheet.setDeduction(value);
+                break;
+            case "social_security":
+            case "socialSecurity":
+                salarySheet.setSocialSecurity(value);
+                break;
+            case "housing_fund":
+            case "housingFund":
+                salarySheet.setHousingFund(value);
+                break;
+            default:
+                // 未知薪资项(如个税、实发工资等由后续流程计算)不回写
+                break;
+        }
+    }
+
+    /**
+     * 将下划线命名转换为驼峰命名(如 base_salary → baseSalary)
+     */
+    private String toCamelCase(String name) {
+        if (name == null || name.isEmpty()) {
+            return name;
+        }
+        StringBuilder sb = new StringBuilder();
+        boolean upperNext = false;
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (c == '_') {
+                upperNext = true;
+            } else if (upperNext) {
+                sb.append(Character.toUpperCase(c));
+                upperNext = false;
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     /**

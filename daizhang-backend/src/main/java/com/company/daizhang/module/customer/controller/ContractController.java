@@ -62,6 +62,27 @@ public class ContractController {
         return Result.success();
     }
 
+    @Operation(summary = "激活合同（草稿→执行中）")
+    @PutMapping("/{id}/activate")
+    public Result<Void> activate(@PathVariable Long id) {
+        contractService.activateContract(id);
+        return Result.success();
+    }
+
+    @Operation(summary = "完结合同（执行中→已完成）")
+    @PutMapping("/{id}/complete")
+    public Result<Void> complete(@PathVariable Long id) {
+        contractService.completeContract(id);
+        return Result.success();
+    }
+
+    @Operation(summary = "终止合同（执行中/已完成→已终止）")
+    @PutMapping("/{id}/terminate")
+    public Result<Void> terminate(@PathVariable Long id) {
+        contractService.terminateContract(id);
+        return Result.success();
+    }
+
     @Operation(summary = "删除合同")
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {

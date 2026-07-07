@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -51,27 +52,31 @@ public class SysRoleController {
     
     @Operation(summary = "创建角色")
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> create(@Valid @RequestBody RoleCreateRequest request) {
         roleService.createRole(request);
         return Result.success();
     }
-    
+
     @Operation(summary = "更新角色")
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody RoleUpdateRequest request) {
         roleService.updateRole(id, request);
         return Result.success();
     }
-    
+
     @Operation(summary = "删除角色")
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         roleService.deleteRole(id);
         return Result.success();
     }
-    
+
     @Operation(summary = "分配角色菜单权限")
     @PutMapping("/{id}/menus")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> assignMenus(@PathVariable Long id, @Valid @RequestBody RoleMenuAssignRequest request) {
         roleService.assignRoleMenus(id, request);
         return Result.success();

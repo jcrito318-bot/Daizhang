@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.biz.entity.ServiceFlowNode;
 import com.company.daizhang.module.biz.entity.ServiceTask;
 import com.company.daizhang.module.biz.mapper.ServiceFlowNodeMapper;
@@ -24,8 +25,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -37,6 +40,7 @@ import java.util.stream.Collectors;
 public class ServiceFlowServiceImpl extends ServiceImpl<ServiceFlowNodeMapper, ServiceFlowNode> implements ServiceFlowService {
 
     private final ServiceTaskMapper serviceTaskMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Override
     public List<ServiceFlowNodeVO> listNodes() {
@@ -109,8 +113,19 @@ public class ServiceFlowServiceImpl extends ServiceImpl<ServiceFlowNodeMapper, S
         }
         Page<ServiceTask> page = new Page<>(pageNum, pageSize);
         LambdaQueryWrapper<ServiceTask> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(accountSetId != null, ServiceTask::getAccountSetId, accountSetId)
-               .eq(year != null, ServiceTask::getYear, year)
+        // IDOR治理:显式指定账套时校验访问权并按该账套过滤;未指定时按当前用户可见账套集合过滤
+        // (admin返回null表示不限制;普通用户返回其可访问账套ID集合)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accountSetId != null) {
+            accountSetAccessService.checkAccess(accountSetId);
+            wrapper.eq(ServiceTask::getAccountSetId, accountSetId);
+        } else if (accessibleIds != null) {
+            if (accessibleIds.isEmpty()) {
+                return new PageResult<>(Collections.emptyList(), 0L, pageNum, pageSize);
+            }
+            wrapper.in(ServiceTask::getAccountSetId, accessibleIds);
+        }
+        wrapper.eq(year != null, ServiceTask::getYear, year)
                .eq(month != null, ServiceTask::getMonth, month)
                .eq(taskStatus != null, ServiceTask::getTaskStatus, taskStatus)
                .orderByDesc(ServiceTask::getCreateTime);
@@ -128,6 +143,8 @@ public class ServiceFlowServiceImpl extends ServiceImpl<ServiceFlowNodeMapper, S
         if (entity.getAccountSetId() == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "账套ID不能为空");
         }
+        // IDOR治理:校验当前用户对该账套的所有者权限
+        accountSetAccessService.checkOwner(entity.getAccountSetId());
         // 业务校验：年度不能为空
         if (entity.getYear() == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "年度不能为空");
@@ -174,6 +191,8 @@ public class ServiceFlowServiceImpl extends ServiceImpl<ServiceFlowNodeMapper, S
         if (existing == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "服务任务不存在");
         }
+        // IDOR治理:校验当前用户对该任务所属账套的所有者权限
+        accountSetAccessService.checkOwner(existing.getAccountSetId());
         // 保护状态字段:updateTask不允许直接修改taskStatus和完成时间,
         // 状态变更必须走 assignTask/completeTask 专用方法,否则可绕过状态机任意穿越状态
         entity.setTaskStatus(existing.getTaskStatus());
@@ -202,6 +221,8 @@ public class ServiceFlowServiceImpl extends ServiceImpl<ServiceFlowNodeMapper, S
         if (existing == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "服务任务不存在");
         }
+        // IDOR治理:校验当前用户对该任务所属账套的所有者权限
+        accountSetAccessService.checkOwner(existing.getAccountSetId());
         existing.setAssigneeId(assigneeId);
         existing.setAssigneeName(assigneeName);
         // 分配后状态置为进行中
@@ -222,6 +243,8 @@ public class ServiceFlowServiceImpl extends ServiceImpl<ServiceFlowNodeMapper, S
         if (existing == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "服务任务不存在");
         }
+        // IDOR治理:校验当前用户对该任务所属账套的所有者权限
+        accountSetAccessService.checkOwner(existing.getAccountSetId());
         // 不能重复完成
         if (existing.getTaskStatus() != null && existing.getTaskStatus() == 2) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "任务已完成，不能重复完成");
@@ -234,7 +257,12 @@ public class ServiceFlowServiceImpl extends ServiceImpl<ServiceFlowNodeMapper, S
 
     @Override
     public ServiceTask getTaskById(Long id) {
-        return serviceTaskMapper.selectById(id);
+        ServiceTask task = serviceTaskMapper.selectById(id);
+        if (task != null) {
+            // IDOR治理:校验当前用户对该任务所属账套的访问权
+            accountSetAccessService.checkAccess(task.getAccountSetId());
+        }
+        return task;
     }
 
     @Override
@@ -247,6 +275,8 @@ public class ServiceFlowServiceImpl extends ServiceImpl<ServiceFlowNodeMapper, S
         if (existing == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "服务任务不存在");
         }
+        // IDOR治理:校验当前用户对该任务所属账套的所有者权限
+        accountSetAccessService.checkOwner(existing.getAccountSetId());
         serviceTaskMapper.deleteById(id);
         log.info("删除服务任务成功，任务ID: {}", id);
     }
@@ -258,6 +288,14 @@ public class ServiceFlowServiceImpl extends ServiceImpl<ServiceFlowNodeMapper, S
         wrapper.eq(year != null, ServiceTask::getYear, year)
                 .eq(month != null, ServiceTask::getMonth, month)
                 .isNotNull(ServiceTask::getAssigneeId);
+        // IDOR治理:按当前用户可访问账套集合过滤(admin返回null表示不限制)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds != null) {
+            if (accessibleIds.isEmpty()) {
+                return new ArrayList<>();
+            }
+            wrapper.in(ServiceTask::getAccountSetId, accessibleIds);
+        }
         List<ServiceTask> tasks = serviceTaskMapper.selectList(wrapper);
 
         if (tasks.isEmpty()) {

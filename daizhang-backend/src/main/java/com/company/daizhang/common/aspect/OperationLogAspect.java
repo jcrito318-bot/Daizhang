@@ -62,6 +62,8 @@ public class OperationLogAspect {
             if (args != null && args.length > 0) {
                 try {
                     String params = JSONUtil.toJsonStr(args);
+                    // 脱敏敏感字段(密码/token/密钥等),防止明文持久化到 sys_operation_log.params
+                    params = maskSensitiveFields(params);
                     operationLog.setParams(StrUtil.sub(params, 0, 2000));
                 } catch (Exception e) {
                     operationLog.setParams("参数序列化失败");
@@ -118,7 +120,24 @@ public class OperationLogAspect {
         if (StrUtil.isNotBlank(ip) && ip.contains(",")) {
             ip = ip.split(",")[0].trim();
         }
-        
+
         return ip;
+    }
+
+    /**
+     * 对JSON字符串中的敏感字段值进行脱敏,替换为 "***"。
+     * 兼容字段名与值之间可能存在的空格(允许冒号两侧有空白)。
+     * 采用大小写不敏感的包含匹配,覆盖以下字段(及其变体,如 passwordHash/accessToken/refreshToken/apiKeySecret 等):
+     * password / passwd / pwd / token / secret / apikey / api_key / credential
+     */
+    private String maskSensitiveFields(String params) {
+        if (StrUtil.isBlank(params)) {
+            return params;
+        }
+        // 正则匹配 "fieldName" : "value" 形式(允许冒号两侧有空白),将value替换为 ***
+        // (?i) 大小写不敏感;字段名包含 password|passwd|pwd|token|secret|apikey|api_key|credential 即命中
+        return params.replaceAll(
+                "(?i)(\"(?:.*(?:password|passwd|pwd|token|secret|apikey|api_key|credential).*)\"\\s*:\\s*)\"[^\"]*\"",
+                "$1\"***\"");
     }
 }

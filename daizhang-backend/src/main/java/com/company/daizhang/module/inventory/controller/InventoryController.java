@@ -2,6 +2,7 @@ package com.company.daizhang.module.inventory.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.company.daizhang.common.annotation.OperationLog;
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.inventory.dto.*;
 import com.company.daizhang.module.inventory.entity.InventoryItem;
@@ -39,6 +40,7 @@ public class InventoryController {
     @Operation(summary = "新增商品")
     @PostMapping("/item")
     @OperationLog("新增商品")
+    @RequireAccountSetAccess(RequireAccountSetAccess.AccessLevel.OWNER)
     public Result<Long> createItem(@RequestBody InventoryItemCreateRequest request) {
         return Result.success(inventoryService.createItem(request));
     }
@@ -86,6 +88,7 @@ public class InventoryController {
     @Operation(summary = "新增入库单")
     @PostMapping("/in")
     @OperationLog("新增入库单")
+    @RequireAccountSetAccess(RequireAccountSetAccess.AccessLevel.OWNER)
     public Result<Long> createIn(@RequestBody InventoryInCreateRequest request) {
         return Result.success(inventoryService.createIn(request));
     }
@@ -129,6 +132,7 @@ public class InventoryController {
     @Operation(summary = "新增出库单")
     @PostMapping("/out")
     @OperationLog("新增出库单")
+    @RequireAccountSetAccess(RequireAccountSetAccess.AccessLevel.OWNER)
     public Result<Long> createOut(@RequestBody InventoryOutCreateRequest request) {
         return Result.success(inventoryService.createOut(request));
     }

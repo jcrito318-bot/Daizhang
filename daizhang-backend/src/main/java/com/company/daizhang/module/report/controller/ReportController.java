@@ -98,6 +98,46 @@ public class ReportController {
         reportService.exportSubjectBalanceTable(request, response);
     }
 
+    @Operation(summary = "导出资产负债表PDF")
+    @GetMapping("/balance-sheet/pdf")
+    @RequireAccountSetAccess
+    public void exportBalanceSheetPdf(@RequestParam Long accountSetId,
+                                      @RequestParam Integer year,
+                                      @RequestParam Integer month,
+                                      HttpServletResponse response) {
+        reportService.exportBalanceSheetPdf(accountSetId, year, month, response);
+    }
+
+    @Operation(summary = "导出利润表PDF")
+    @GetMapping("/income-statement/pdf")
+    @RequireAccountSetAccess
+    public void exportIncomeStatementPdf(@RequestParam Long accountSetId,
+                                         @RequestParam Integer year,
+                                         @RequestParam Integer month,
+                                         HttpServletResponse response) {
+        reportService.exportIncomeStatementPdf(accountSetId, year, month, response);
+    }
+
+    @Operation(summary = "导出现金流量表PDF")
+    @GetMapping("/cash-flow-statement/pdf")
+    @RequireAccountSetAccess
+    public void exportCashFlowStatementPdf(@RequestParam Long accountSetId,
+                                           @RequestParam Integer year,
+                                           @RequestParam Integer month,
+                                           HttpServletResponse response) {
+        reportService.exportCashFlowStatementPdf(accountSetId, year, month, response);
+    }
+
+    @Operation(summary = "导出科目余额表PDF")
+    @GetMapping("/subject-balance-table/pdf")
+    @RequireAccountSetAccess
+    public void exportSubjectBalanceTablePdf(@RequestParam Long accountSetId,
+                                             @RequestParam Integer year,
+                                             @RequestParam Integer month,
+                                             HttpServletResponse response) {
+        reportService.exportSubjectBalanceTablePdf(accountSetId, year, month, response);
+    }
+
     @Operation(summary = "查询现金流量表调整项列表")
     @GetMapping("/cash-flow-adjustment/list")
     @RequireAccountSetAccess
@@ -170,5 +210,29 @@ public class ReportController {
                                                                        @RequestParam Integer month) {
         DepartmentExpenseReportVO result = reportService.departmentExpenseReport(accountSetId, year, month);
         return Result.success(result);
+    }
+
+    @Operation(summary = "导出所有者权益变动表Excel")
+    @GetMapping("/equity-change-statement/export")
+    public void exportEquityChangeStatement(ReportQueryRequest request, HttpServletResponse response) {
+        reportService.exportEquityChangeStatement(request, response);
+    }
+
+    @Operation(summary = "导出所有者权益变动表PDF")
+    @GetMapping("/equity-change-statement/pdf")
+    public void exportEquityChangeStatementPdf(ReportQueryRequest request, HttpServletResponse response) {
+        reportService.exportEquityChangeStatementPdf(request, response);
+    }
+
+    @Operation(summary = "导出部门费用分析表Excel")
+    @GetMapping("/department-expense/export")
+    public void exportDepartmentExpense(ReportQueryRequest request, HttpServletResponse response) {
+        reportService.exportDepartmentExpense(request, response);
+    }
+
+    @Operation(summary = "导出部门费用分析表PDF")
+    @GetMapping("/department-expense/pdf")
+    public void exportDepartmentExpensePdf(ReportQueryRequest request, HttpServletResponse response) {
+        reportService.exportDepartmentExpensePdf(request, response);
     }
 }

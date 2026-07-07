@@ -177,6 +177,51 @@ public class AccountSetServiceImpl extends ServiceImpl<AccountSetMapper, Account
 
         log.info("更新账套成功，账套ID: {}", id);
     }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void enableAccountSet(Long id) {
+        AccountSet accountSet = this.getById(id);
+        if (accountSet == null) {
+            throw new BusinessException(ErrorCode.ACCOUNT_SET_NOT_FOUND);
+        }
+        // IDOR治理:启用账套须所有者权限
+        accountSetAccessService.checkOwner(id);
+        accountSet.setStatus(1);
+        this.updateById(accountSet);
+        log.info("启用账套成功，账套ID: {}", id);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void disableAccountSet(Long id) {
+        AccountSet accountSet = this.getById(id);
+        if (accountSet == null) {
+            throw new BusinessException(ErrorCode.ACCOUNT_SET_NOT_FOUND);
+        }
+        // IDOR治理:停用账套须所有者权限
+        accountSetAccessService.checkOwner(id);
+
+        // 业务校验：账套存在未结账业务(未结账期间或未审核/未过账凭证)时不允许停用,避免遗漏在途业务
+        LambdaQueryWrapper<AccountPeriod> periodWrapper = new LambdaQueryWrapper<>();
+        periodWrapper.eq(AccountPeriod::getAccountSetId, id)
+                .eq(AccountPeriod::getStatus, 0); // 未结账
+        if (periodMapper.selectCount(periodWrapper) > 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "账套存在未结账业务，无法停用");
+        }
+
+        // 校验是否存在未审核(0)/已审核未过账(1)的凭证(已过账=2,已作废不在此范围)
+        LambdaQueryWrapper<Voucher> voucherWrapper = new LambdaQueryWrapper<>();
+        voucherWrapper.eq(Voucher::getAccountSetId, id)
+                .in(Voucher::getStatus, 0, 1);
+        if (voucherMapper.selectCount(voucherWrapper) > 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "账套存在未结账业务，无法停用");
+        }
+
+        accountSet.setStatus(0);
+        this.updateById(accountSet);
+        log.info("停用账套成功，账套ID: {}", id);
+    }
     
     @Override
     @Transactional(rollbackFor = Exception.class)

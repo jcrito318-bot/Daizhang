@@ -417,8 +417,10 @@ public class AmortizationServiceImpl implements AmortizationService {
 
     /**
      * 校验指定摊销对象在指定期间是否已生成过摊销凭证。
-     * 通过查询该期间的凭证中是否存在摘要以"长期待摊费用摊销-"开头且贷方科目为1801的明细来判断。
+     * 通过查询该期间的系统生成凭证中是否存在摘要精确匹配且贷方科目为该摊销对象对应科目的明细来判断。
      * 此方法不依赖额外字段,避免修改数据库schema。
+     * 注意:摘要构造须与 generateAmortizationVoucher 完全一致(空名称使用"未命名"),
+     * 否则空名称摊销对象的校验会与生成时摘要不一致,导致重复生成凭证。
      */
     private boolean existsAmortizationVoucher(Long amortizationId, Integer year, Integer month) {
         Amortization amortization = amortizationMapper.selectById(amortizationId);
@@ -437,12 +439,29 @@ public class AmortizationServiceImpl implements AmortizationService {
             return false;
         }
         List<Long> voucherIds = vouchers.stream().map(Voucher::getId).collect(Collectors.toList());
-        // 查询这些凭证的明细,判断是否存在该摊销对象的摊销凭证(精确匹配"长期待摊费用摊销-{摊销对象名称}")
-        // 原like"长期待摊费用摊销-"会误判其他摊销对象为已存在,导致同期只能摊销一个对象
-        String exactSummary = "长期待摊费用摊销-" + amortization.getAmortizationName();
+
+        // 摘要构造须与 generateAmortizationVoucher 完全一致(空名称使用"未命名"),
+        // 避免 amortizationName 为 null/空白时拼接出"长期待摊费用摊销-null"/"...-"与生成时的"...-未命名"不一致,
+        // 导致校验失效、重复生成凭证
+        String amortizationName = StrUtil.isBlank(amortization.getAmortizationName())
+                ? "未命名" : amortization.getAmortizationName();
+        String exactSummary = "长期待摊费用摊销-" + amortizationName;
+
+        // 用摊销贷方科目作为附加匹配条件(与生成凭证时一致),降低仅靠名称匹配的脆弱性
+        Long creditSubjectId = amortization.getSubjectId();
+        if (creditSubjectId == null) {
+            Subject subject = subjectMapper.selectOne(new LambdaQueryWrapper<Subject>()
+                    .eq(Subject::getAccountSetId, accountSetId)
+                    .eq(Subject::getCode, CODE_LONG_TERM_PREPAID));
+            if (subject != null) {
+                creditSubjectId = subject.getId();
+            }
+        }
+
         LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
         detailWrapper.in(VoucherDetail::getVoucherId, voucherIds)
                 .eq(VoucherDetail::getSummary, exactSummary)
+                .eq(creditSubjectId != null, VoucherDetail::getSubjectId, creditSubjectId)
                 .gt(VoucherDetail::getCredit, BigDecimal.ZERO);
         Long count = voucherDetailMapper.selectCount(detailWrapper);
         return count != null && count > 0;
@@ -531,14 +550,45 @@ public class AmortizationServiceImpl implements AmortizationService {
     }
 
     private String generateVoucherNo(Long accountSetId, Integer year, Integer month) {
-        // 查询该期间已有凭证数+1，排除TMP-临时号，避免序号偏大
+        // 查询该期间所有非TMP-前缀的凭证号列表,用max+1生成凭证号
+        // 修复:原count+1在存在断号(作废/删除凭证)时会小于max序号,导致与现有凭证号重复
         LambdaQueryWrapper<Voucher> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Voucher::getAccountSetId, accountSetId)
                .eq(Voucher::getYear, year)
                .eq(Voucher::getMonth, month)
                .notLike(Voucher::getVoucherNo, "TMP-%");
-        Long count = voucherMapper.selectCount(wrapper);
-        return String.format("%d-%02d-%03d", year, month, count + 1);
+        List<Voucher> vouchers = voucherMapper.selectList(wrapper);
+
+        int maxSeq = 0;
+        if (vouchers != null && !vouchers.isEmpty()) {
+            // Java层提取序号取最大值,避免数据库CAST/SUBSTRING兼容性问题(凭证号含两个'-')
+            maxSeq = vouchers.stream()
+                    .map(Voucher::getVoucherNo)
+                    .filter(StrUtil::isNotBlank)
+                    .mapToInt(this::extractVoucherSequence)
+                    .max()
+                    .orElse(0);
+        }
+        return String.format("%d-%02d-%03d", year, month, maxSeq + 1);
+    }
+
+    /**
+     * 从凭证号中提取序号
+     * 凭证号格式：2026-01-001，取最后一个'-'后的部分
+     */
+    private int extractVoucherSequence(String voucherNo) {
+        if (StrUtil.isBlank(voucherNo)) {
+            return 0;
+        }
+        int lastDash = voucherNo.lastIndexOf('-');
+        if (lastDash < 0 || lastDash == voucherNo.length() - 1) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(voucherNo.substring(lastDash + 1));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     private AmortizationVO convertToVO(Amortization amortization) {

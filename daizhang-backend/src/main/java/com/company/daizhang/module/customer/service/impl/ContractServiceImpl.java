@@ -24,8 +24,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -49,6 +51,15 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
                .eq(StrUtil.isNotBlank(request.getContractType()), ServiceContract::getContractType, request.getContractType())
                .eq(request.getStatus() != null, ServiceContract::getStatus, request.getStatus())
                .orderByDesc(ServiceContract::getCreateTime);
+
+        // IDOR治理:仅返回当前用户可访问账套下的合同(超级管理员返回null表示不限制)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds != null) {
+            if (accessibleIds.isEmpty()) {
+                return new PageResult<>(Collections.emptyList(), 0L, request.getPageNum(), request.getPageSize());
+            }
+            wrapper.in(ServiceContract::getAccountSetId, accessibleIds);
+        }
 
         Page<ServiceContract> result = this.page(page, wrapper);
 
@@ -123,6 +134,57 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
         BeanUtil.copyProperties(request, contract, cn.hutool.core.bean.copier.CopyOptions.create().ignoreNullValue());
         contract.setId(id);
         contract.setStatus(originalStatus);
+        this.updateById(contract);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void activateContract(Long id) {
+        ServiceContract contract = this.getById(id);
+        if (contract == null) {
+            throw new BusinessException(404, "合同不存在");
+        }
+        // IDOR治理:校验当前用户对该合同所属账套的所有者权限
+        accountSetAccessService.checkOwner(contract.getAccountSetId());
+        // 激活仅允许草稿(0)状态
+        if (contract.getStatus() == null || contract.getStatus() != 0) {
+            throw new BusinessException("合同当前状态不允许此操作");
+        }
+        contract.setStatus(1);
+        this.updateById(contract);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void completeContract(Long id) {
+        ServiceContract contract = this.getById(id);
+        if (contract == null) {
+            throw new BusinessException(404, "合同不存在");
+        }
+        // IDOR治理:校验当前用户对该合同所属账套的所有者权限
+        accountSetAccessService.checkOwner(contract.getAccountSetId());
+        // 完结仅允许执行中(1)状态
+        if (contract.getStatus() == null || contract.getStatus() != 1) {
+            throw new BusinessException("合同当前状态不允许此操作");
+        }
+        contract.setStatus(2);
+        this.updateById(contract);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void terminateContract(Long id) {
+        ServiceContract contract = this.getById(id);
+        if (contract == null) {
+            throw new BusinessException(404, "合同不存在");
+        }
+        // IDOR治理:校验当前用户对该合同所属账套的所有者权限
+        accountSetAccessService.checkOwner(contract.getAccountSetId());
+        // 终止允许执行中(1)或已完成(2)状态
+        if (contract.getStatus() == null || (contract.getStatus() != 1 && contract.getStatus() != 2)) {
+            throw new BusinessException("合同当前状态不允许此操作");
+        }
+        contract.setStatus(3);
         this.updateById(contract);
     }
 

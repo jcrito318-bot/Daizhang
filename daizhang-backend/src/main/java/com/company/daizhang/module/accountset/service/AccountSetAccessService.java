@@ -1,5 +1,8 @@
 package com.company.daizhang.module.accountset.service;
 
+import com.company.daizhang.module.accountset.vo.UserAccountSetVO;
+
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -41,4 +44,40 @@ public interface AccountSetAccessService {
      * @param userId       用户ID
      */
     void bindOwner(Long accountSetId, Long userId);
+
+    /**
+     * 为用户分配账套访问权限(仅账套OWNER或管理员可操作)。
+     * 已存在关系则更新角色,不存在则新增。
+     *
+     * @param userId       被分配用户ID
+     * @param accountSetId 账套ID
+     * @param roleType     角色类型 OWNER/ACCOUNTANT/VIEWER
+     */
+    void assignAccountSet(Long userId, Long accountSetId, String roleType);
+
+    /**
+     * 移除用户的账套访问权限(仅账套OWNER或管理员可操作)。
+     * 不能移除OWNER关系,防止账套无主。
+     *
+     * @param userId       被移除用户ID
+     * @param accountSetId 账套ID
+     */
+    void revokeAccountSet(Long userId, Long accountSetId);
+
+    /**
+     * 查询账套下的所有用户及角色(需对该账套有访问权)。
+     *
+     * @param accountSetId 账套ID
+     * @return 用户账套关系列表(含用户名/真实姓名)
+     */
+    List<UserAccountSetVO> listAccountSetUsers(Long accountSetId);
+
+    /**
+     * 查询用户可访问的所有账套及角色。
+     * 管理员可查任意用户,普通用户只能查自己。
+     *
+     * @param userId 用户ID
+     * @return 用户账套关系列表(含账套名称)
+     */
+    List<UserAccountSetVO> listUserAccountSets(Long userId);
 }

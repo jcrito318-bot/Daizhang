@@ -150,6 +150,27 @@ public class LedgerController {
         writeExcelResponse(response, data, "科目余额表_" + year + "年" + start + "-" + end + "月.xlsx");
     }
 
+    @Operation(summary = "导出现金日记账Excel")
+    @GetMapping("/cash-journal/export")
+    @RequireAccountSetAccess
+    public void exportCashJournal(@RequestParam Long accountSetId,
+                                  @RequestParam Integer year,
+                                  @RequestParam Integer month,
+                                  HttpServletResponse response) {
+        ledgerService.exportCashJournal(accountSetId, year, month, response);
+    }
+
+    @Operation(summary = "导出银行日记账Excel")
+    @GetMapping("/bank-journal/export")
+    @RequireAccountSetAccess
+    public void exportBankJournal(@RequestParam Long accountSetId,
+                                  @RequestParam Integer year,
+                                  @RequestParam Integer month,
+                                  @RequestParam(required = false) Long bankAccountId,
+                                  HttpServletResponse response) {
+        ledgerService.exportBankJournal(accountSetId, year, month, bankAccountId, response);
+    }
+
     @Operation(summary = "账龄分析")
     @GetMapping("/aging-analysis")
     @RequireAccountSetAccess

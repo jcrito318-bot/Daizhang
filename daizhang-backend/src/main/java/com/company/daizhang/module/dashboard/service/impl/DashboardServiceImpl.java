@@ -1,8 +1,11 @@
 package com.company.daizhang.module.dashboard.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
+import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.module.accountset.entity.AccountSet;
 import com.company.daizhang.module.accountset.mapper.AccountSetMapper;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.biz.entity.ServiceTask;
 import com.company.daizhang.module.biz.mapper.ServiceTaskMapper;
 import com.company.daizhang.module.dashboard.service.DashboardService;
@@ -31,6 +34,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class DashboardServiceImpl implements DashboardService {
 
+    private final AccountSetAccessService accountSetAccessService;
     private final AccountSetMapper accountSetMapper;
     private final ServiceTaskMapper serviceTaskMapper;
     private final VoucherMapper voucherMapper;
@@ -45,14 +49,19 @@ public class DashboardServiceImpl implements DashboardService {
     public DashboardVO getDashboard() {
         DashboardVO vo = new DashboardVO();
 
+        // 数据级隔离:仅查询当前用户可访问账套及其关联数据(超级管理员返回null表示不限制)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+
         // 1. 查询账套（限量500防止全量加载OOM）
         LambdaQueryWrapper<AccountSet> asWrapper = new LambdaQueryWrapper<>();
+        applyAccessFilter(asWrapper, AccountSet::getId, accessibleIds);
         asWrapper.orderByDesc(AccountSet::getUpdateTime)
                  .last("LIMIT 500");
         List<AccountSet> accountSets = accountSetMapper.selectList(asWrapper);
 
         // 2. 查询待办服务任务（taskStatus < 2,限量500防止OOM）
         LambdaQueryWrapper<ServiceTask> taskWrapper = new LambdaQueryWrapper<>();
+        applyAccessFilter(taskWrapper, ServiceTask::getAccountSetId, accessibleIds);
         taskWrapper.lt(ServiceTask::getTaskStatus, 2)
                 .orderByDesc(ServiceTask::getCreateTime)
                 .last("LIMIT 500");
@@ -62,11 +71,14 @@ public class DashboardServiceImpl implements DashboardService {
                 .collect(Collectors.groupingBy(ServiceTask::getAccountSetId));
 
         // 已完成服务任务数（status==2）用count统计,不加载明细
-        long completedTaskCount = serviceTaskMapper.selectCount(new LambdaQueryWrapper<ServiceTask>()
-                .eq(ServiceTask::getTaskStatus, 2));
+        LambdaQueryWrapper<ServiceTask> completedTaskWrapper = new LambdaQueryWrapper<ServiceTask>()
+                .eq(ServiceTask::getTaskStatus, 2);
+        applyAccessFilter(completedTaskWrapper, ServiceTask::getAccountSetId, accessibleIds);
+        long completedTaskCount = serviceTaskMapper.selectCount(completedTaskWrapper);
 
         // 3. 查询未审核凭证（status=0,限量500防止OOM）
         LambdaQueryWrapper<Voucher> voucherWrapper = new LambdaQueryWrapper<>();
+        applyAccessFilter(voucherWrapper, Voucher::getAccountSetId, accessibleIds);
         voucherWrapper.eq(Voucher::getStatus, 0)
                 .orderByDesc(Voucher::getCreateTime)
                 .last("LIMIT 500");
@@ -77,6 +89,7 @@ public class DashboardServiceImpl implements DashboardService {
 
         // 4. 查询未申报税务（status=0,限量500防止OOM）
         LambdaQueryWrapper<TaxDeclaration> taxWrapper = new LambdaQueryWrapper<>();
+        applyAccessFilter(taxWrapper, TaxDeclaration::getAccountSetId, accessibleIds);
         taxWrapper.eq(TaxDeclaration::getStatus, 0)
                 .orderByDesc(TaxDeclaration::getCreateTime)
                 .last("LIMIT 500");
@@ -88,32 +101,48 @@ public class DashboardServiceImpl implements DashboardService {
         // 5. 构建总览统计
         // 注意:列表查询带LIMIT 500仅用于明细展示,统计数必须用独立的selectCount(不加limit),否则超过500时计数失真
         // 账套总数(不限制)
-        long totalAccountSets = accountSetMapper.selectCount(new LambdaQueryWrapper<>());
+        LambdaQueryWrapper<AccountSet> totalAsWrapper = new LambdaQueryWrapper<>();
+        applyAccessFilter(totalAsWrapper, AccountSet::getId, accessibleIds);
+        long totalAccountSets = accountSetMapper.selectCount(totalAsWrapper);
         // 启用账套数(status=1)
-        long activeAccountSets = accountSetMapper.selectCount(new LambdaQueryWrapper<AccountSet>()
-                .eq(AccountSet::getStatus, 1));
+        LambdaQueryWrapper<AccountSet> activeAsWrapper = new LambdaQueryWrapper<AccountSet>()
+                .eq(AccountSet::getStatus, 1);
+        applyAccessFilter(activeAsWrapper, AccountSet::getId, accessibleIds);
+        long activeAccountSets = accountSetMapper.selectCount(activeAsWrapper);
         // 一般纳税人:taxpayerType="2"或包含"一般"
-        long generalTaxpayerCount = accountSetMapper.selectCount(new LambdaQueryWrapper<AccountSet>()
+        LambdaQueryWrapper<AccountSet> generalWrapper = new LambdaQueryWrapper<AccountSet>()
                 .and(w -> w.eq(AccountSet::getTaxpayerType, "2")
-                        .or().like(AccountSet::getTaxpayerType, "一般")));
+                        .or().like(AccountSet::getTaxpayerType, "一般"));
+        applyAccessFilter(generalWrapper, AccountSet::getId, accessibleIds);
+        long generalTaxpayerCount = accountSetMapper.selectCount(generalWrapper);
         // 小规模纳税人:taxpayerType="1"或包含"小规模"
-        long smallTaxpayerCount = accountSetMapper.selectCount(new LambdaQueryWrapper<AccountSet>()
+        LambdaQueryWrapper<AccountSet> smallWrapper = new LambdaQueryWrapper<AccountSet>()
                 .and(w -> w.eq(AccountSet::getTaxpayerType, "1")
-                        .or().like(AccountSet::getTaxpayerType, "小规模")));
+                        .or().like(AccountSet::getTaxpayerType, "小规模"));
+        applyAccessFilter(smallWrapper, AccountSet::getId, accessibleIds);
+        long smallTaxpayerCount = accountSetMapper.selectCount(smallWrapper);
         // 待办任务数(taskStatus<2,不限制)
-        long pendingTaskCount = serviceTaskMapper.selectCount(new LambdaQueryWrapper<ServiceTask>()
-                .lt(ServiceTask::getTaskStatus, 2));
+        LambdaQueryWrapper<ServiceTask> pendingTaskCountWrapper = new LambdaQueryWrapper<ServiceTask>()
+                .lt(ServiceTask::getTaskStatus, 2);
+        applyAccessFilter(pendingTaskCountWrapper, ServiceTask::getAccountSetId, accessibleIds);
+        long pendingTaskCount = serviceTaskMapper.selectCount(pendingTaskCountWrapper);
         // 逾期待办:状态未完成且创建时间超过7天
         LocalDateTime threshold = LocalDateTime.now().minusDays(7);
-        long overdueTodoCount = serviceTaskMapper.selectCount(new LambdaQueryWrapper<ServiceTask>()
+        LambdaQueryWrapper<ServiceTask> overdueWrapper = new LambdaQueryWrapper<ServiceTask>()
                 .lt(ServiceTask::getTaskStatus, 2)
-                .lt(ServiceTask::getCreateTime, threshold));
+                .lt(ServiceTask::getCreateTime, threshold);
+        applyAccessFilter(overdueWrapper, ServiceTask::getAccountSetId, accessibleIds);
+        long overdueTodoCount = serviceTaskMapper.selectCount(overdueWrapper);
         // 未审核凭证数(status=0,不限制)
-        long unauditedVoucherCount = voucherMapper.selectCount(new LambdaQueryWrapper<Voucher>()
-                .eq(Voucher::getStatus, 0));
+        LambdaQueryWrapper<Voucher> unauditedCountWrapper = new LambdaQueryWrapper<Voucher>()
+                .eq(Voucher::getStatus, 0);
+        applyAccessFilter(unauditedCountWrapper, Voucher::getAccountSetId, accessibleIds);
+        long unauditedVoucherCount = voucherMapper.selectCount(unauditedCountWrapper);
         // 未申报税务数(status=0,不限制)
-        long undeclaredTaxCount = taxDeclarationMapper.selectCount(new LambdaQueryWrapper<TaxDeclaration>()
-                .eq(TaxDeclaration::getStatus, 0));
+        LambdaQueryWrapper<TaxDeclaration> undeclaredCountWrapper = new LambdaQueryWrapper<TaxDeclaration>()
+                .eq(TaxDeclaration::getStatus, 0);
+        applyAccessFilter(undeclaredCountWrapper, TaxDeclaration::getAccountSetId, accessibleIds);
+        long undeclaredTaxCount = taxDeclarationMapper.selectCount(undeclaredCountWrapper);
 
         vo.setSummary(buildSummary(totalAccountSets, activeAccountSets, generalTaxpayerCount, smallTaxpayerCount,
                 pendingTaskCount, completedTaskCount, unauditedVoucherCount, undeclaredTaxCount, overdueTodoCount));
@@ -133,6 +162,74 @@ public class DashboardServiceImpl implements DashboardService {
         vo.setTodoItems(todoItems);
 
         return vo;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResult<TodoItemVO> pageTodoItems(int page, int size) {
+        // 参数兜底，防止分页越界或除零
+        if (page < 1) {
+            page = 1;
+        }
+        if (size < 1) {
+            size = 10;
+        }
+        List<TodoItemVO> all = loadAllTodoItems();
+        int total = all.size();
+        int fromIndex = Math.min((page - 1) * size, total);
+        int toIndex = Math.min(fromIndex + size, total);
+        List<TodoItemVO> pageList = fromIndex < toIndex
+                ? new ArrayList<>(all.subList(fromIndex, toIndex))
+                : new ArrayList<>();
+        return new PageResult<>(pageList, (long) total, page, size);
+    }
+
+    /**
+     * 加载全部待办项（合并服务任务/凭证审核/税务申报，按创建时间倒序）。
+     * 复用 getDashboard 中的待办查询逻辑，供独立分页查询使用。
+     * 待办来自三张不同表，无法单SQL分页，故先按各自上限加载再在内存合并分页。
+     */
+    private List<TodoItemVO> loadAllTodoItems() {
+        // 数据级隔离:仅查询当前用户可访问账套(超级管理员返回null表示不限制)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+
+        // 查询账套（用于填充公司名称，限量500防止OOM）
+        LambdaQueryWrapper<AccountSet> asWrapper = new LambdaQueryWrapper<>();
+        applyAccessFilter(asWrapper, AccountSet::getId, accessibleIds);
+        asWrapper.orderByDesc(AccountSet::getUpdateTime).last("LIMIT 500");
+        List<AccountSet> accountSets = accountSetMapper.selectList(asWrapper);
+
+        // 待办服务任务（taskStatus<2，限量500防止OOM）
+        LambdaQueryWrapper<ServiceTask> taskWrapper = new LambdaQueryWrapper<>();
+        applyAccessFilter(taskWrapper, ServiceTask::getAccountSetId, accessibleIds);
+        taskWrapper.lt(ServiceTask::getTaskStatus, 2)
+                .orderByDesc(ServiceTask::getCreateTime)
+                .last("LIMIT 500");
+        List<ServiceTask> pendingTasks = serviceTaskMapper.selectList(taskWrapper);
+
+        // 未审核凭证（status=0，限量500防止OOM）
+        LambdaQueryWrapper<Voucher> voucherWrapper = new LambdaQueryWrapper<>();
+        applyAccessFilter(voucherWrapper, Voucher::getAccountSetId, accessibleIds);
+        voucherWrapper.eq(Voucher::getStatus, 0)
+                .orderByDesc(Voucher::getCreateTime)
+                .last("LIMIT 500");
+        List<Voucher> unauditedVouchers = voucherMapper.selectList(voucherWrapper);
+
+        // 未申报税务（status=0，限量500防止OOM）
+        LambdaQueryWrapper<TaxDeclaration> taxWrapper = new LambdaQueryWrapper<>();
+        applyAccessFilter(taxWrapper, TaxDeclaration::getAccountSetId, accessibleIds);
+        taxWrapper.eq(TaxDeclaration::getStatus, 0)
+                .orderByDesc(TaxDeclaration::getCreateTime)
+                .last("LIMIT 500");
+        List<TaxDeclaration> undeclaredTaxes = taxDeclarationMapper.selectList(taxWrapper);
+
+        // 合并各类型，按创建时间倒序
+        List<TodoItemVO> todoItems = new ArrayList<>();
+        todoItems.addAll(buildTaskTodos(pendingTasks, accountSets));
+        todoItems.addAll(buildVoucherTodos(unauditedVouchers, accountSets));
+        todoItems.addAll(buildTaxTodos(undeclaredTaxes, accountSets));
+        todoItems.sort(Comparator.comparing(TodoItemVO::getCreateTime, Comparator.nullsLast(Comparator.reverseOrder())));
+        return todoItems;
     }
 
     private DashboardSummary buildSummary(long totalAccountSets, long activeAccountSets,
@@ -277,5 +374,24 @@ public class DashboardServiceImpl implements DashboardService {
             case 2: return "已完成";
             default: return String.valueOf(status);
         }
+    }
+
+    /**
+     * Dashboard 数据级隔离过滤(IDOR治理):
+     * - accessibleIds 为 null: 超级管理员,不限制
+     * - accessibleIds 为空: 无任何可访问账套,注入永不命中条件避免空集合in被跳过导致越权
+     * - 其他: 按可访问账套集合in过滤
+     */
+    private <T> void applyAccessFilter(LambdaQueryWrapper<T> wrapper,
+                                       SFunction<T, Long> accountSetIdColumn,
+                                       Set<Long> accessibleIds) {
+        if (accessibleIds == null) {
+            return;
+        }
+        if (accessibleIds.isEmpty()) {
+            wrapper.eq(accountSetIdColumn, -1L);
+            return;
+        }
+        wrapper.in(accountSetIdColumn, accessibleIds);
     }
 }

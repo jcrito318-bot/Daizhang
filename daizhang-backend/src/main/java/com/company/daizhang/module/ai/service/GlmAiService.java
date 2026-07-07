@@ -1,5 +1,7 @@
 package com.company.daizhang.module.ai.service;
 
+import com.company.daizhang.common.exception.BusinessException;
+import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.module.ai.config.AiConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -203,6 +205,12 @@ public class GlmAiService {
             throw new RuntimeException("AI功能未启用");
         }
 
+        // 入参校验：金额必须为正数。amount 为 Double 包装类，
+        // 若为 null 传入 buildAccountingRequest 的 %.2f 会自动拆箱触发 NPE。
+        if (amount == null || amount <= 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "金额必须为正数");
+        }
+
         // 构建GLM API请求
         Map<String, Object> request = buildAccountingRequest(description, amount);
 
@@ -210,6 +218,29 @@ public class GlmAiService {
         String response = callGlmApi(request, aiConfig.getChatModel());
 
         log.info("智能记账建议生成完成");
+        return response;
+    }
+
+    /**
+     * AI财税问答
+     * @param question 用户财税问题
+     * @return AI回答内容
+     */
+    public String chat(String question) {
+        if (!aiConfig.getEnabled()) {
+            throw new RuntimeException("AI功能未启用");
+        }
+        if (question == null || question.trim().isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "问题不能为空");
+        }
+
+        // 构建GLM API请求
+        Map<String, Object> request = buildChatRequest(question);
+
+        // 调用GLM API
+        String response = callGlmApi(request, aiConfig.getChatModel());
+
+        log.info("AI财税问答完成");
         return response;
     }
 
@@ -297,7 +328,34 @@ public class GlmAiService {
         // 用户消息
         messages[1] = new HashMap<>();
         messages[1].put("role", "user");
-        messages[1].put("content", String.format("业务描述：%s，金额：%.2f元", description, amount));
+        // 防御性兜底：amount 为 null 时 %.2f 自动拆箱会 NPE，此处兜底为 0
+        messages[1].put("content", String.format("业务描述：%s，金额：%.2f元", description, amount == null ? 0.0 : amount));
+
+        request.put("model", aiConfig.getChatModel());
+        request.put("messages", messages);
+
+        return request;
+    }
+
+    /**
+     * 构建财税问答请求
+     */
+    private Map<String, Object> buildChatRequest(String question) {
+        Map<String, Object> request = new HashMap<>();
+
+        // 构建消息
+        Map<String, Object>[] messages = new Map[2];
+
+        // 系统消息：财税专家角色设定
+        messages[0] = new HashMap<>();
+        messages[0].put("role", "system");
+        messages[0].put("content", "你是一名专业的财税顾问，精通中国会计准则、税法（增值税、企业所得税、个人所得税、印花税等）及代账实务。"
+                + "请根据用户的问题，提供准确、专业、实用的财税解答。回答应条理清晰，必要时给出法规依据或实操建议。");
+
+        // 用户消息
+        messages[1] = new HashMap<>();
+        messages[1].put("role", "user");
+        messages[1].put("content", question);
 
         request.put("model", aiConfig.getChatModel());
         request.put("messages", messages);

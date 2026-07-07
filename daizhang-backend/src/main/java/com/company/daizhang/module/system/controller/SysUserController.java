@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -40,27 +41,31 @@ public class SysUserController {
     
     @Operation(summary = "创建用户")
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> create(@Valid @RequestBody UserCreateRequest request) {
         userService.createUser(request);
         return Result.success();
     }
-    
+
     @Operation(summary = "更新用户")
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody UserUpdateRequest request) {
         userService.updateUser(id, request);
         return Result.success();
     }
-    
+
     @Operation(summary = "删除用户")
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         userService.deleteUser(id);
         return Result.success();
     }
-    
+
     @Operation(summary = "重置密码")
     @PutMapping("/{id}/password")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> resetPassword(@PathVariable Long id, @RequestParam String newPassword) {
         userService.resetPassword(id, newPassword);
         return Result.success();
@@ -68,6 +73,7 @@ public class SysUserController {
     
     @Operation(summary = "更新状态")
     @PutMapping("/{id}/status")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> updateStatus(@PathVariable Long id, @RequestParam Integer status) {
         userService.updateStatus(id, status);
         return Result.success();

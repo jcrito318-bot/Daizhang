@@ -4,6 +4,9 @@ import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
+import com.company.daizhang.module.customer.entity.Customer;
+import com.company.daizhang.module.customer.mapper.CustomerMapper;
 import com.company.daizhang.module.industrycommerce.dto.IndustryCommerceTaskCreateRequest;
 import com.company.daizhang.module.industrycommerce.dto.IndustryCommerceTaskUpdateRequest;
 import com.company.daizhang.module.industrycommerce.entity.IndustryCommerceService;
@@ -34,12 +37,16 @@ public class IndustryCommerceTaskServiceImpl implements IndustryCommerceTaskServ
     private final IndustryCommerceTaskMapper industryCommerceTaskMapper;
     private final IndustryCommerceServiceMapper industryCommerceServiceMapper;
     private final SysUserMapper sysUserMapper;
+    private final CustomerMapper customerMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Override
     public List<IndustryCommerceTaskVO> listTasksByServiceId(Long serviceId) {
         if (serviceId == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "工商服务ID不能为空");
         }
+        // IDOR治理:校验当前用户对该外勤任务所属账套的访问权(经service->customer关联链)
+        accountSetAccessService.checkAccess(resolveAccountSetIdByService(serviceId));
         LambdaQueryWrapper<IndustryCommerceTask> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(IndustryCommerceTask::getServiceId, serviceId)
                .orderByDesc(IndustryCommerceTask::getCreateTime);
@@ -57,6 +64,8 @@ public class IndustryCommerceTaskServiceImpl implements IndustryCommerceTaskServ
         if (service == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "工商服务不存在");
         }
+        // IDOR治理:校验当前用户对该外勤任务所属账套的所有者权限(经service->customer关联链)
+        accountSetAccessService.checkOwner(resolveAccountSetIdByService(service.getId()));
 
         IndustryCommerceTask entity = new IndustryCommerceTask();
         BeanUtil.copyProperties(request, entity);
@@ -74,6 +83,8 @@ public class IndustryCommerceTaskServiceImpl implements IndustryCommerceTaskServ
         if (entity == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "外勤任务不存在");
         }
+        // IDOR治理:校验当前用户对该外勤任务所属账套的所有者权限(经service->customer关联链)
+        accountSetAccessService.checkOwner(resolveAccountSetIdByService(entity.getServiceId()));
         // 保存原状态,防止copyProperties覆盖taskStatus绕过状态机(状态变更只能走assignTask/completeTask)
         Integer originalStatus = entity.getTaskStatus();
         BeanUtil.copyProperties(request, entity);
@@ -90,6 +101,8 @@ public class IndustryCommerceTaskServiceImpl implements IndustryCommerceTaskServ
         if (entity == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "外勤任务不存在");
         }
+        // IDOR治理:校验当前用户对该外勤任务所属账套的所有者权限(经service->customer关联链)
+        accountSetAccessService.checkOwner(resolveAccountSetIdByService(entity.getServiceId()));
         industryCommerceTaskMapper.deleteById(id);
         log.info("删除外勤任务成功，任务ID: {}", id);
     }
@@ -101,6 +114,8 @@ public class IndustryCommerceTaskServiceImpl implements IndustryCommerceTaskServ
         if (entity == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "外勤任务不存在");
         }
+        // IDOR治理:校验当前用户对该外勤任务所属账套的所有者权限(经service->customer关联链)
+        accountSetAccessService.checkOwner(resolveAccountSetIdByService(entity.getServiceId()));
         // 必须为"进行中(1)"才能完成,防止从待处理直接跳到完成绕过派工流程
         if (entity.getTaskStatus() == null || entity.getTaskStatus() != 1) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "当前状态不允许完成，仅进行中状态可完成");
@@ -118,6 +133,8 @@ public class IndustryCommerceTaskServiceImpl implements IndustryCommerceTaskServ
         if (entity == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "外勤任务不存在");
         }
+        // IDOR治理:校验当前用户对该外勤任务所属账套的所有者权限(经service->customer关联链)
+        accountSetAccessService.checkOwner(resolveAccountSetIdByService(entity.getServiceId()));
         if (assigneeId == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "经办人ID不能为空");
         }
@@ -130,6 +147,22 @@ public class IndustryCommerceTaskServiceImpl implements IndustryCommerceTaskServ
         entity.setTaskStatus(1);
         industryCommerceTaskMapper.updateById(entity);
         log.info("外勤任务派工成功，任务ID: {}, 经办人ID: {}", id, assigneeId);
+    }
+
+    /**
+     * IDOR治理关联链: task.serviceId -> service.customerId -> customer.accountSetId
+     * 通过工商服务ID解析其所属账套ID,用于账套级权限校验
+     */
+    private Long resolveAccountSetIdByService(Long serviceId) {
+        IndustryCommerceService service = industryCommerceServiceMapper.selectById(serviceId);
+        if (service == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "工商服务不存在");
+        }
+        Customer customer = customerMapper.selectById(service.getCustomerId());
+        if (customer == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "客户不存在");
+        }
+        return customer.getAccountSetId();
     }
 
     /**

@@ -42,6 +42,21 @@ public interface ContractService extends IService<ServiceContract> {
     void updateContract(Long id, ContractUpdateRequest request);
 
     /**
+     * 激活合同（草稿0→执行中1）
+     */
+    void activateContract(Long id);
+
+    /**
+     * 完结合同（执行中1→已完成2）
+     */
+    void completeContract(Long id);
+
+    /**
+     * 终止合同（执行中1或已完成2→已终止3）
+     */
+    void terminateContract(Long id);
+
+    /**
      * 删除合同
      */
     void deleteContract(Long id);

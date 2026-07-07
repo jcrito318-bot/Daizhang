@@ -6,6 +6,8 @@ import com.company.daizhang.module.asset.dto.*;
 import com.company.daizhang.module.asset.entity.FixedAsset;
 import com.company.daizhang.module.asset.vo.*;
 
+import java.math.BigDecimal;
+
 /**
  * 资产服务接口
  */
@@ -74,6 +76,21 @@ public interface AssetService extends IService<FixedAsset> {
      * 变更资产状态
      */
     void changeAssetStatus(AssetStatusChangeRequest request);
+
+    /**
+     * 资产处置（清理/报废/出售/捐赠）
+     * <p>
+     * 生成处置凭证：借 固定资产清理(净值)、累计折旧；贷 固定资产(原值)；
+     * 若有处置收入：借 银行存款，贷 固定资产清理；差额计入资产处置损益。
+     * 处置后资产状态置为"已处置"。
+     *
+     * @param id             资产ID
+     * @param disposeType    处置类型：1=清理 2=报废 3=出售 4=捐赠
+     * @param disposeAmount  处置收入金额（出售/清理收入，无收入传0或null）
+     * @param remark         备注
+     * @return 生成的凭证ID
+     */
+    Long disposeAsset(Long id, Integer disposeType, BigDecimal disposeAmount, String remark);
 
     // ==================== 折旧管理 ====================
 

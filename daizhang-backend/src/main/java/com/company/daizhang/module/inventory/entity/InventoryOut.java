@@ -29,6 +29,10 @@ public class InventoryOut {
     private Long createBy;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
+    /**
+     * 关联凭证ID（出入库审核后生成的凭证ID）
+     */
+    private Long voucherId;
 
     @TableField(exist = false)
     private List<InventoryOutDetail> details;

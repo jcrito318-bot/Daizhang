@@ -1,0 +1,26 @@
+# 构建产物
+target/
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.project
+.classpath
+
+# 日志
+data/logs/
+*.log
+
+# H2运行时数据库文件（保留schema，不保留运行时数据）
+data/daizhang.mv.db
+data/daizhang.lock.db
+data/daizhang.trace.db
+data/backup/
+data/*.bak.*
+
+# 临时文件
+*.tmp
+*.bak

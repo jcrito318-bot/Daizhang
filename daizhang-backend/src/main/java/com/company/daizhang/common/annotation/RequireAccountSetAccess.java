@@ -31,6 +31,15 @@ public @interface RequireAccountSetAccess {
     AccessLevel value() default AccessLevel.ACCESS;
 
     /**
+     * 是否强制要求从方法参数中解析到 accountSetId。
+     * <p>
+     * true(默认): 无法解析 accountSetId 时抛 FORBIDDEN 异常(fail-closed,防止注解被静默绕过);
+     * false: 无法解析时仅告警并放行(用于 accountSetId 为可选参数的列表查询等合法场景,
+     * 此时应由 Service 层兜底校验)。
+     */
+    boolean required() default true;
+
+    /**
      * 授权级别枚举
      */
     enum AccessLevel {

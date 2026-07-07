@@ -67,7 +67,7 @@ public class ServiceFlowController {
 
     @Operation(summary = "任务分页")
     @GetMapping("/task/page")
-    @RequireAccountSetAccess
+    @RequireAccountSetAccess(required = false)
     public Result<PageResult<ServiceTaskVO>> taskPage(@RequestParam(required = false) Long accountSetId,
                                                        @RequestParam(required = false) Integer year,
                                                        @RequestParam(required = false) Integer month,

@@ -7,6 +7,7 @@ import com.company.daizhang.module.system.service.SysOperationLogService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -31,5 +32,13 @@ public class SysOperationLogController {
             @RequestParam(defaultValue = "10") int pageSize) {
         PageResult<SysOperationLog> page = operationLogService.pageLogs(username, operation, startDate, endDate, pageNum, pageSize);
         return Result.success(page);
+    }
+
+    @Operation(summary = "清理操作日志")
+    @DeleteMapping("/clean")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Result<Void> clean(@RequestParam(required = false) Integer keepDays) {
+        operationLogService.cleanOperationLogs(keepDays);
+        return Result.success();
     }
 }

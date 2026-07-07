@@ -11,9 +11,11 @@ import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.asset.dto.*;
 import com.company.daizhang.module.asset.entity.AssetCategory;
+import com.company.daizhang.module.asset.entity.AssetChangeRecord;
 import com.company.daizhang.module.asset.entity.DepreciationRecord;
 import com.company.daizhang.module.asset.entity.FixedAsset;
 import com.company.daizhang.module.asset.mapper.AssetCategoryMapper;
+import com.company.daizhang.module.asset.mapper.AssetChangeRecordMapper;
 import com.company.daizhang.module.asset.mapper.DepreciationRecordMapper;
 import com.company.daizhang.module.asset.mapper.FixedAssetMapper;
 import com.company.daizhang.module.asset.service.AssetService;
@@ -27,8 +29,6 @@ import com.company.daizhang.module.subject.entity.Subject;
 import com.company.daizhang.module.subject.mapper.SubjectMapper;
 import com.company.daizhang.module.voucher.dto.VoucherCreateRequest;
 import com.company.daizhang.module.voucher.dto.VoucherDetailRequest;
-import com.company.daizhang.module.voucher.entity.Voucher;
-import com.company.daizhang.module.voucher.mapper.VoucherMapper;
 import com.company.daizhang.module.voucher.service.VoucherService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -53,9 +53,9 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
 
     private final AccountSetAccessService accountSetAccessService;
     private final AssetCategoryMapper assetCategoryMapper;
+    private final AssetChangeRecordMapper assetChangeRecordMapper;
     private final DepreciationRecordMapper depreciationRecordMapper;
     private final VoucherService voucherService;
-    private final VoucherMapper voucherMapper;
     private final SubjectMapper subjectMapper;
 
     // ==================== 资产分类管理 ====================
@@ -313,6 +313,197 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         this.updateById(asset);
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Long disposeAsset(Long id, Integer disposeType, BigDecimal disposeAmount, String remark) {
+        // 1. 校验资产存在
+        FixedAsset asset = this.getById(id);
+        if (asset == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "固定资产不存在");
+        }
+        // IDOR治理:校验当前用户对该资产所属账套的所有者权限
+        accountSetAccessService.checkOwner(asset.getAccountSetId());
+
+        // 2. 校验资产状态：仅在用(0)或闲置(1)的资产可处置，已报废(2)不可重复处置
+        if (asset.getStatus() != null && asset.getStatus() == 2) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "该资产已处置，不可重复处置");
+        }
+        // 校验处置类型
+        if (disposeType == null || disposeType < 1 || disposeType > 4) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "处置类型不正确：1=清理 2=报废 3=出售 4=捐赠");
+        }
+
+        // 3. 计算关键金额：原值、累计折旧、净值
+        BigDecimal originalValue = nvl(asset.getPurchaseAmount());
+        BigDecimal accumulatedDepreciation = nvl(asset.getAccumulatedDeprecation());
+        BigDecimal netValue = originalValue.subtract(accumulatedDepreciation);
+        BigDecimal income = disposeAmount != null ? disposeAmount : BigDecimal.ZERO;
+        if (income.compareTo(BigDecimal.ZERO) < 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "处置收入不能为负数");
+        }
+
+        // 4. 动态查询科目ID（编码：1601固定资产/1602累计折旧/1606固定资产清理/1002银行存款/5711资产处置损益）
+        Long fixedAssetSubjectId = requireSubject(asset.getAccountSetId(), "1601", "固定资产");
+        Long accumulatedDepSubjectId = requireSubject(asset.getAccountSetId(), "1602", "累计折旧");
+        Long disposalSubjectId = requireSubject(asset.getAccountSetId(), "1606", "固定资产清理");
+        Long bankSubjectId = requireSubject(asset.getAccountSetId(), "1002", "银行存款");
+        Long gainLossSubjectId = requireSubject(asset.getAccountSetId(), "5711", "资产处置损益");
+
+        // 5. 构建处置凭证（参考金蝶标准分录）
+        LocalDate voucherDate = LocalDate.now();
+        int year = voucherDate.getYear();
+        int month = voucherDate.getMonthValue();
+        String assetDesc = asset.getAssetName() != null ? asset.getAssetName() : String.valueOf(id);
+        String summary = "资产处置-" + assetDesc;
+
+        VoucherCreateRequest voucherRequest = new VoucherCreateRequest();
+        voucherRequest.setAccountSetId(asset.getAccountSetId());
+        voucherRequest.setVoucherDate(voucherDate);
+        voucherRequest.setYear(year);
+        voucherRequest.setMonth(month);
+        voucherRequest.setAttachmentCount(0);
+
+        List<VoucherDetailRequest> details = new ArrayList<>();
+        int lineNo = 1;
+
+        // 借：固定资产清理（按净值 = 原值 - 累计折旧）
+        VoucherDetailRequest debitDisposal = new VoucherDetailRequest();
+        debitDisposal.setLineNo(lineNo++);
+        debitDisposal.setSummary(summary);
+        debitDisposal.setSubjectId(disposalSubjectId);
+        debitDisposal.setDebit(netValue);
+        debitDisposal.setCredit(BigDecimal.ZERO);
+        debitDisposal.setSortOrder(lineNo - 1);
+        details.add(debitDisposal);
+
+        // 借：累计折旧（按已提折旧）
+        if (accumulatedDepreciation.compareTo(BigDecimal.ZERO) > 0) {
+            VoucherDetailRequest debitAccumDep = new VoucherDetailRequest();
+            debitAccumDep.setLineNo(lineNo++);
+            debitAccumDep.setSummary(summary);
+            debitAccumDep.setSubjectId(accumulatedDepSubjectId);
+            debitAccumDep.setDebit(accumulatedDepreciation);
+            debitAccumDep.setCredit(BigDecimal.ZERO);
+            debitAccumDep.setSortOrder(lineNo - 1);
+            details.add(debitAccumDep);
+        }
+
+        // 贷：固定资产（按原值）
+        VoucherDetailRequest creditFixedAsset = new VoucherDetailRequest();
+        creditFixedAsset.setLineNo(lineNo++);
+        creditFixedAsset.setSummary(summary);
+        creditFixedAsset.setSubjectId(fixedAssetSubjectId);
+        creditFixedAsset.setDebit(BigDecimal.ZERO);
+        creditFixedAsset.setCredit(originalValue);
+        creditFixedAsset.setSortOrder(lineNo - 1);
+        details.add(creditFixedAsset);
+
+        // 若有处置收入：借 银行存款，贷 固定资产清理
+        if (income.compareTo(BigDecimal.ZERO) > 0) {
+            VoucherDetailRequest debitBank = new VoucherDetailRequest();
+            debitBank.setLineNo(lineNo++);
+            debitBank.setSummary("处置收入-" + assetDesc);
+            debitBank.setSubjectId(bankSubjectId);
+            debitBank.setDebit(income);
+            debitBank.setCredit(BigDecimal.ZERO);
+            debitBank.setSortOrder(lineNo - 1);
+            details.add(debitBank);
+
+            VoucherDetailRequest creditDisposal = new VoucherDetailRequest();
+            creditDisposal.setLineNo(lineNo++);
+            creditDisposal.setSummary("处置收入-" + assetDesc);
+            creditDisposal.setSubjectId(disposalSubjectId);
+            creditDisposal.setDebit(BigDecimal.ZERO);
+            creditDisposal.setCredit(income);
+            creditDisposal.setSortOrder(lineNo - 1);
+            details.add(creditDisposal);
+        }
+
+        // 差额计入资产处置损益：净收入(收入-净值)>0 贷方资产处置损益；净损失 借方资产处置损益
+        BigDecimal diff = income.subtract(netValue);
+        if (diff.compareTo(BigDecimal.ZERO) != 0) {
+            VoucherDetailRequest gainLossDetail = new VoucherDetailRequest();
+            gainLossDetail.setLineNo(lineNo++);
+            gainLossDetail.setSummary("资产处置损益-" + assetDesc);
+            gainLossDetail.setSubjectId(gainLossSubjectId);
+            if (diff.compareTo(BigDecimal.ZERO) > 0) {
+                // 净收益：贷方资产处置损益
+                gainLossDetail.setDebit(BigDecimal.ZERO);
+                gainLossDetail.setCredit(diff);
+            } else {
+                // 净损失：借方资产处置损益（取绝对值）
+                gainLossDetail.setDebit(diff.negate());
+                gainLossDetail.setCredit(BigDecimal.ZERO);
+            }
+            gainLossDetail.setSortOrder(lineNo - 1);
+            details.add(gainLossDetail);
+        }
+
+        voucherRequest.setDetails(details);
+
+        // 6. 调用凭证服务创建凭证（内部校验会计期间、借贷平衡），直接返回新凭证ID
+        Long voucherId = voucherService.createVoucher(voucherRequest);
+
+        // 7. 更新资产状态为已处置(2)，并清零净值/累计折旧
+        asset.setStatus(2);
+        asset.setNetValue(BigDecimal.ZERO);
+        asset.setAccumulatedDeprecation(originalValue);
+        asset.setMonthlyDepreciation(BigDecimal.ZERO);
+        if (StrUtil.isNotBlank(remark)) {
+            asset.setRemark(remark);
+        }
+        this.updateById(asset);
+
+        // 8. 记录资产变动记录（保留审计轨迹）
+        AssetChangeRecord changeRecord = new AssetChangeRecord();
+        changeRecord.setAccountSetId(asset.getAccountSetId());
+        changeRecord.setAssetId(id);
+        changeRecord.setChangeType(disposeTypeToName(disposeType));
+        changeRecord.setChangeDate(voucherDate);
+        changeRecord.setChangeAmount(income);
+        changeRecord.setVoucherId(voucherId);
+        changeRecord.setRemark(remark);
+        assetChangeRecordMapper.insert(changeRecord);
+
+        log.info("资产处置成功，资产ID: {}, 处置类型: {}, 凭证ID: {}", id, disposeType, voucherId);
+        return voucherId;
+    }
+
+    /**
+     * 处置类型编码转中文名称
+     */
+    private String disposeTypeToName(Integer disposeType) {
+        if (disposeType == null) {
+            return "处置";
+        }
+        switch (disposeType) {
+            case 1: return "清理";
+            case 2: return "报废";
+            case 3: return "出售";
+            case 4: return "捐赠";
+            default: return "处置";
+        }
+    }
+
+    /**
+     * 通过科目编码查询科目ID，查不到时抛业务异常（处置凭证要求科目必须存在）
+     */
+    private Long requireSubject(Long accountSetId, String code, String subjectName) {
+        Long subjectId = getSubjectIdByCode(accountSetId, code, null, subjectName);
+        if (subjectId == null) {
+            throw new BusinessException(ErrorCode.VOUCHER_SUBJECT_INVALID.getCode(),
+                    "未查询到科目[" + subjectName + "]，编码: " + code);
+        }
+        return subjectId;
+    }
+
+    /**
+     * null 转 0
+     */
+    private BigDecimal nvl(BigDecimal val) {
+        return val != null ? val : BigDecimal.ZERO;
+    }
+
     // ==================== 折旧管理 ====================
 
     @Override
@@ -490,19 +681,10 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
 
         voucherRequest.setDetails(details);
 
-        // 调用凭证服务创建凭证
-        voucherService.createVoucher(voucherRequest);
-
-        // 查询刚创建的凭证（按ID降序取最新一张）并回写voucherId到折旧记录，避免重复生成
-        LambdaQueryWrapper<Voucher> vw = new LambdaQueryWrapper<>();
-        vw.eq(Voucher::getAccountSetId, record.getAccountSetId())
-          .eq(Voucher::getYear, record.getYear())
-          .eq(Voucher::getMonth, record.getMonth())
-          .orderByDesc(Voucher::getId)
-          .last("LIMIT 1");
-        Voucher createdVoucher = voucherMapper.selectOne(vw);
-        if (createdVoucher != null) {
-            record.setVoucherId(createdVoucher.getId());
+        // 调用凭证服务创建凭证，直接返回新凭证ID并回写voucherId到折旧记录，避免重复生成
+        Long voucherId = voucherService.createVoucher(voucherRequest);
+        if (voucherId != null) {
+            record.setVoucherId(voucherId);
             depreciationRecordMapper.updateById(record);
         }
     }
@@ -686,6 +868,55 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
             // 工作量法：简化为按直线法，月折旧额 = (原值 - 残值) / 使用年限 / 12
             return purchaseAmount.subtract(residualValue)
                     .divide(BigDecimal.valueOf(usefulLife).multiply(BigDecimal.valueOf(12)), 2, RoundingMode.HALF_UP);
+        } else if ("年数总和法".equals(depreciationMethod)) {
+            // 年数总和法(SYD)：月折旧额 = (原值 - 残值) × 尚可使用月数 / 使用年限月数总和
+            BigDecimal baseValue = (netValue != null ? netValue : purchaseAmount);
+            // 总月数 n = 使用年限 × 12
+            int totalMonths = usefulLife * 12;
+            // 使用年限月数总和 = n×(n+1)/2
+            BigDecimal sumOfMonths = BigDecimal.valueOf(totalMonths)
+                    .multiply(BigDecimal.valueOf(totalMonths + 1))
+                    .divide(BigDecimal.valueOf(2), 0, RoundingMode.HALF_UP);
+            BigDecimal depreciableBase = purchaseAmount.subtract(residualValue);
+            // 剩余净值 = 原值 - 残值 - 累计折旧 = 净值 - 残值
+            BigDecimal remainingNet = baseValue.subtract(residualValue);
+            if (depreciableBase.compareTo(BigDecimal.ZERO) <= 0
+                    || sumOfMonths.compareTo(BigDecimal.ZERO) <= 0
+                    || remainingNet.compareTo(BigDecimal.ZERO) <= 0) {
+                return BigDecimal.ZERO;
+            }
+            // 已使用月数：本方法无开始折旧日期入参，用累计折旧(原值-净值)按SYD累计公式反推
+            // 累计 k 个月折旧 = 可折旧基数 × k×(2n-k+1)/(2×月数总和)
+            BigDecimal accumulated = purchaseAmount.subtract(baseValue);
+            int usedMonths = 0;
+            if (accumulated.compareTo(BigDecimal.ZERO) > 0) {
+                for (int k = 1; k <= totalMonths; k++) {
+                    BigDecimal cumulative = depreciableBase
+                            .multiply(BigDecimal.valueOf(k))
+                            .multiply(BigDecimal.valueOf(2L * totalMonths - k + 1))
+                            .divide(BigDecimal.valueOf(2), 10, RoundingMode.HALF_UP)
+                            .divide(sumOfMonths, 10, RoundingMode.HALF_UP);
+                    if (cumulative.compareTo(accumulated) >= 0) {
+                        usedMonths = k - 1;
+                        break;
+                    }
+                    usedMonths = k;
+                }
+            }
+            // 尚可使用月数 = 总月数 - 已使用月数
+            int remainingMonths = totalMonths - usedMonths;
+            if (remainingMonths <= 0) {
+                return BigDecimal.ZERO;
+            }
+            // 月折旧额 = (原值 - 残值) × 尚可使用月数 / 使用年限月数总和
+            BigDecimal monthlyDepreciation = depreciableBase
+                    .multiply(BigDecimal.valueOf(remainingMonths))
+                    .divide(sumOfMonths, 2, RoundingMode.HALF_UP);
+            // 月折旧额不能超过剩余净值（原值-残值-累计折旧）
+            if (monthlyDepreciation.compareTo(remainingNet) > 0) {
+                monthlyDepreciation = remainingNet;
+            }
+            return monthlyDepreciation;
         }
         return BigDecimal.ZERO;
     }

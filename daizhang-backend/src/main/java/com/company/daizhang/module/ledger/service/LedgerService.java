@@ -13,6 +13,7 @@ import com.company.daizhang.module.ledger.vo.MultiColumnLedgerVO;
 import com.company.daizhang.module.ledger.vo.QuantityAmountLedgerVO;
 import com.company.daizhang.module.ledger.vo.ReconciliationVO;
 import com.company.daizhang.module.ledger.vo.SubjectBalanceVO;
+import jakarta.servlet.http.HttpServletResponse;
 
 import java.util.List;
 
@@ -111,4 +112,16 @@ public interface LedgerService {
      * @param month        月份（可为空，表示查询全年）
      */
     List<AccountCheckVO> accountCheck(Long accountSetId, Integer year, Integer month);
+
+    /**
+     * 导出现金日记账Excel
+     */
+    void exportCashJournal(Long accountSetId, Integer year, Integer month, HttpServletResponse response);
+
+    /**
+     * 导出银行日记账Excel
+     *
+     * @param bankAccountId 银行科目ID（可选，为空时导出全部银行科目日记账）
+     */
+    void exportBankJournal(Long accountSetId, Integer year, Integer month, Long bankAccountId, HttpServletResponse response);
 }

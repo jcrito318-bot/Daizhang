@@ -12,6 +12,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -50,6 +51,7 @@ public class PositionController {
 
     @Operation(summary = "创建岗位")
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> create(@Valid @RequestBody PositionRequest request) {
         Position entity = new Position();
         BeanUtil.copyProperties(request, entity);
@@ -59,6 +61,7 @@ public class PositionController {
 
     @Operation(summary = "更新岗位")
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody PositionRequest request) {
         Position entity = new Position();
         BeanUtil.copyProperties(request, entity);
@@ -69,6 +72,7 @@ public class PositionController {
 
     @Operation(summary = "删除岗位")
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         positionService.deletePosition(id);
         return Result.success();

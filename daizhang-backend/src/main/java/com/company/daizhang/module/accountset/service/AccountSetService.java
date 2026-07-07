@@ -39,7 +39,17 @@ public interface AccountSetService extends IService<AccountSet> {
      * 更新账套
      */
     void updateAccountSet(Long id, AccountSetUpdateRequest request);
-    
+
+    /**
+     * 启用账套
+     */
+    void enableAccountSet(Long id);
+
+    /**
+     * 停用账套
+     */
+    void disableAccountSet(Long id);
+
     /**
      * 删除账套
      */

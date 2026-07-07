@@ -1,7 +1,10 @@
 package com.company.daizhang.module.ai.controller;
 
 import com.company.daizhang.common.annotation.RequireAccountSetAccess;
+import com.company.daizhang.common.exception.BusinessException;
+import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.Result;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.ai.dto.AccountingSuggestRequest;
 import com.company.daizhang.module.ai.dto.InvoiceRecognizeRequest;
 import com.company.daizhang.module.ai.service.GlmAiService;
@@ -25,6 +28,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * AI功能控制器
@@ -40,6 +44,7 @@ public class AiController {
     private final DocumentService documentService;
     private final InvoiceService invoiceService;
     private final ObjectMapper objectMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     /**
      * 票据OCR识别
@@ -48,6 +53,8 @@ public class AiController {
     @Operation(summary = "票据OCR识别", description = "使用GLM大模型识别票据图片")
     public Result<String> recognizeInvoice(@RequestParam("file") MultipartFile file,
                                            @RequestParam(value = "invoiceType", required = false) Integer invoiceType) {
+        // OCR为通用功能不绑定特定账套，但要求当前用户至少拥有任意账套访问权，避免无账套用户滥用AI算力
+        checkAiAccess();
         try {
             if (file.isEmpty()) {
                 return Result.error(400, "文件不能为空");
@@ -67,6 +74,8 @@ public class AiController {
     @PostMapping("/recognize/invoice/base64")
     @Operation(summary = "票据OCR识别（Base64）", description = "使用GLM大模型识别票据图片（Base64编码）")
     public Result<String> recognizeInvoiceBase64(@RequestBody InvoiceRecognizeRequest request) {
+        // OCR为通用功能不绑定特定账套，但要求当前用户至少拥有任意账套访问权，避免无账套用户滥用AI算力
+        checkAiAccess();
         try {
             if (request.getImageBase64() == null || request.getImageBase64().isEmpty()) {
                 return Result.error(400, "图片数据不能为空");
@@ -89,6 +98,8 @@ public class AiController {
     @PostMapping("/recognize/invoice/url")
     @Operation(summary = "票据OCR识别（URL）", description = "使用GLM大模型识别票据图片（通过URL）")
     public Result<String> recognizeInvoiceByUrl(@RequestBody java.util.Map<String, Object> request) {
+        // OCR为通用功能不绑定特定账套，但要求当前用户至少拥有任意账套访问权，避免无账套用户滥用AI算力
+        checkAiAccess();
         try {
             String fileUrl = (String) request.get("fileUrl");
             if (fileUrl == null || fileUrl.isEmpty()) {
@@ -117,6 +128,8 @@ public class AiController {
     @PostMapping("/suggest/accounting")
     @Operation(summary = "智能记账建议", description = "使用GLM大模型提供记账建议")
     public Result<String> suggestAccounting(@RequestBody AccountingSuggestRequest request) {
+        // AI为通用功能不绑定特定账套,但要求当前用户至少拥有任意账套访问权,避免无账套用户滥用AI算力
+        checkAiAccess();
         try {
             if (request.getDescription() == null || request.getDescription().isEmpty()) {
                 return Result.error(400, "业务描述不能为空");
@@ -134,6 +147,28 @@ public class AiController {
         } catch (Exception e) {
             log.error("智能记账建议生成失败", e);
             return Result.error(500, "生成记账建议失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * AI财税问答
+     */
+    @PostMapping("/chat")
+    @Operation(summary = "AI财税问答", description = "使用GLM大模型回答财税相关问题")
+    public Result<String> chat(@RequestBody Map<String, String> request) {
+        // AI为通用功能不绑定特定账套,但要求当前用户至少拥有任意账套访问权,避免无账套用户滥用AI算力
+        checkAiAccess();
+        try {
+            String question = request.get("question");
+            if (question == null || question.trim().isEmpty()) {
+                return Result.error(400, "问题不能为空");
+            }
+
+            String result = glmAiService.chat(question);
+            return Result.success(result);
+        } catch (Exception e) {
+            log.error("AI财税问答失败", e);
+            return Result.error(500, "AI财税问答失败：" + e.getMessage());
         }
     }
 
@@ -172,6 +207,19 @@ public class AiController {
         } catch (Exception e) {
             log.error("票据识别并保存失败", e);
             return Result.error(500, "票据识别并保存失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * AI接口访问校验：OCR等通用AI功能不绑定特定账套，
+     * 但要求当前用户至少拥有任意一个账套的访问权，避免无账套权限用户滥用AI算力。
+     * fail-closed：普通用户无可访问账套时抛 FORBIDDEN；超级管理员(listAccessibleAccountSetIds 返回 null)放行。
+     */
+    private void checkAiAccess() {
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds != null && accessibleIds.isEmpty()) {
+            log.warn("AI接口访问拦截：当前用户无任何账套访问权限");
+            throw new BusinessException(ErrorCode.FORBIDDEN, "无账套访问权限，无法使用AI功能");
         }
     }
 

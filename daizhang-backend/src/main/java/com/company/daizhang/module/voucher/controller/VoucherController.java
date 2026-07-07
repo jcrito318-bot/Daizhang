@@ -56,9 +56,9 @@ public class VoucherController {
 
     @Operation(summary = "创建凭证")
     @PostMapping
-    public Result<Void> create(@Valid @RequestBody VoucherCreateRequest request) {
-        voucherService.createVoucher(request);
-        return Result.success();
+    public Result<Long> create(@Valid @RequestBody VoucherCreateRequest request) {
+        Long id = voucherService.createVoucher(request);
+        return Result.success(id);
     }
 
     @Operation(summary = "更新凭证")
@@ -107,6 +107,20 @@ public class VoucherController {
     @PostMapping("/{id}/post")
     public Result<Void> post(@PathVariable Long id) {
         voucherService.postVoucher(id);
+        return Result.success();
+    }
+
+    @Operation(summary = "反过账凭证")
+    @PostMapping("/{id}/unpost")
+    public Result<Void> unpost(@PathVariable Long id) {
+        voucherService.unpostVoucher(id);
+        return Result.success();
+    }
+
+    @Operation(summary = "作废凭证")
+    @PostMapping("/{id}/cancel")
+    public Result<Void> cancel(@PathVariable Long id) {
+        voucherService.cancelVoucher(id);
         return Result.success();
     }
 

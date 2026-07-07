@@ -10,7 +10,10 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDate;
 
 /**
  * 凭证模板管理控制器
@@ -60,5 +63,17 @@ public class VoucherTemplateController {
     public Result<Void> delete(@PathVariable Long id) {
         voucherTemplateService.deleteTemplate(id);
         return Result.success();
+    }
+
+    @Operation(summary = "应用模板生成凭证")
+    @PostMapping("/{templateId}/apply")
+    @RequireAccountSetAccess
+    public Result<Long> applyTemplate(@PathVariable Long templateId,
+                                      @RequestParam Long accountSetId,
+                                      @RequestParam @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate voucherDate,
+                                      @RequestParam Integer year,
+                                      @RequestParam Integer month) {
+        Long voucherId = voucherTemplateService.applyTemplate(templateId, accountSetId, voucherDate, year, month);
+        return Result.success(voucherId);
     }
 }

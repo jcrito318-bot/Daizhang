@@ -9,11 +9,14 @@ import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.module.accountset.service.AccountSetAccessService;
+import com.company.daizhang.module.voucher.dto.VoucherCreateRequest;
+import com.company.daizhang.module.voucher.dto.VoucherDetailRequest;
 import com.company.daizhang.module.voucher.dto.VoucherTemplateRequest;
 import com.company.daizhang.module.voucher.entity.VoucherTemplate;
 import com.company.daizhang.module.voucher.entity.VoucherTemplateDetail;
 import com.company.daizhang.module.voucher.mapper.VoucherTemplateDetailMapper;
 import com.company.daizhang.module.voucher.mapper.VoucherTemplateMapper;
+import com.company.daizhang.module.voucher.service.VoucherService;
 import com.company.daizhang.module.voucher.service.VoucherTemplateService;
 import com.company.daizhang.module.voucher.vo.VoucherTemplateVO;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +25,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -35,6 +40,7 @@ public class VoucherTemplateServiceImpl extends ServiceImpl<VoucherTemplateMappe
 
     private final VoucherTemplateDetailMapper voucherTemplateDetailMapper;
     private final AccountSetAccessService accountSetAccessService;
+    private final VoucherService voucherService;
 
     @Override
     public PageResult<VoucherTemplateVO> pageTemplates(Long accountSetId, String templateName, int pageNum, int pageSize) {
@@ -148,6 +154,61 @@ public class VoucherTemplateServiceImpl extends ServiceImpl<VoucherTemplateMappe
         this.removeById(id);
 
         log.info("删除凭证模板成功，模板ID: {}, 模板名称: {}", id, template.getTemplateName());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Long applyTemplate(Long templateId, Long accountSetId, LocalDate voucherDate, Integer year, Integer month) {
+        // 查询模板，校验存在
+        VoucherTemplate template = this.getById(templateId);
+        if (template == null) {
+            throw new BusinessException(ErrorCode.VOUCHER_TEMPLATE_NOT_FOUND);
+        }
+        // IDOR治理:校验当前用户对该账套的所有者权限
+        accountSetAccessService.checkOwner(accountSetId);
+
+        // 查询模板明细
+        LambdaQueryWrapper<VoucherTemplateDetail> detailWrapper = new LambdaQueryWrapper<>();
+        detailWrapper.eq(VoucherTemplateDetail::getTemplateId, templateId)
+                     .orderByAsc(VoucherTemplateDetail::getSortOrder);
+        List<VoucherTemplateDetail> details = voucherTemplateDetailMapper.selectList(detailWrapper);
+        if (details == null || details.isEmpty()) {
+            throw new BusinessException(ErrorCode.VOUCHER_TEMPLATE_DETAIL_EMPTY);
+        }
+
+        // 摘要缺省取模板摘要
+        String summary = StrUtil.isNotBlank(template.getSummary()) ? template.getSummary() : template.getTemplateName();
+
+        // 根据模板明细构建 VoucherCreateRequest
+        VoucherCreateRequest voucherRequest = new VoucherCreateRequest();
+        voucherRequest.setAccountSetId(accountSetId);
+        voucherRequest.setVoucherWordId(template.getVoucherWordId());
+        voucherRequest.setVoucherDate(voucherDate);
+        voucherRequest.setYear(year);
+        voucherRequest.setMonth(month);
+        voucherRequest.setAttachmentCount(template.getAttachmentCount() != null ? template.getAttachmentCount() : 0);
+
+        List<VoucherDetailRequest> voucherDetails = new ArrayList<>();
+        for (int i = 0; i < details.size(); i++) {
+            VoucherTemplateDetail detail = details.get(i);
+            VoucherDetailRequest detailRequest = new VoucherDetailRequest();
+            detailRequest.setLineNo(detail.getLineNo() != null ? detail.getLineNo() : i + 1);
+            detailRequest.setSummary(StrUtil.isNotBlank(detail.getSummary()) ? detail.getSummary() : summary);
+            detailRequest.setSubjectId(detail.getSubjectId());
+            detailRequest.setSubjectCode(detail.getSubjectCode());
+            detailRequest.setSubjectName(detail.getSubjectName());
+            detailRequest.setDebit(detail.getDebit() != null ? detail.getDebit() : BigDecimal.ZERO);
+            detailRequest.setCredit(detail.getCredit() != null ? detail.getCredit() : BigDecimal.ZERO);
+            detailRequest.setSortOrder(detail.getSortOrder() != null ? detail.getSortOrder() : i + 1);
+            voucherDetails.add(detailRequest);
+        }
+        voucherRequest.setDetails(voucherDetails);
+
+        // 调用凭证服务创建凭证（内部会校验会计期间、借贷平衡等），直接返回新凭证ID
+        Long voucherId = voucherService.createVoucher(voucherRequest);
+
+        log.info("应用模板生成凭证成功，模板ID: {}, 账套ID: {}, 凭证ID: {}", templateId, accountSetId, voucherId);
+        return voucherId;
     }
 
     /**

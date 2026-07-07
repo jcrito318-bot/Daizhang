@@ -1,5 +1,6 @@
 package com.company.daizhang.module.period.service.impl;
 
+import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.company.daizhang.common.annotation.OperationLog;
@@ -64,24 +65,39 @@ public class PeriodServiceImpl implements PeriodService {
         wrapper.eq(Voucher::getAccountSetId, accountSetId)
                .eq(Voucher::getYear, year)
                .eq(Voucher::getMonth, month)
-               .notLike(Voucher::getVoucherNo, "TMP-%")
-               // 按序号数值排序,而非字符串排序:序号超999时"999"按字符串大于"1000",会取错最大号导致重号
-               .last("ORDER BY CAST(SUBSTRING_INDEX(voucher_no, '-', -1) AS UNSIGNED) DESC LIMIT 1");
+               .notLike(Voucher::getVoucherNo, "TMP-%");
         List<Voucher> list = voucherMapper.selectList(wrapper);
         int sequence = 1;
         if (list != null && !list.isEmpty()) {
-            Voucher lastVoucher = list.get(0);
-            if (lastVoucher.getVoucherNo() != null && !lastVoucher.getVoucherNo().isEmpty()) {
-                String[] parts = lastVoucher.getVoucherNo().split("-");
-                if (parts.length == 3) {
-                    try {
-                        sequence = Integer.parseInt(parts[2]) + 1;
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-            }
+            // Java层提取序号取最大值,避免数据库CAST/SUBSTRING兼容性问题(凭证号含两个'-')
+            int maxSeq = list.stream()
+                    .map(Voucher::getVoucherNo)
+                    .filter(StrUtil::isNotBlank)
+                    .mapToInt(this::extractVoucherSequence)
+                    .max()
+                    .orElse(0);
+            sequence = maxSeq + 1;
         }
         return String.format("%d-%02d-%03d", year, month, sequence);
+    }
+
+    /**
+     * 从凭证号中提取序号(用于排序)
+     * 凭证号格式: 2026-01-001,取最后一个连字符后的数字部分
+     */
+    private int extractVoucherSequence(String voucherNo) {
+        if (StrUtil.isBlank(voucherNo)) {
+            return 0;
+        }
+        int lastDash = voucherNo.lastIndexOf('-');
+        if (lastDash < 0 || lastDash == voucherNo.length() - 1) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(voucherNo.substring(lastDash + 1));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     @Override

@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.customer.entity.Customer;
 import com.company.daizhang.module.customer.mapper.CustomerMapper;
 import com.company.daizhang.module.industrycommerce.dto.IndustryCommerceServiceCreateRequest;
@@ -27,7 +28,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -42,6 +45,7 @@ public class IndustryCommerceServiceServiceImpl implements IndustryCommerceServi
     private final IndustryCommerceTaskMapper industryCommerceTaskMapper;
     private final CustomerMapper customerMapper;
     private final SysUserMapper sysUserMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Override
     public PageResult<IndustryCommerceServiceVO> pageServices(IndustryCommerceServiceQueryRequest request) {
@@ -56,6 +60,19 @@ public class IndustryCommerceServiceServiceImpl implements IndustryCommerceServi
                .eq(request.getAssigneeId() != null, IndustryCommerceService::getAssigneeId, request.getAssigneeId())
                .orderByDesc(IndustryCommerceService::getCreateTime);
 
+        // IDOR治理:仅返回当前用户可访问账套下客户的工商服务(实体无accountSetId,通过customer关联链过滤)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds != null) {
+            if (accessibleIds.isEmpty()) {
+                return new PageResult<>(Collections.emptyList(), 0L, pageNum, pageSize);
+            }
+            List<Long> customerIds = listAccessibleCustomerIds(accessibleIds);
+            if (customerIds.isEmpty()) {
+                return new PageResult<>(Collections.emptyList(), 0L, pageNum, pageSize);
+            }
+            wrapper.in(IndustryCommerceService::getCustomerId, customerIds);
+        }
+
         Page<IndustryCommerceService> result = industryCommerceServiceMapper.selectPage(page, wrapper);
         List<IndustryCommerceServiceVO> voList = result.getRecords().stream()
                 .map(this::convertToVO)
@@ -69,6 +86,8 @@ public class IndustryCommerceServiceServiceImpl implements IndustryCommerceServi
         if (entity == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "工商服务不存在");
         }
+        // IDOR治理:校验当前用户对该工商服务所属账套的访问权
+        accountSetAccessService.checkAccess(resolveAccountSetIdByCustomer(entity.getCustomerId()));
         IndustryCommerceServiceVO vo = convertToVO(entity);
 
         // 查询并组装外勤任务列表
@@ -91,6 +110,8 @@ public class IndustryCommerceServiceServiceImpl implements IndustryCommerceServi
         if (customer == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "客户不存在");
         }
+        // IDOR治理:校验当前用户对该客户所属账套的所有者权限(防止越权为他人账套客户创建工商服务)
+        accountSetAccessService.checkOwner(customer.getAccountSetId());
 
         IndustryCommerceService entity = new IndustryCommerceService();
         BeanUtil.copyProperties(request, entity);
@@ -115,6 +136,8 @@ public class IndustryCommerceServiceServiceImpl implements IndustryCommerceServi
         if (entity == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "工商服务不存在");
         }
+        // IDOR治理:校验当前用户对该工商服务所属账套的所有者权限
+        accountSetAccessService.checkOwner(resolveAccountSetIdByCustomer(entity.getCustomerId()));
         // 保存原状态,防止copyProperties覆盖serviceStatus绕过状态机(状态变更只能走assignService/completeService/cancelService)
         Integer originalStatus = entity.getServiceStatus();
         BeanUtil.copyProperties(request, entity);
@@ -131,6 +154,8 @@ public class IndustryCommerceServiceServiceImpl implements IndustryCommerceServi
         if (entity == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "工商服务不存在");
         }
+        // IDOR治理:校验当前用户对该工商服务所属账套的所有者权限
+        accountSetAccessService.checkOwner(resolveAccountSetIdByCustomer(entity.getCustomerId()));
         industryCommerceServiceMapper.deleteById(id);
         log.info("删除工商服务成功，服务ID: {}", id);
     }
@@ -142,6 +167,8 @@ public class IndustryCommerceServiceServiceImpl implements IndustryCommerceServi
         if (entity == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "工商服务不存在");
         }
+        // IDOR治理:校验当前用户对该工商服务所属账套的所有者权限
+        accountSetAccessService.checkOwner(resolveAccountSetIdByCustomer(entity.getCustomerId()));
         if (assigneeId == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "经办人ID不能为空");
         }
@@ -163,6 +190,8 @@ public class IndustryCommerceServiceServiceImpl implements IndustryCommerceServi
         if (entity == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "工商服务不存在");
         }
+        // IDOR治理:校验当前用户对该工商服务所属账套的所有者权限
+        accountSetAccessService.checkOwner(resolveAccountSetIdByCustomer(entity.getCustomerId()));
         // 必须为"进行中(1)"才能完成,防止从待派工/已取消直接跳到完成绕过派工流程
         if (entity.getServiceStatus() == null || entity.getServiceStatus() != 1) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "当前状态不允许完成，仅进行中状态可完成");
@@ -180,6 +209,8 @@ public class IndustryCommerceServiceServiceImpl implements IndustryCommerceServi
         if (entity == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "工商服务不存在");
         }
+        // IDOR治理:校验当前用户对该工商服务所属账套的所有者权限
+        accountSetAccessService.checkOwner(resolveAccountSetIdByCustomer(entity.getCustomerId()));
         // 仅"待派工(0)/进行中(1)"可取消,已完成或已取消不允许
         if (entity.getServiceStatus() == null
                 || entity.getServiceStatus() == 2
@@ -189,6 +220,29 @@ public class IndustryCommerceServiceServiceImpl implements IndustryCommerceServi
         entity.setServiceStatus(3);
         industryCommerceServiceMapper.updateById(entity);
         log.info("取消工商服务成功，服务ID: {}", id);
+    }
+
+    /**
+     * IDOR治理:查询指定账套集合下的客户ID集合(用于实体无accountSetId时按customerId过滤)
+     */
+    private List<Long> listAccessibleCustomerIds(Set<Long> accessibleIds) {
+        LambdaQueryWrapper<Customer> customerWrapper = new LambdaQueryWrapper<>();
+        customerWrapper.in(Customer::getAccountSetId, accessibleIds);
+        return customerMapper.selectList(customerWrapper).stream()
+                .map(Customer::getId)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * IDOR治理关联链: service.customerId -> customer.accountSetId
+     * 通过客户ID解析其所属账套ID,用于账套级权限校验
+     */
+    private Long resolveAccountSetIdByCustomer(Long customerId) {
+        Customer customer = customerMapper.selectById(customerId);
+        if (customer == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "客户不存在");
+        }
+        return customer.getAccountSetId();
     }
 
     /**

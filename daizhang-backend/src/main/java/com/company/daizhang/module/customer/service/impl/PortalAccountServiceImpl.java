@@ -6,8 +6,11 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.customer.dto.PortalAccountRequest;
+import com.company.daizhang.module.customer.entity.Customer;
 import com.company.daizhang.module.customer.entity.PortalAccount;
+import com.company.daizhang.module.customer.mapper.CustomerMapper;
 import com.company.daizhang.module.customer.mapper.PortalAccountMapper;
 import com.company.daizhang.module.customer.service.PortalAccountService;
 import com.company.daizhang.module.customer.vo.PortalAccountVO;
@@ -17,7 +20,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -29,12 +34,23 @@ import java.util.stream.Collectors;
 public class PortalAccountServiceImpl extends ServiceImpl<PortalAccountMapper, PortalAccount> implements PortalAccountService {
 
     private final PasswordEncoder passwordEncoder;
+    private final CustomerMapper customerMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Override
     public List<PortalAccountVO> listPortals(Long customerId) {
+        // IDOR治理:仅返回当前用户可访问账套下的门户账户(超级管理员返回null表示不限制)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds != null && accessibleIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+
         LambdaQueryWrapper<PortalAccount> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(customerId != null, PortalAccount::getCustomerId, customerId)
                .orderByDesc(PortalAccount::getCreateTime);
+        if (accessibleIds != null) {
+            wrapper.in(PortalAccount::getAccountSetId, accessibleIds);
+        }
         List<PortalAccount> list = this.list(wrapper);
         return list.stream()
                 .map(this::convertToVO)
@@ -61,6 +77,13 @@ public class PortalAccountServiceImpl extends ServiceImpl<PortalAccountMapper, P
             throw new BusinessException(ErrorCode.PARAM_ERROR, "门户用户名已存在");
         }
 
+        // IDOR治理:校验当前用户对该门户账户所属账套的所有者权限(通过客户关联链获取账套)
+        Customer customer = customerMapper.selectById(request.getCustomerId());
+        if (customer == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "客户不存在");
+        }
+        accountSetAccessService.checkOwner(customer.getAccountSetId());
+
         PortalAccount portalAccount = new PortalAccount();
         BeanUtil.copyProperties(request, portalAccount);
         // 密码BCrypt加密
@@ -80,6 +103,8 @@ public class PortalAccountServiceImpl extends ServiceImpl<PortalAccountMapper, P
         if (portalAccount == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "门户账户不存在");
         }
+        // IDOR治理:校验当前用户对该门户账户所属账套的所有者权限
+        accountSetAccessService.checkOwner(portalAccount.getAccountSetId());
 
         // 检查用户名是否与其他记录冲突
         LambdaQueryWrapper<PortalAccount> wrapper = new LambdaQueryWrapper<>();
@@ -106,6 +131,8 @@ public class PortalAccountServiceImpl extends ServiceImpl<PortalAccountMapper, P
         if (portalAccount == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "门户账户不存在");
         }
+        // IDOR治理:校验当前用户对该门户账户所属账套的所有者权限
+        accountSetAccessService.checkOwner(portalAccount.getAccountSetId());
 
         this.removeById(id);
 
@@ -129,6 +156,8 @@ public class PortalAccountServiceImpl extends ServiceImpl<PortalAccountMapper, P
         if (portalAccount == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "门户账户不存在");
         }
+        // IDOR治理:校验当前用户对该门户账户所属账套的所有者权限
+        accountSetAccessService.checkOwner(portalAccount.getAccountSetId());
 
         portalAccount.setPortalPassword(passwordEncoder.encode(newPassword));
         this.updateById(portalAccount);
@@ -153,6 +182,8 @@ public class PortalAccountServiceImpl extends ServiceImpl<PortalAccountMapper, P
         if (portalAccount == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "门户账户不存在");
         }
+        // IDOR治理:校验当前用户对该门户账户所属账套的所有者权限
+        accountSetAccessService.checkOwner(portalAccount.getAccountSetId());
 
         portalAccount.setStatus(status);
         this.updateById(portalAccount);

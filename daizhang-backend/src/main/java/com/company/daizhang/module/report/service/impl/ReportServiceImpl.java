@@ -4,7 +4,10 @@ import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.module.accountset.entity.AccountBalance;
+import com.company.daizhang.module.accountset.entity.AccountPeriod;
 import com.company.daizhang.module.accountset.mapper.AccountBalanceMapper;
+import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.report.dto.ReportQueryRequest;
 import com.company.daizhang.module.report.entity.CashFlowAdjustment;
 import com.company.daizhang.module.report.mapper.CashFlowAdjustmentMapper;
@@ -21,6 +24,7 @@ import com.company.daizhang.module.voucher.entity.Voucher;
 import com.company.daizhang.module.voucher.entity.VoucherDetail;
 import com.company.daizhang.module.voucher.mapper.VoucherDetailMapper;
 import com.company.daizhang.module.voucher.mapper.VoucherMapper;
+import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,8 +32,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.util.HtmlUtils;
 
+import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -44,6 +52,7 @@ import java.util.stream.Collectors;
 public class ReportServiceImpl implements ReportService {
 
     private final AccountBalanceMapper accountBalanceMapper;
+    private final AccountPeriodMapper accountPeriodMapper;
     private final SubjectMapper subjectMapper;
     private final ReportExcelUtil reportExcelUtil;
     private final VoucherMapper voucherMapper;
@@ -51,13 +60,20 @@ public class ReportServiceImpl implements ReportService {
     private final CashFlowAdjustmentMapper cashFlowAdjustmentMapper;
     private final AuxiliaryCategoryMapper auxiliaryCategoryMapper;
     private final AuxiliaryItemMapper auxiliaryItemMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Override
     @Transactional(readOnly = true)
     public BalanceSheetVO balanceSheet(ReportQueryRequest request) {
+        accountSetAccessService.checkAccess(request.getAccountSetId());
         Long accountSetId = request.getAccountSetId();
         Integer year = request.getYear();
         Integer month = request.getMonth();
+
+        // 期间结账校验：未结账期间报表数据可能变更，仅告警不阻断
+        if (!checkPeriodClosed(accountSetId, year, month)) {
+            log.warn("期间未结账，报表数据可能变更。accountSetId={}, {}年{}月", accountSetId, year, month);
+        }
 
         // 查询所有科目
         LambdaQueryWrapper<Subject> subjectWrapper = new LambdaQueryWrapper<>();
@@ -133,9 +149,15 @@ public class ReportServiceImpl implements ReportService {
     @Override
     @Transactional(readOnly = true)
     public IncomeStatementVO incomeStatement(ReportQueryRequest request) {
+        accountSetAccessService.checkAccess(request.getAccountSetId());
         Long accountSetId = request.getAccountSetId();
         Integer year = request.getYear();
         Integer month = request.getMonth();
+
+        // 期间结账校验：未结账期间报表数据可能变更，仅告警不阻断
+        if (!checkPeriodClosed(accountSetId, year, month)) {
+            log.warn("期间未结账，报表数据可能变更。accountSetId={}, {}年{}月", accountSetId, year, month);
+        }
 
         // 查询损益类科目（isCurrent=1）
         LambdaQueryWrapper<Subject> subjectWrapper = new LambdaQueryWrapper<>();
@@ -476,6 +498,7 @@ public class ReportServiceImpl implements ReportService {
     @Override
     @Transactional(readOnly = true)
     public SubjectBalanceTableVO subjectBalanceTable(ReportQueryRequest request) {
+        accountSetAccessService.checkAccess(request.getAccountSetId());
         Long accountSetId = request.getAccountSetId();
         Integer year = request.getYear();
         Integer month = request.getMonth();
@@ -540,6 +563,12 @@ public class ReportServiceImpl implements ReportService {
     @Override
     @Transactional(readOnly = true)
     public CashFlowStatementVO cashFlowStatement(Long accountSetId, Integer year, Integer month) {
+        accountSetAccessService.checkAccess(accountSetId);
+        // 期间结账校验：未结账期间报表数据可能变更，仅告警不阻断
+        if (!checkPeriodClosed(accountSetId, year, month)) {
+            log.warn("期间未结账，报表数据可能变更。accountSetId={}, {}年{}月", accountSetId, year, month);
+        }
+
         // 1. 查询该账套该期间所有已过账凭证（status=2）
         LambdaQueryWrapper<Voucher> voucherWrapper = new LambdaQueryWrapper<>();
         voucherWrapper.eq(Voucher::getAccountSetId, accountSetId)
@@ -767,6 +796,7 @@ public class ReportServiceImpl implements ReportService {
     @Override
     @Transactional(readOnly = true)
     public List<CashFlowAdjustmentVO> listAdjustments(Long accountSetId, Integer year, Integer month) {
+        accountSetAccessService.checkAccess(accountSetId);
         LambdaQueryWrapper<CashFlowAdjustment> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(CashFlowAdjustment::getAccountSetId, accountSetId)
                 .eq(CashFlowAdjustment::getYear, year)
@@ -784,6 +814,7 @@ public class ReportServiceImpl implements ReportService {
         if (request.getAccountSetId() == null) {
             throw new BusinessException("账套ID不能为空");
         }
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         if (request.getYear() == null || request.getMonth() == null) {
             throw new BusinessException("年度和月份不能为空");
         }
@@ -822,6 +853,7 @@ public class ReportServiceImpl implements ReportService {
         if (entity == null) {
             throw new BusinessException("现金流量调整项不存在");
         }
+        accountSetAccessService.checkOwner(entity.getAccountSetId());
         cashFlowAdjustmentMapper.deleteById(id);
         log.info("删除现金流量调整项成功，ID: {}", id);
     }
@@ -829,6 +861,7 @@ public class ReportServiceImpl implements ReportService {
     @Override
     @Transactional(readOnly = true)
     public CashFlowStatementVO cashFlowStatementWithAdjustment(Long accountSetId, Integer year, Integer month) {
+        accountSetAccessService.checkAccess(accountSetId);
         // 1. 获取原始现金流量表
         CashFlowStatementVO vo = cashFlowStatement(accountSetId, year, month);
 
@@ -1068,6 +1101,7 @@ public class ReportServiceImpl implements ReportService {
     @Override
     @Transactional(readOnly = true)
     public String generatePrintHtml(Long accountSetId, Integer year, Integer month, String reportType) {
+        accountSetAccessService.checkAccess(accountSetId);
         ReportQueryRequest request = new ReportQueryRequest();
         request.setAccountSetId(accountSetId);
         request.setYear(year);
@@ -1077,7 +1111,7 @@ public class ReportServiceImpl implements ReportService {
         String printDate = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
 
         StringBuilder html = new StringBuilder();
-        html.append("<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"UTF-8\">");
+        html.append("<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"UTF-8\" />");
         html.append("<title>财务报表打印</title>");
         html.append("<style>");
         html.append("body{font-family:'SimSun','宋体',serif;margin:20px;color:#000;}");
@@ -1100,12 +1134,119 @@ public class ReportServiceImpl implements ReportService {
             html.append(buildCashFlowStatementHtml(accountSetId, year, month, periodTitle, printDate));
         } else if ("subject-balance".equals(reportType)) {
             html.append(buildSubjectBalanceHtml(request, periodTitle, printDate));
+        } else if ("equity-change-statement".equals(reportType)) {
+            html.append(buildEquityChangeStatementHtml(accountSetId, year, month, periodTitle, printDate));
+        } else if ("department-expense".equals(reportType)) {
+            html.append(buildDepartmentExpenseHtml(accountSetId, year, month, periodTitle, printDate));
         } else {
             html.append("<div class=\"report-title\">不支持的报表类型: ").append(esc(reportType)).append("</div>");
         }
 
         html.append("</body></html>");
         return html.toString();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public void exportBalanceSheetPdf(Long accountSetId, Integer year, Integer month, HttpServletResponse response) {
+        exportReportPdf(accountSetId, year, month, "balance-sheet", "资产负债表", response);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public void exportIncomeStatementPdf(Long accountSetId, Integer year, Integer month, HttpServletResponse response) {
+        exportReportPdf(accountSetId, year, month, "income-statement", "利润表", response);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public void exportCashFlowStatementPdf(Long accountSetId, Integer year, Integer month, HttpServletResponse response) {
+        exportReportPdf(accountSetId, year, month, "cash-flow-statement", "现金流量表", response);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public void exportSubjectBalanceTablePdf(Long accountSetId, Integer year, Integer month, HttpServletResponse response) {
+        exportReportPdf(accountSetId, year, month, "subject-balance", "科目余额表", response);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public void exportEquityChangeStatement(ReportQueryRequest request, HttpServletResponse response) {
+        EquityChangeStatementVO data = equityChangeStatement(request.getAccountSetId(), request.getYear(), request.getMonth());
+        reportExcelUtil.exportEquityChangeStatement(data, request.getYear(), request.getMonth(), response);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public void exportEquityChangeStatementPdf(ReportQueryRequest request, HttpServletResponse response) {
+        exportReportPdf(request.getAccountSetId(), request.getYear(), request.getMonth(),
+                "equity-change-statement", "所有者权益变动表", response);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public void exportDepartmentExpense(ReportQueryRequest request, HttpServletResponse response) {
+        DepartmentExpenseReportVO data = departmentExpenseReport(request.getAccountSetId(), request.getYear(), request.getMonth());
+        reportExcelUtil.exportDepartmentExpense(data, request.getYear(), request.getMonth(), response);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public void exportDepartmentExpensePdf(ReportQueryRequest request, HttpServletResponse response) {
+        exportReportPdf(request.getAccountSetId(), request.getYear(), request.getMonth(),
+                "department-expense", "部门费用分析表", response);
+    }
+
+    /**
+     * 通用报表PDF导出：复用 generatePrintHtml 生成HTML，再用 OpenHTMLtopdf 转 PDF 写入响应。
+     * 先渲染到内存再写响应，避免生成失败时已提交响应无法返回错误。
+     */
+    private void exportReportPdf(Long accountSetId, Integer year, Integer month,
+                                 String reportType, String reportName, HttpServletResponse response) {
+        String html = generatePrintHtml(accountSetId, year, month, reportType);
+        try (ByteArrayOutputStream os = new ByteArrayOutputStream()) {
+            PdfRendererBuilder builder = new PdfRendererBuilder();
+            builder.useFastMode();
+            builder.withHtmlContent(html, null);
+            useChineseFont(builder);
+            builder.toStream(os);
+            builder.run();
+
+            byte[] pdfBytes = os.toByteArray();
+            response.setContentType("application/pdf");
+            response.setCharacterEncoding("utf-8");
+            String fileName = reportName + "_" + year + "年" + month + "月.pdf";
+            String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replaceAll("\\+", "%20");
+            response.setHeader("Content-disposition", "attachment;filename*=utf-8''" + encodedFileName);
+            response.getOutputStream().write(pdfBytes);
+            response.getOutputStream().flush();
+        } catch (Exception e) {
+            log.error("导出{}PDF失败", reportName, e);
+            throw new BusinessException("导出PDF失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 配置中文字体（PDF渲染）
+     * OpenHTMLtopdf 的 PDFBox 后端仅支持 TTF 格式，不支持 OTF
+     * 优先使用 AR PL UMing（文鼎宋体，TTF格式）渲染中文
+     */
+    private void useChineseFont(PdfRendererBuilder builder) {
+        String[] fontPaths = {
+                "/usr/share/fonts/truetype/arphic/uming.ttc",
+                "/usr/share/fonts/truetype/arphic/ukai.ttc",
+                "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+                "/usr/share/fonts/truetype/simsun.ttc"
+        };
+        for (String path : fontPaths) {
+            File f = new File(path);
+            if (f.exists()) {
+                builder.useFont(f, "SimSun");
+                builder.useFont(f, "宋体");
+                return;
+            }
+        }
     }
 
     /**
@@ -1298,6 +1439,73 @@ public class ReportServiceImpl implements ReportService {
     }
 
     /**
+     * 构建所有者权益变动表打印HTML
+     */
+    private String buildEquityChangeStatementHtml(Long accountSetId, Integer year, Integer month, String periodTitle, String printDate) {
+        EquityChangeStatementVO vo = equityChangeStatement(accountSetId, year, month);
+        StringBuilder sb = new StringBuilder();
+        sb.append("<div class=\"report-title\">所有者权益变动表</div>");
+        sb.append("<div class=\"report-period\">会计期间：").append(periodTitle).append("</div>");
+        sb.append("<table>");
+        sb.append("<thead><tr><th>行次</th><th>项目</th>");
+        sb.append("<th class=\"num\">年初余额</th><th class=\"num\">本年增加</th>");
+        sb.append("<th class=\"num\">本年减少</th><th class=\"num\">期末余额</th></tr></thead>");
+        sb.append("<tbody>");
+        if (vo.getItems() != null) {
+            for (EquityChangeItem item : vo.getItems()) {
+                sb.append("<tr>");
+                sb.append("<td>").append(item.getRowNo()).append("</td>");
+                sb.append("<td>").append(esc(item.getItemName())).append("</td>");
+                sb.append("<td class=\"num\">").append(formatAmount(item.getBeginningBalance())).append("</td>");
+                sb.append("<td class=\"num\">").append(formatAmount(item.getIncreaseAmount())).append("</td>");
+                sb.append("<td class=\"num\">").append(formatAmount(item.getDecreaseAmount())).append("</td>");
+                sb.append("<td class=\"num\">").append(formatAmount(item.getEndingBalance())).append("</td>");
+                sb.append("</tr>");
+            }
+        }
+        sb.append("<tr class=\"total\"><td></td><td>合计</td>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getTotalBeginningBalance())).append("</td>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getTotalIncrease())).append("</td>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getTotalDecrease())).append("</td>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getTotalEndingBalance())).append("</td>");
+        sb.append("</tr>");
+        sb.append("</tbody></table>");
+        sb.append("<div class=\"footer\">打印日期：").append(printDate).append("</div>");
+        return sb.toString();
+    }
+
+    /**
+     * 构建部门费用分析表打印HTML
+     */
+    private String buildDepartmentExpenseHtml(Long accountSetId, Integer year, Integer month, String periodTitle, String printDate) {
+        DepartmentExpenseReportVO vo = departmentExpenseReport(accountSetId, year, month);
+        StringBuilder sb = new StringBuilder();
+        sb.append("<div class=\"report-title\">部门费用分析表</div>");
+        sb.append("<div class=\"report-period\">会计期间：").append(periodTitle).append("</div>");
+        sb.append("<table>");
+        sb.append("<thead><tr><th>部门编码</th><th>部门名称</th>");
+        sb.append("<th class=\"num\">本期借方发生额</th><th class=\"num\">本年累计</th><th class=\"num\">占比(%)</th></tr></thead>");
+        sb.append("<tbody>");
+        if (vo.getItems() != null) {
+            for (DepartmentExpenseItem item : vo.getItems()) {
+                sb.append("<tr>");
+                sb.append("<td>").append(esc(item.getDepartmentCode())).append("</td>");
+                sb.append("<td>").append(esc(item.getDepartmentName())).append("</td>");
+                sb.append("<td class=\"num\">").append(formatAmount(item.getPeriodAmount())).append("</td>");
+                sb.append("<td class=\"num\">").append(formatAmount(item.getYearAmount())).append("</td>");
+                sb.append("<td class=\"num\">").append(formatAmount(item.getPercentage())).append("</td>");
+                sb.append("</tr>");
+            }
+        }
+        sb.append("<tr class=\"total\"><td></td><td>合计</td>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getTotalExpense())).append("</td>");
+        sb.append("<td class=\"num\"></td><td class=\"num\"></td></tr>");
+        sb.append("</tbody></table>");
+        sb.append("<div class=\"footer\">打印日期：").append(printDate).append("</div>");
+        return sb.toString();
+    }
+
+    /**
      * 格式化金额（保留两位小数）
      */
     private String formatAmount(BigDecimal amount) {
@@ -1315,6 +1523,25 @@ public class ReportServiceImpl implements ReportService {
             return "";
         }
         return HtmlUtils.htmlEscape(text);
+    }
+
+    /**
+     * 检查会计期间是否已结账
+     * AccountPeriod.status：0=未结账(OPEN)，1=已结账(CLOSED)
+     *
+     * @param accountSetId 账套ID
+     * @param year         年度
+     * @param month        月份
+     * @return true=已结账，false=未结账(含期间不存在或status为null)
+     */
+    private boolean checkPeriodClosed(Long accountSetId, Integer year, Integer month) {
+        LambdaQueryWrapper<AccountPeriod> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(AccountPeriod::getAccountSetId, accountSetId)
+                .eq(AccountPeriod::getYear, year)
+                .eq(AccountPeriod::getMonth, month);
+        AccountPeriod period = accountPeriodMapper.selectOne(wrapper);
+        // 用 Integer.valueOf(1).equals(...) 避免 status 为 null 时自动拆箱 NPE
+        return period != null && Integer.valueOf(1).equals(period.getStatus());
     }
 
     /**
@@ -1428,6 +1655,7 @@ public class ReportServiceImpl implements ReportService {
     @Override
     @Transactional(readOnly = true)
     public EquityChangeStatementVO equityChangeStatement(Long accountSetId, Integer year, Integer month) {
+        accountSetAccessService.checkAccess(accountSetId);
         // 查询所有者权益类科目
         LambdaQueryWrapper<Subject> subjectWrapper = new LambdaQueryWrapper<>();
         subjectWrapper.eq(Subject::getAccountSetId, accountSetId)
@@ -1506,6 +1734,7 @@ public class ReportServiceImpl implements ReportService {
     @Override
     @Transactional(readOnly = true)
     public DepartmentExpenseReportVO departmentExpenseReport(Long accountSetId, Integer year, Integer month) {
+        accountSetAccessService.checkAccess(accountSetId);
         DepartmentExpenseReportVO vo = new DepartmentExpenseReportVO();
         vo.setAccountSetId(accountSetId);
         vo.setYear(year);

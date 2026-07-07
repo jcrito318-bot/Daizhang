@@ -8,6 +8,11 @@ import com.company.daizhang.module.accountset.entity.AccountBalance;
 import com.company.daizhang.module.accountset.entity.AccountSet;
 import com.company.daizhang.module.accountset.mapper.AccountBalanceMapper;
 import com.company.daizhang.module.accountset.mapper.AccountSetMapper;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
+import com.company.daizhang.module.bank.entity.BankAccount;
+import com.company.daizhang.module.bank.entity.BankTransaction;
+import com.company.daizhang.module.bank.mapper.BankAccountMapper;
+import com.company.daizhang.module.bank.mapper.BankTransactionMapper;
 import com.company.daizhang.module.ledger.dto.LedgerQueryRequest;
 import com.company.daizhang.module.ledger.dto.SubjectBalanceQueryRequest;
 import com.company.daizhang.module.ledger.entity.MultiColumnConfig;
@@ -42,12 +47,16 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.math.BigDecimal;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -69,6 +78,9 @@ public class LedgerServiceImpl implements LedgerService {
     private final MultiColumnConfigMapper multiColumnConfigMapper;
     private final AuxiliaryItemMapper auxiliaryItemMapper;
     private final AuxiliaryCategoryMapper auxiliaryCategoryMapper;
+    private final AccountSetAccessService accountSetAccessService;
+    private final BankAccountMapper bankAccountMapper;
+    private final BankTransactionMapper bankTransactionMapper;
 
     @Override
     @Transactional(readOnly = true)
@@ -82,6 +94,9 @@ public class LedgerServiceImpl implements LedgerService {
         if (accountSetId == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "账套ID不能为空");
         }
+
+        // IDOR越权校验：账套读权限
+        accountSetAccessService.checkAccess(accountSetId);
 
         // 业务校验：科目ID不能为空
         if (subjectId == null) {
@@ -254,6 +269,9 @@ public class LedgerServiceImpl implements LedgerService {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "账套ID不能为空");
         }
 
+        // IDOR越权校验：账套读权限
+        accountSetAccessService.checkAccess(accountSetId);
+
         // 业务校验：年度不能为空
         if (year == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "年度不能为空");
@@ -331,6 +349,9 @@ public class LedgerServiceImpl implements LedgerService {
         if (accountSetId == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "账套ID不能为空");
         }
+
+        // IDOR越权校验：账套读权限
+        accountSetAccessService.checkAccess(accountSetId);
 
         // 业务校验：年度不能为空
         if (year == null) {
@@ -467,6 +488,9 @@ public class LedgerServiceImpl implements LedgerService {
         if (accountSetId == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "账套ID不能为空");
         }
+
+        // IDOR越权校验：账套读权限
+        accountSetAccessService.checkAccess(accountSetId);
 
         // 业务校验：年度不能为空
         if (year == null) {
@@ -1118,6 +1142,8 @@ public class LedgerServiceImpl implements LedgerService {
         if (accountSetId == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "账套ID不能为空");
         }
+        // IDOR越权校验：账套读权限
+        accountSetAccessService.checkAccess(accountSetId);
         if (year == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "年度不能为空");
         }
@@ -1198,6 +1224,8 @@ public class LedgerServiceImpl implements LedgerService {
         if (accountSetId == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "账套ID不能为空");
         }
+        // IDOR越权校验：账套读权限
+        accountSetAccessService.checkAccess(accountSetId);
         if (year == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "年度不能为空");
         }
@@ -1288,6 +1316,8 @@ public class LedgerServiceImpl implements LedgerService {
         if (accountSetId == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "账套ID不能为空");
         }
+        // IDOR越权校验：账套读权限
+        accountSetAccessService.checkAccess(accountSetId);
         if (year == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "年度不能为空");
         }
@@ -1462,7 +1492,7 @@ public class LedgerServiceImpl implements LedgerService {
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional(rollbackFor = Exception.class)
     public ReconciliationVO reconciliation(Long accountSetId, Long subjectId, Long auxiliaryId, Integer year, Integer month) {
         validateLedgerParams(accountSetId, subjectId, year, month);
         if (auxiliaryId == null) {
@@ -1511,6 +1541,70 @@ public class LedgerServiceImpl implements LedgerService {
             details = voucherDetailMapper.selectList(detailWrapper);
         }
 
+        // 银企对账：从银行流水计算对方余额，并收集已核对的凭证ID集合
+        // 1. 查询该账套、该科目关联的银行账户（BankAccount.subjectId 关联银行存款明细科目）
+        LambdaQueryWrapper<BankAccount> bankAccountWrapper = new LambdaQueryWrapper<>();
+        bankAccountWrapper.eq(BankAccount::getAccountSetId, accountSetId)
+                .eq(BankAccount::getSubjectId, subjectId);
+        List<BankAccount> bankAccounts = bankAccountMapper.selectList(bankAccountWrapper);
+
+        BigDecimal counterpartBalance;
+        // 已与银行流水核对的凭证ID集合（BankTransaction.voucherId 关联凭证）
+        Set<Long> matchedVoucherIds = new HashSet<>();
+        // 银行流水明细集合，用于明细级别的核对标识
+        if (bankAccounts.isEmpty()) {
+            // 无银行账户数据，对方余额为0
+            counterpartBalance = BigDecimal.ZERO;
+        } else {
+            // 提取银行账号（BankTransaction 通过 bankAccount 账号字符串关联银行账户）
+            List<String> accountNumbers = bankAccounts.stream()
+                    .map(BankAccount::getAccountNumber)
+                    .filter(s -> s != null && !s.isEmpty())
+                    .collect(Collectors.toList());
+
+            // 期初余额累计
+            BigDecimal beginningTotal = bankAccounts.stream()
+                    .map(a -> a.getBeginningBalance() != null ? a.getBeginningBalance() : BigDecimal.ZERO)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            if (accountNumbers.isEmpty()) {
+                // 银行账户未登记账号，仅以期初余额作为对方余额
+                counterpartBalance = beginningTotal;
+            } else {
+                // 计算期间范围：年初至所选月份末（month=null 则取全年）
+                LocalDate startDate = LocalDate.of(year, 1, 1);
+                LocalDate endDate = month != null
+                        ? LocalDate.of(year, month, 1).withDayOfMonth(LocalDate.of(year, month, 1).lengthOfMonth())
+                        : LocalDate.of(year, 12, 31);
+
+                LambdaQueryWrapper<BankTransaction> bankTxnWrapper = new LambdaQueryWrapper<>();
+                bankTxnWrapper.in(BankTransaction::getBankAccount, accountNumbers)
+                        .ge(BankTransaction::getTransactionDate, startDate)
+                        .le(BankTransaction::getTransactionDate, endDate);
+                List<BankTransaction> bankTransactions = bankTransactionMapper.selectList(bankTxnWrapper);
+
+                // 收入流水（transactionType=1）
+                BigDecimal incomeTotal = bankTransactions.stream()
+                        .filter(t -> t.getTransactionType() != null && t.getTransactionType() == 1)
+                        .map(t -> t.getAmount() != null ? t.getAmount() : BigDecimal.ZERO)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+                // 支出流水（transactionType=2）
+                BigDecimal expenseTotal = bankTransactions.stream()
+                        .filter(t -> t.getTransactionType() != null && t.getTransactionType() == 2)
+                        .map(t -> t.getAmount() != null ? t.getAmount() : BigDecimal.ZERO)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+                // 对方余额 = 期初余额 + 收入流水 - 支出流水
+                counterpartBalance = beginningTotal.add(incomeTotal).subtract(expenseTotal);
+
+                // 收集已与银行流水核对的凭证ID（bankTransaction.voucherId 不为空表示已生成凭证/已核对）
+                matchedVoucherIds = bankTransactions.stream()
+                        .map(BankTransaction::getVoucherId)
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toSet());
+            }
+        }
+
         // 构建明细列表并计算账面余额
         List<ReconciliationDetailVO> detailList = new ArrayList<>();
         BigDecimal totalDebit = BigDecimal.ZERO;
@@ -1530,7 +1624,8 @@ public class LedgerServiceImpl implements LedgerService {
             BigDecimal credit = detail.getCredit() != null ? detail.getCredit() : BigDecimal.ZERO;
             detailVO.setDebit(debit);
             detailVO.setCredit(credit);
-            detailVO.setMatched(false);
+            // 凭证已与银行流水核对则标记为已核对
+            detailVO.setMatched(matchedVoucherIds.contains(detail.getVoucherId()));
 
             totalDebit = totalDebit.add(debit);
             totalCredit = totalCredit.add(credit);
@@ -1543,8 +1638,6 @@ public class LedgerServiceImpl implements LedgerService {
         BigDecimal bookBalance = (balanceDirection == 1)
                 ? totalDebit.subtract(totalCredit)
                 : totalCredit.subtract(totalDebit);
-        // 对方余额暂时设为0（无外部数据源）
-        BigDecimal counterpartBalance = BigDecimal.ZERO;
         BigDecimal difference = bookBalance.subtract(counterpartBalance);
         String status = difference.compareTo(BigDecimal.ZERO) == 0 ? "已平" : "未平";
 
@@ -1568,6 +1661,8 @@ public class LedgerServiceImpl implements LedgerService {
         if (accountSetId == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "账套ID不能为空");
         }
+        // IDOR越权校验：账套读权限
+        accountSetAccessService.checkAccess(accountSetId);
         if (year == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "年度不能为空");
         }
@@ -1789,6 +1884,107 @@ public class LedgerServiceImpl implements LedgerService {
         return result;
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public void exportCashJournal(Long accountSetId, Integer year, Integer month, HttpServletResponse response) {
+        // 复用现金日记账查询逻辑，pageSize设大值以导出全部
+        LedgerQueryRequest request = new LedgerQueryRequest();
+        request.setAccountSetId(accountSetId);
+        request.setYear(year);
+        request.setMonth(month);
+        request.setPageNum(1);
+        request.setPageSize(100000);
+        PageResult<CashJournalVO> page = cashJournal(request);
+        writeJournalExcel(page.getList(), "现金日记账", year, month, response);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public void exportBankJournal(Long accountSetId, Integer year, Integer month, Long bankAccountId, HttpServletResponse response) {
+        // 复用银行日记账查询逻辑（按所有银行科目汇总），pageSize设大值以导出全部
+        // bankAccountId为预留参数，当前导出全部银行科目日记账
+        LedgerQueryRequest request = new LedgerQueryRequest();
+        request.setAccountSetId(accountSetId);
+        request.setYear(year);
+        request.setMonth(month);
+        request.setPageNum(1);
+        request.setPageSize(100000);
+        PageResult<CashJournalVO> page = bankJournal(request);
+        writeJournalExcel(page.getList(), "银行日记账", year, month, response);
+    }
+
+    /**
+     * 将日记账数据写入Excel并输出到响应
+     * 列：日期、凭证号、摘要、借方(收入)、贷方(支出)、余额
+     */
+    private void writeJournalExcel(List<CashJournalVO> list, String title, Integer year, Integer month, HttpServletResponse response) {
+        try (Workbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Sheet sheet = workbook.createSheet(title);
+            CellStyle headerStyle = createHeaderStyle(workbook);
+
+            // 标题
+            Row titleRow = sheet.createRow(0);
+            Cell titleCell = titleRow.createCell(0);
+            titleCell.setCellValue(title + " " + year + "年" + (month != null ? month + "月" : ""));
+            titleCell.setCellStyle(headerStyle);
+
+            // 表头
+            Row headerRow = sheet.createRow(2);
+            String[] headers = {"日期", "凭证号", "摘要", "借方", "贷方", "余额"};
+            for (int i = 0; i < headers.length; i++) {
+                Cell cell = headerRow.createCell(i);
+                cell.setCellValue(headers[i]);
+                cell.setCellStyle(headerStyle);
+            }
+
+            // 数据行（借方=收入，贷方=支出）
+            int rowNum = 3;
+            if (list != null) {
+                for (CashJournalVO vo : list) {
+                    Row row = sheet.createRow(rowNum++);
+                    row.createCell(0).setCellValue(vo.getVoucherDate() != null ? vo.getVoucherDate().toString() : "");
+                    row.createCell(1).setCellValue(vo.getVoucherNo() != null ? vo.getVoucherNo() : "");
+                    row.createCell(2).setCellValue(vo.getSummary() != null ? vo.getSummary() : "");
+                    row.createCell(3).setCellValue(vo.getIncome() != null ? vo.getIncome().doubleValue() : 0);
+                    row.createCell(4).setCellValue(vo.getExpense() != null ? vo.getExpense().doubleValue() : 0);
+                    row.createCell(5).setCellValue(vo.getBalance() != null ? vo.getBalance().doubleValue() : 0);
+                }
+            }
+
+            // 列宽
+            sheet.setColumnWidth(0, 12 * 256);
+            sheet.setColumnWidth(1, 14 * 256);
+            sheet.setColumnWidth(2, 30 * 256);
+            for (int i = 3; i < 6; i++) {
+                sheet.setColumnWidth(i, 15 * 256);
+            }
+
+            workbook.write(out);
+            writeExcelToResponse(response, out.toByteArray(), title + "_" + year + "年" + (month != null ? month + "月" : "") + ".xlsx");
+        } catch (IOException e) {
+            log.error("导出{}失败", title, e);
+            throw new RuntimeException("导出" + title + "失败", e);
+        }
+    }
+
+    /**
+     * 将Excel字节数组写入HTTP响应
+     */
+    private void writeExcelToResponse(HttpServletResponse response, byte[] data, String fileName) {
+        response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+        response.setCharacterEncoding("utf-8");
+        String encodedFileName = URLEncoder.encode(fileName, StandardCharsets.UTF_8).replaceAll("\\+", "%20");
+        response.setHeader("Content-disposition", "attachment;filename*=utf-8''" + encodedFileName);
+        try (OutputStream os = response.getOutputStream()) {
+            os.write(data);
+            os.flush();
+        } catch (IOException e) {
+            log.error("写入Excel响应失败", e);
+            throw new RuntimeException("导出失败", e);
+        }
+    }
+
     // ==================== 辅助方法 ====================
 
     /**
@@ -1798,6 +1994,8 @@ public class LedgerServiceImpl implements LedgerService {
         if (accountSetId == null) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "账套ID不能为空");
         }
+        // IDOR越权校验：账套读权限
+        accountSetAccessService.checkAccess(accountSetId);
         if (subjectId == null) {
             throw new BusinessException(ErrorCode.LEDGER_SUBJECT_ID_BLANK);
         }

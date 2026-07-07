@@ -39,7 +39,7 @@ public class Voucher extends BaseEntity {
     private Integer attachmentCount;
 
     /**
-     * 0-未审核 1-已审核 2-已过账
+     * 0-未审核 1-已审核 2-已过账 3-已作废
      */
     private Integer status;
 

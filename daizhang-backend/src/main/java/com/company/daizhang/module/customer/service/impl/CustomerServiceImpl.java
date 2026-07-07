@@ -43,9 +43,11 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -82,8 +84,21 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
                .eq(StrUtil.isNotBlank(request.getTaxpayerType()), Customer::getTaxpayerType, request.getTaxpayerType())
                .like(StrUtil.isNotBlank(request.getContactPhone()), Customer::getContactPhone, request.getContactPhone())
                .eq(request.getStatus() != null, Customer::getStatus, request.getStatus())
-               .eq(request.getAccountSetId() != null, Customer::getAccountSetId, request.getAccountSetId())
                .orderByDesc(Customer::getCreateTime);
+
+        // IDOR治理:显式指定账套则校验访问权后过滤,否则按可访问账套集合过滤(超管返回null表示不限制)
+        if (request.getAccountSetId() != null) {
+            accountSetAccessService.checkAccess(request.getAccountSetId());
+            wrapper.eq(Customer::getAccountSetId, request.getAccountSetId());
+        } else {
+            Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+            if (accessibleIds != null) {
+                if (accessibleIds.isEmpty()) {
+                    return new PageResult<>(Collections.emptyList(), 0L, request.getPageNum(), request.getPageSize());
+                }
+                wrapper.in(Customer::getAccountSetId, accessibleIds);
+            }
+        }
 
         Page<Customer> result = this.page(page, wrapper);
 
@@ -96,7 +111,18 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
 
     @Override
     public List<CustomerVO> listAllCustomers() {
-        List<Customer> list = this.list();
+        // IDOR治理:仅返回当前用户可访问账套下的客户(超级管理员返回null表示不限制)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds != null && accessibleIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        LambdaQueryWrapper<Customer> wrapper = new LambdaQueryWrapper<>();
+        wrapper.orderByDesc(Customer::getCreateTime);
+        if (accessibleIds != null) {
+            wrapper.in(Customer::getAccountSetId, accessibleIds);
+        }
+        List<Customer> list = this.list(wrapper);
         return list.stream()
                 .map(this::convertToVO)
                 .collect(Collectors.toList());
@@ -116,6 +142,9 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createCustomer(CustomerCreateRequest request) {
+        // IDOR治理:校验当前用户对目标账套的所有者权限(写操作用checkOwner)
+        accountSetAccessService.checkOwner(request.getAccountSetId());
+
         // 检查编码是否已存在
         LambdaQueryWrapper<Customer> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Customer::getCustomerCode, request.getCustomerCode());
@@ -192,6 +221,15 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
                .eq(customerStatus != null, Customer::getCustomerStatus, customerStatus)
                .eq(StrUtil.isNotBlank(industryType), Customer::getIndustryType, industryType)
                .orderByDesc(Customer::getCreateTime);
+
+        // IDOR治理:仅返回当前用户可访问账套下的客户(超级管理员返回null表示不限制)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds != null) {
+            if (accessibleIds.isEmpty()) {
+                return new PageResult<>(Collections.emptyList(), 0L, pageNum, pageSize);
+            }
+            wrapper.in(Customer::getAccountSetId, accessibleIds);
+        }
 
         Page<Customer> result = this.page(page, wrapper);
 
@@ -475,12 +513,21 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
 
     @Override
     public List<Map<String, Object>> getCustomerStatistics() {
+        // IDOR治理:仅统计当前用户可访问账套下的客户(超级管理员返回null表示不限制)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds != null && accessibleIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+
         List<Map<String, Object>> result = new ArrayList<>();
 
         // 按客户等级分组
         QueryWrapper<Customer> levelWrapper = new QueryWrapper<>();
         levelWrapper.select("IFNULL(customer_level,'未分类') as groupKey, count(*) as total")
                    .groupBy("customer_level");
+        if (accessibleIds != null) {
+            levelWrapper.in("account_set_id", accessibleIds);
+        }
         List<Map<String, Object>> levelStats = this.listMaps(levelWrapper);
         for (Map<String, Object> map : levelStats) {
             map.put("groupType", "level");
@@ -491,6 +538,9 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         QueryWrapper<Customer> statusWrapper = new QueryWrapper<>();
         statusWrapper.select("IFNULL(customer_status,-1) as groupKey, count(*) as total")
                     .groupBy("customer_status");
+        if (accessibleIds != null) {
+            statusWrapper.in("account_set_id", accessibleIds);
+        }
         List<Map<String, Object>> statusStats = this.listMaps(statusWrapper);
         for (Map<String, Object> map : statusStats) {
             map.put("groupType", "status");
@@ -501,6 +551,9 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         QueryWrapper<Customer> industryWrapper = new QueryWrapper<>();
         industryWrapper.select("IFNULL(industry_type,'未分类') as groupKey, count(*) as total")
                      .groupBy("industry_type");
+        if (accessibleIds != null) {
+            industryWrapper.in("account_set_id", accessibleIds);
+        }
         List<Map<String, Object>> industryStats = this.listMaps(industryWrapper);
         for (Map<String, Object> map : industryStats) {
             map.put("groupType", "industry");
@@ -516,6 +569,15 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         LambdaQueryWrapper<Customer> customerWrapper = new LambdaQueryWrapper<>();
         customerWrapper.like(StrUtil.isNotBlank(customerName), Customer::getCustomerName, customerName)
                        .orderByDesc(Customer::getCreateTime);
+
+        // IDOR治理:仅查询当前用户可访问账套下的客户(超级管理员返回null表示不限制)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds != null) {
+            if (accessibleIds.isEmpty()) {
+                return new PageResult<>(Collections.emptyList(), 0L, pageNum, pageSize);
+            }
+            customerWrapper.in(Customer::getAccountSetId, accessibleIds);
+        }
         List<Customer> customers = this.list(customerWrapper);
 
         List<ArrearsVO> allArrears = new ArrayList<>();
@@ -555,10 +617,20 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
 
     @Override
     public List<Map<String, Object>> getCollectionReminders() {
+        // IDOR治理:仅查询当前用户可访问账套下的客户(超级管理员返回null表示不限制)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds != null && accessibleIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        LambdaQueryWrapper<Customer> reminderWrapper = new LambdaQueryWrapper<>();
+        if (accessibleIds != null) {
+            reminderWrapper.in(Customer::getAccountSetId, accessibleIds);
+        }
         List<Map<String, Object>> result = new ArrayList<>();
 
         // 查询所有客户
-        List<Customer> customers = this.list();
+        List<Customer> customers = this.list(reminderWrapper);
         LocalDate today = LocalDate.now();
 
         for (Customer customer : customers) {

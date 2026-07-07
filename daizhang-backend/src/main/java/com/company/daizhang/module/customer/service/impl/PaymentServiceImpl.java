@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.customer.dto.PaymentCreateRequest;
 import com.company.daizhang.module.customer.dto.PaymentQueryRequest;
 import com.company.daizhang.module.customer.dto.PaymentUpdateRequest;
@@ -22,7 +23,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -34,6 +37,7 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
 
     private final CustomerMapper customerMapper;
     private final ServiceContractMapper contractMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Override
     public PageResult<PaymentVO> pagePayments(PaymentQueryRequest request) {
@@ -45,6 +49,19 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
                .eq(StrUtil.isNotBlank(request.getPaymentMethod()), PaymentRecord::getPaymentMethod, request.getPaymentMethod())
                .eq(StrUtil.isNotBlank(request.getPaymentType()), PaymentRecord::getPaymentType, request.getPaymentType())
                .orderByDesc(PaymentRecord::getPaymentDate);
+
+        // IDOR治理:仅返回当前用户可访问账套下客户的收款记录(实体无accountSetId,通过customer关联链过滤)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds != null) {
+            if (accessibleIds.isEmpty()) {
+                return new PageResult<>(Collections.emptyList(), 0L, request.getPageNum(), request.getPageSize());
+            }
+            List<Long> customerIds = listAccessibleCustomerIds(accessibleIds);
+            if (customerIds.isEmpty()) {
+                return new PageResult<>(Collections.emptyList(), 0L, request.getPageNum(), request.getPageSize());
+            }
+            wrapper.in(PaymentRecord::getCustomerId, customerIds);
+        }
 
         Page<PaymentRecord> result = this.page(page, wrapper);
 
@@ -61,6 +78,19 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
         wrapper.eq(PaymentRecord::getCustomerId, customerId)
                .orderByDesc(PaymentRecord::getPaymentDate);
 
+        // IDOR治理:仅返回当前用户可访问账套下客户的收款记录(实体无accountSetId,通过customer关联链过滤)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds != null) {
+            if (accessibleIds.isEmpty()) {
+                return Collections.emptyList();
+            }
+            List<Long> customerIds = listAccessibleCustomerIds(accessibleIds);
+            if (customerIds.isEmpty()) {
+                return Collections.emptyList();
+            }
+            wrapper.in(PaymentRecord::getCustomerId, customerIds);
+        }
+
         List<PaymentRecord> list = this.list(wrapper);
         return list.stream()
                 .map(this::convertToVO)
@@ -72,6 +102,19 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
         LambdaQueryWrapper<PaymentRecord> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(PaymentRecord::getContractId, contractId)
                .orderByDesc(PaymentRecord::getPaymentDate);
+
+        // IDOR治理:仅返回当前用户可访问账套下客户的收款记录(实体无accountSetId,通过customer关联链过滤)
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds != null) {
+            if (accessibleIds.isEmpty()) {
+                return Collections.emptyList();
+            }
+            List<Long> customerIds = listAccessibleCustomerIds(accessibleIds);
+            if (customerIds.isEmpty()) {
+                return Collections.emptyList();
+            }
+            wrapper.in(PaymentRecord::getCustomerId, customerIds);
+        }
 
         List<PaymentRecord> list = this.list(wrapper);
         return list.stream()
@@ -85,6 +128,12 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
         if (payment == null) {
             throw new BusinessException(404, "收款记录不存在");
         }
+        // IDOR治理:校验当前用户对该收款记录所属账套的访问权(读操作用checkAccess)
+        Customer customer = customerMapper.selectById(payment.getCustomerId());
+        if (customer == null) {
+            throw new BusinessException(404, "客户不存在");
+        }
+        accountSetAccessService.checkAccess(customer.getAccountSetId());
         return convertToVO(payment);
     }
 
@@ -96,6 +145,8 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
         if (customer == null) {
             throw new BusinessException(404, "客户不存在");
         }
+        // IDOR治理:校验当前用户对该收款记录所属账套的所有者权限(写操作用checkOwner)
+        accountSetAccessService.checkOwner(customer.getAccountSetId());
 
         // 如果指定了合同，检查合同是否存在且归属于该客户
         if (request.getContractId() != null) {
@@ -122,6 +173,12 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
         if (payment == null) {
             throw new BusinessException(404, "收款记录不存在");
         }
+        // IDOR治理:校验当前用户对该收款记录所属账套的所有者权限(写操作用checkOwner)
+        Customer customer = customerMapper.selectById(payment.getCustomerId());
+        if (customer == null) {
+            throw new BusinessException(404, "客户不存在");
+        }
+        accountSetAccessService.checkOwner(customer.getAccountSetId());
 
         // 若变更了合同,校验新合同存在且归属于同一客户,防止收款记录关联到错误合同
         if (request.getContractId() != null
@@ -147,8 +204,25 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
         if (payment == null) {
             throw new BusinessException(404, "收款记录不存在");
         }
+        // IDOR治理:校验当前用户对该收款记录所属账套的所有者权限(写操作用checkOwner)
+        Customer customer = customerMapper.selectById(payment.getCustomerId());
+        if (customer == null) {
+            throw new BusinessException(404, "客户不存在");
+        }
+        accountSetAccessService.checkOwner(customer.getAccountSetId());
 
         this.removeById(id);
+    }
+
+    /**
+     * IDOR治理:查询指定账套集合下的客户ID集合(用于实体无accountSetId时按customerId过滤)
+     */
+    private List<Long> listAccessibleCustomerIds(Set<Long> accessibleIds) {
+        LambdaQueryWrapper<Customer> customerWrapper = new LambdaQueryWrapper<>();
+        customerWrapper.in(Customer::getAccountSetId, accessibleIds);
+        return customerMapper.selectList(customerWrapper).stream()
+                .map(Customer::getId)
+                .collect(Collectors.toList());
     }
 
     private PaymentVO convertToVO(PaymentRecord payment) {

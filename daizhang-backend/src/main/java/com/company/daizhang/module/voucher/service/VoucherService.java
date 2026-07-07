@@ -27,8 +27,11 @@ public interface VoucherService extends IService<Voucher> {
 
     /**
      * 创建凭证
+     *
+     * @param request 凭证创建请求
+     * @return 新凭证ID
      */
-    void createVoucher(VoucherCreateRequest request);
+    Long createVoucher(VoucherCreateRequest request);
 
     /**
      * 更新凭证
@@ -70,6 +73,20 @@ public interface VoucherService extends IService<Voucher> {
      * 过账凭证
      */
     void postVoucher(Long id);
+
+    /**
+     * 反过账凭证（将已过账凭证回退到已审核状态，并反向冲减科目余额）
+     *
+     * @param id 凭证ID
+     */
+    void unpostVoucher(Long id);
+
+    /**
+     * 作废凭证（作废不删除，保留审计轨迹）
+     *
+     * @param id 凭证ID
+     */
+    void cancelVoucher(Long id);
 
     /**
      * 凭证整理（断号重编）

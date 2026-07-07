@@ -5,6 +5,7 @@ import com.company.daizhang.module.system.service.DataBackupService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -23,6 +24,7 @@ public class DataBackupController {
 
     @Operation(summary = "备份数据库")
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<String> backup() {
         String fileName = dataBackupService.backup();
         return Result.success(fileName);
@@ -37,6 +39,7 @@ public class DataBackupController {
 
     @Operation(summary = "恢复数据库（需要重启应用）")
     @PostMapping("/restore")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> restore(@RequestParam String fileName) {
         dataBackupService.restore(fileName);
         return Result.success();
@@ -44,6 +47,7 @@ public class DataBackupController {
 
     @Operation(summary = "删除备份文件")
     @DeleteMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> delete(@RequestParam String fileName) {
         dataBackupService.deleteBackup(fileName);
         return Result.success();
