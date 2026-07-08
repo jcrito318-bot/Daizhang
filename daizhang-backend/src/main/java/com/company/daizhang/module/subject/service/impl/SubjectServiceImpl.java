@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
+import com.company.daizhang.module.accountset.entity.AccountBalance;
+import com.company.daizhang.module.accountset.mapper.AccountBalanceMapper;
 import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.subject.dto.SubjectCreateRequest;
 import com.company.daizhang.module.subject.dto.SubjectUpdateRequest;
@@ -20,6 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -34,6 +37,7 @@ import java.util.stream.Collectors;
 public class SubjectServiceImpl extends ServiceImpl<SubjectMapper, Subject> implements SubjectService {
     
     private final VoucherDetailMapper voucherDetailMapper;
+    private final AccountBalanceMapper accountBalanceMapper;
     private final AccountSetAccessService accountSetAccessService;
     
     // 科目编码正则：4位数字开头，可以有下级编码
@@ -265,9 +269,25 @@ public class SubjectServiceImpl extends ServiceImpl<SubjectMapper, Subject> impl
             }
         }
         
+        // 在 copyProperties 之前保存原状态,用于检测禁用操作
+        Integer originalStatus = subject.getStatus();
+
         BeanUtil.copyProperties(request, subject);
         subject.setName(request.getSubjectName());
         subject.setIsAuxiliary(request.getAuxiliaryAccounting());
+
+        // 业务校验：禁用科目时校验凭证引用
+        // 被凭证引用的科目禁用后,科目树过滤停用科目会导致历史凭证科目解析失败
+        if (request.getStatus() != null && request.getStatus() == 0
+                && originalStatus != null && originalStatus == 1) {
+            LambdaQueryWrapper<VoucherDetail> disableDetailWrapper = new LambdaQueryWrapper<>();
+            disableDetailWrapper.eq(VoucherDetail::getSubjectId, id);
+            if (voucherDetailMapper.selectCount(disableDetailWrapper) > 0) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                        "该科目已被凭证引用，无法禁用");
+            }
+        }
+
         this.updateById(subject);
         
         log.info("更新科目成功，科目ID: {}, 科目编码: {}", id, subject.getCode());
@@ -295,6 +315,19 @@ public class SubjectServiceImpl extends ServiceImpl<SubjectMapper, Subject> impl
         detailWrapper.eq(VoucherDetail::getSubjectId, id);
         if (voucherDetailMapper.selectCount(detailWrapper) > 0) {
             throw new BusinessException(ErrorCode.SUBJECT_HAS_VOUCHERS);
+        }
+
+        // 业务校验：检查科目是否存在余额（含期初余额）
+        // 有期初余额但无凭证的科目删除后，期初余额合计借贷不平
+        Long balanceCount = accountBalanceMapper.selectCount(new LambdaQueryWrapper<AccountBalance>()
+                .eq(AccountBalance::getSubjectId, id)
+                .and(w -> w.ne(AccountBalance::getBeginDebit, BigDecimal.ZERO)
+                        .or().ne(AccountBalance::getBeginCredit, BigDecimal.ZERO)
+                        .or().ne(AccountBalance::getEndDebit, BigDecimal.ZERO)
+                        .or().ne(AccountBalance::getEndCredit, BigDecimal.ZERO)));
+        if (balanceCount > 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "该科目存在余额，无法删除");
         }
         
         this.removeById(id);

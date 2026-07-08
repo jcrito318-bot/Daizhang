@@ -242,10 +242,18 @@ public class PeriodServiceImpl implements PeriodService {
         }
 
         // 6. 更新会计期间状态为已结账
+        // 使用条件update(status=原值)模拟乐观锁,防止双用户并发结账同一期间时同时通过校验
         period.setStatus(PeriodStatus.CLOSED.getCode());
         period.setCloseBy(SecurityUtils.getCurrentUserId());
         period.setCloseTime(LocalDateTime.now());
-        accountPeriodMapper.updateById(period);
+        int affected = accountPeriodMapper.update(period,
+                new LambdaUpdateWrapper<AccountPeriod>()
+                        .eq(AccountPeriod::getId, period.getId())
+                        .eq(AccountPeriod::getStatus, PeriodStatus.OPEN.getCode()));
+        if (affected == 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "期间状态已变更(并发冲突)，请刷新后重试");
+        }
 
         log.info("期末结账成功，账套ID：{}，期间：{}-{}", accountSetId, year, month);
 
@@ -281,12 +289,18 @@ public class PeriodServiceImpl implements PeriodService {
 
         // 3. 更新会计期间状态为未结账，解锁本期数据
         // 使用LambdaUpdateWrapper显式set null，避免MyBatis-Plus默认NOT_NULL策略不更新null字段
+        // 带条件(status=已结账)模拟乐观锁,防止双用户并发反结账同一期间时同时通过校验
         LambdaUpdateWrapper<AccountPeriod> updateWrapper = new LambdaUpdateWrapper<>();
         updateWrapper.eq(AccountPeriod::getId, period.getId())
+                     .eq(AccountPeriod::getStatus, PeriodStatus.CLOSED.getCode())
                      .set(AccountPeriod::getStatus, PeriodStatus.OPEN.getCode())
                      .set(AccountPeriod::getCloseBy, null)
                      .set(AccountPeriod::getCloseTime, null);
-        accountPeriodMapper.update(null, updateWrapper);
+        int affected = accountPeriodMapper.update(null, updateWrapper);
+        if (affected == 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "期间状态已变更(并发冲突)，请刷新后重试");
+        }
 
         // 已知限制：反结账未自动清理本期系统生成的结转凭证（source=1，含损益结转/成本结转）。
         // 这些凭证已过账（status=2）并更新了科目余额（损益科目清零、本年利润累加等），

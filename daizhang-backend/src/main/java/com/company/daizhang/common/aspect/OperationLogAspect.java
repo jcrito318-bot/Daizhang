@@ -13,6 +13,8 @@ import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -26,6 +28,7 @@ import java.time.LocalDateTime;
 @Slf4j
 @Aspect
 @Component
+@Order(Ordered.HIGHEST_PRECEDENCE)
 @RequiredArgsConstructor
 public class OperationLogAspect {
     
@@ -99,7 +102,17 @@ public class OperationLogAspect {
     }
     
     private String getIpAddress(HttpServletRequest request) {
+        // 注意:X-Forwarded-For可被客户端伪造,生产环境应配置可信代理链
+        // 当前实现取X-Forwarded-For首段,仅作审计参考
         String ip = request.getHeader("X-Forwarded-For");
+        if (StrUtil.isNotBlank(ip) && !"unknown".equalsIgnoreCase(ip)) {
+            // 取第一个IP并清洗(防止注入)
+            ip = ip.split(",")[0].trim();
+            // 校验IP格式(仅允许数字/字母/冒号/点),不合法则回退到后续Header/RemoteAddr
+            if (!ip.matches("^[0-9a-fA-F:.]+$")) {
+                ip = null;
+            }
+        }
         if (StrUtil.isBlank(ip) || "unknown".equalsIgnoreCase(ip)) {
             ip = request.getHeader("Proxy-Client-IP");
         }
@@ -129,15 +142,16 @@ public class OperationLogAspect {
      * 兼容字段名与值之间可能存在的空格(允许冒号两侧有空白)。
      * 采用大小写不敏感的包含匹配,覆盖以下字段(及其变体,如 passwordHash/accessToken/refreshToken/apiKeySecret 等):
      * password / passwd / pwd / token / secret / apikey / api_key / credential
+     * / authorization / cookie / privatekey / private_key / salt / sessionid / session_id
      */
     private String maskSensitiveFields(String params) {
         if (StrUtil.isBlank(params)) {
             return params;
         }
         // 正则匹配 "fieldName" : "value" 形式(允许冒号两侧有空白),将value替换为 ***
-        // (?i) 大小写不敏感;字段名包含 password|passwd|pwd|token|secret|apikey|api_key|credential 即命中
+        // (?i) 大小写不敏感;字段名包含下列关键字之一即命中
         return params.replaceAll(
-                "(?i)(\"(?:.*(?:password|passwd|pwd|token|secret|apikey|api_key|credential).*)\"\\s*:\\s*)\"[^\"]*\"",
+                "(?i)(\"(?:.*(?:password|passwd|pwd|token|secret|apikey|api_key|credential|authorization|cookie|privatekey|private_key|salt|sessionid|session_id).*)\"\\s*:\\s*)\"[^\"]*\"",
                 "$1\"***\"");
     }
 }

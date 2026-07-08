@@ -3,6 +3,7 @@ package com.company.daizhang.module.voucher.service.impl;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.company.daizhang.common.exception.BusinessException;
+import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.utils.ExcelImportUtil;
 import com.company.daizhang.common.vo.ImportResultVO;
 import com.company.daizhang.module.accountset.entity.AccountPeriod;
@@ -20,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -71,6 +73,12 @@ public class VoucherImportServiceImpl implements VoucherImportService {
 
         if (rows.isEmpty()) {
             return ImportResultVO.of(0, 0, 0, Collections.singletonList("Excel文件中没有数据行"));
+        }
+
+        // 大文件保护：Excel全量加载到内存，万行级可能OOM，单次最多5000行
+        if (rows.size() > 5000) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "导入行数过多(" + rows.size() + ")，单次最多5000行，请分批导入");
         }
 
         // 按凭证日期+凭证字分组
@@ -222,14 +230,10 @@ public class VoucherImportServiceImpl implements VoucherImportService {
             throw new BusinessException("凭证金额不能为零");
         }
 
-        // 生成凭证号
-        String voucherNo = generateVoucherNo(accountSetId, year, month);
-
         // 创建凭证
         Voucher voucher = new Voucher();
         voucher.setAccountSetId(accountSetId);
         voucher.setVoucherWordId(voucherWordId);
-        voucher.setVoucherNo(voucherNo);
         voucher.setVoucherDate(voucherDate);
         voucher.setYear(year);
         voucher.setMonth(month);
@@ -238,7 +242,25 @@ public class VoucherImportServiceImpl implements VoucherImportService {
         voucher.setAttachmentCount(StrUtil.isNotBlank(attachmentStr) ? ExcelImportUtil.toInteger(attachmentStr) : 0);
         voucher.setStatus(0);
         voucher.setSource(0);
-        voucherMapper.insert(voucher);
+
+        // 生成凭证号并插入：generateVoucherNo 仅查最大序号+1非原子，并发导入可能重号，
+        // 此处通过捕获唯一键冲突重试，避免并发重号
+        int maxRetry = 3;
+        for (int attempt = 0; attempt < maxRetry; attempt++) {
+            String voucherNo = generateVoucherNo(accountSetId, year, month);
+            voucher.setVoucherNo(voucherNo);
+            try {
+                voucherMapper.insert(voucher);
+                break;
+            } catch (DuplicateKeyException e) {
+                if (attempt == maxRetry - 1) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                            "凭证号生成失败(并发冲突)，请重试");
+                }
+                log.warn("凭证号冲突,重试: {}", voucherNo);
+                voucher.setId(null);
+            }
+        }
 
         // 保存凭证明细
         for (VoucherDetail detail : details) {

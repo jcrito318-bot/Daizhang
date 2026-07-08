@@ -7,8 +7,11 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
+import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.utils.SecurityUtils;
+import com.company.daizhang.module.accountset.entity.AccountPeriod;
+import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
 import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.bank.dto.*;
 import com.company.daizhang.module.bank.entity.BankReconciliation;
@@ -58,6 +61,7 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
     private final SysUserMapper sysUserMapper;
     private final BankVoucherService bankVoucherService;
     private final AccountSetAccessService accountSetAccessService;
+    private final AccountPeriodMapper accountPeriodMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -65,13 +69,48 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
         List<BankTransactionImportRequest.BankTransactionItem> items = request.getTransactions();
         int count = 0;
 
-        for (BankTransactionImportRequest.BankTransactionItem item : items) {
-            // 根据交易流水号去重
+        for (int index = 0; index < items.size(); index++) {
+            BankTransactionImportRequest.BankTransactionItem item = items.get(index);
+
+            // 金额非负校验，避免负数金额进入对账扭曲银行余额
+            if (item.getAmount() != null && item.getAmount().compareTo(BigDecimal.ZERO) < 0) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                        "第" + (index + 1) + "行金额不能为负: " + item.getAmount());
+            }
+
+            // 校验交易日期对应的会计期间是否存在、是否已结账
+            LocalDate txDate = item.getTransactionDate();
+            if (txDate != null) {
+                AccountPeriod period = accountPeriodMapper.selectOne(new LambdaQueryWrapper<AccountPeriod>()
+                        .eq(AccountPeriod::getAccountSetId, request.getAccountSetId())
+                        .eq(AccountPeriod::getYear, txDate.getYear())
+                        .eq(AccountPeriod::getMonth, txDate.getMonthValue()));
+                if (period == null) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                            "第" + (index + 1) + "行日期对应的会计期间不存在: " + txDate);
+                }
+                if (period.getStatus() != null && period.getStatus() == 1) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                            "第" + (index + 1) + "行日期对应的会计期间已结账: " + txDate.getYear() + "-" + txDate.getMonthValue());
+                }
+            }
+
+            // 去重：有流水号按流水号去重，无流水号按 accountSetId+bankAccount+date+amount+counterparty 组合去重
             if (StrUtil.isNotBlank(item.getTransactionNo())) {
                 LambdaQueryWrapper<BankTransaction> existWrapper = new LambdaQueryWrapper<>();
                 existWrapper.eq(BankTransaction::getAccountSetId, request.getAccountSetId())
                             .eq(BankTransaction::getBankAccount, request.getBankAccount())
                             .eq(BankTransaction::getTransactionNo, item.getTransactionNo());
+                if (this.count(existWrapper) > 0) {
+                    continue;
+                }
+            } else {
+                LambdaQueryWrapper<BankTransaction> existWrapper = new LambdaQueryWrapper<>();
+                existWrapper.eq(BankTransaction::getAccountSetId, request.getAccountSetId())
+                            .eq(BankTransaction::getBankAccount, request.getBankAccount())
+                            .eq(BankTransaction::getTransactionDate, item.getTransactionDate())
+                            .eq(BankTransaction::getAmount, item.getAmount())
+                            .eq(item.getCounterparty() != null, BankTransaction::getCounterparty, item.getCounterparty());
                 if (this.count(existWrapper) > 0) {
                     continue;
                 }

@@ -1,6 +1,7 @@
 package com.company.daizhang.common.utils;
 
 import com.company.daizhang.common.exception.BusinessException;
+import com.company.daizhang.common.exception.ErrorCode;
 import org.apache.poi.ss.usermodel.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -49,6 +50,13 @@ public class ExcelImportUtil {
             Sheet sheet = workbook.getSheetAt(0);
             if (sheet == null) {
                 return result;
+            }
+
+            // 行数限制: WorkbookFactory全量加载到内存,万行级Excel可能触发OOM
+            int physicalNumberOfRows = sheet.getPhysicalNumberOfRows();
+            if (physicalNumberOfRows > 10000) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                        "Excel行数过多(" + physicalNumberOfRows + ")，单次最多10000行，请分批导入");
             }
 
             // 读取表头行
