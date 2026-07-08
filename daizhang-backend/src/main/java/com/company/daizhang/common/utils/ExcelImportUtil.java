@@ -9,8 +9,11 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -119,7 +122,20 @@ public class ExcelImportUtil {
                 return cell.getStringCellValue();
             case NUMERIC:
                 if (DateUtil.isCellDateFormatted(cell)) {
-                    return DATA_FORMATTER.formatCellValue(cell);
+                    // 直接取日期值,绕开 Locale 相关的格式化字符串,避免非 zh-CN/en-US 环境下
+                    // 输出 08.07.26 等无法被 toLocalDate 解析的格式
+                    try {
+                        LocalDateTime ldt = cell.getLocalDateTimeCellValue();
+                        return ldt != null ? ldt.toLocalDate().toString() : "";
+                    } catch (Exception e) {
+                        // 降级:用 Date
+                        try {
+                            Date date = cell.getDateCellValue();
+                            return date != null ? date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate().toString() : "";
+                        } catch (Exception e2) {
+                            return "";
+                        }
+                    }
                 }
                 double numVal = cell.getNumericCellValue();
                 if (numVal == Math.floor(numVal) && !Double.isInfinite(numVal)) {

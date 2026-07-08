@@ -14,8 +14,10 @@ import com.company.daizhang.module.accountset.entity.AccountPeriod;
 import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
 import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.bank.dto.*;
+import com.company.daizhang.module.bank.entity.BankAccount;
 import com.company.daizhang.module.bank.entity.BankReconciliation;
 import com.company.daizhang.module.bank.entity.BankTransaction;
+import com.company.daizhang.module.bank.mapper.BankAccountMapper;
 import com.company.daizhang.module.bank.mapper.BankReconciliationMapper;
 import com.company.daizhang.module.bank.mapper.BankTransactionMapper;
 import com.company.daizhang.module.bank.service.BankService;
@@ -62,10 +64,20 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
     private final BankVoucherService bankVoucherService;
     private final AccountSetAccessService accountSetAccessService;
     private final AccountPeriodMapper accountPeriodMapper;
+    private final BankAccountMapper bankAccountMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Integer importBankTransactions(BankTransactionImportRequest request) {
+        // 校验银行账号归属:bankAccount 必须属于该账套,否则可向他账套的银行账号导入流水
+        Long bankAccountCount = bankAccountMapper.selectCount(new LambdaQueryWrapper<BankAccount>()
+                .eq(BankAccount::getAccountSetId, request.getAccountSetId())
+                .eq(BankAccount::getAccountNumber, request.getBankAccount()));
+        if (bankAccountCount == 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "银行账号不属于该账套: " + request.getBankAccount());
+        }
+
         List<BankTransactionImportRequest.BankTransactionItem> items = request.getTransactions();
         int count = 0;
 

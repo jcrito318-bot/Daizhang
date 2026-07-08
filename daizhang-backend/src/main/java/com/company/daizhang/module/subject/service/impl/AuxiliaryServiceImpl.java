@@ -27,8 +27,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -62,12 +65,33 @@ public class AuxiliaryServiceImpl implements AuxiliaryService {
         Map<Long, List<AuxiliaryItem>> itemMap = allItems.stream()
                 .collect(Collectors.groupingBy(AuxiliaryItem::getCategoryId));
 
+        // 批量查询所有父项目名称,避免 convertItemToVO 在此处对每个 item 单独 selectById 触发 N+1 查询
+        Set<Long> parentIds = allItems.stream()
+                .map(AuxiliaryItem::getParentId)
+                .filter(Objects::nonNull)
+                .filter(id -> id > 0)
+                .collect(Collectors.toSet());
+        Map<Long, String> parentNameMap = new HashMap<>();
+        if (!parentIds.isEmpty()) {
+            List<AuxiliaryItem> parents = auxiliaryItemMapper.selectBatchIds(parentIds);
+            parentNameMap = parents.stream()
+                    .collect(Collectors.toMap(AuxiliaryItem::getId, AuxiliaryItem::getItemName));
+        }
+
+        Map<Long, String> finalParentNameMap = parentNameMap;
         return categories.stream()
                 .map(category -> {
                     AuxiliaryCategoryVO vo = convertCategoryToVO(category);
                     List<AuxiliaryItem> items = itemMap.getOrDefault(category.getId(), Collections.emptyList());
                     vo.setItems(items.stream()
-                            .map(this::convertItemToVO)
+                            .map(item -> {
+                                AuxiliaryItemVO itemVO = new AuxiliaryItemVO();
+                                BeanUtil.copyProperties(item, itemVO);
+                                if (item.getParentId() != null && item.getParentId() > 0) {
+                                    itemVO.setParentName(finalParentNameMap.get(item.getParentId()));
+                                }
+                                return itemVO;
+                            })
                             .collect(Collectors.toList()));
                     return vo;
                 })

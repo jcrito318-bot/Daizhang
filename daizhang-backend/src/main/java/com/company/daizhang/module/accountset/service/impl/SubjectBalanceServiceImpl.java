@@ -25,6 +25,8 @@ import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -80,6 +82,27 @@ public class SubjectBalanceServiceImpl extends ServiceImpl<SubjectBalanceMapper,
 
         // 批量插入新数据
         if (requests != null && !requests.isEmpty()) {
+            // 校验科目归属:所有 subjectId 必须属于当前账套,防止为他账套科目写入期初余额
+            Set<Long> subjectIds = requests.stream()
+                    .map(SubjectBalanceRequest::getSubjectId)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
+            if (!subjectIds.isEmpty()) {
+                List<Subject> subjects = subjectMapper.selectList(new LambdaQueryWrapper<Subject>()
+                        .eq(Subject::getAccountSetId, accountSetId)
+                        .in(Subject::getId, subjectIds));
+                Set<Long> validSubjectIds = subjects.stream()
+                        .map(Subject::getId)
+                        .collect(Collectors.toSet());
+                List<Long> invalidIds = subjectIds.stream()
+                        .filter(id -> !validSubjectIds.contains(id))
+                        .collect(Collectors.toList());
+                if (!invalidIds.isEmpty()) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                            "科目不属于当前账套: " + invalidIds);
+                }
+            }
+
             // 借贷平衡校验:期初余额借方合计必须等于贷方合计
             BigDecimal totalDebit = requests.stream()
                     .map(r -> r.getBeginDebit() != null ? r.getBeginDebit() : BigDecimal.ZERO)
