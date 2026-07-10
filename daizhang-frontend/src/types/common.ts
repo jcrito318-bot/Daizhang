@@ -20,6 +20,7 @@ export interface LoginRequest {
 
 export interface LoginResponse {
   token: string
+  refreshToken: string
   userInfo: UserVO
 }
 

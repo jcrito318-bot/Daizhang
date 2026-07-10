@@ -32,7 +32,9 @@ service.interceptors.response.use(
       }
       return Promise.reject(new Error(res.message || '请求失败'))
     }
-    return response
+    // 返回 response.data(Result 包装器)而非完整 AxiosResponse,
+    // 使 API 调用方通过 res.data 获取实际数据载荷,与 Promise<Result<T>> 类型一致
+    return res as unknown as AxiosResponse
   },
   (error) => {
     if (error.response) {

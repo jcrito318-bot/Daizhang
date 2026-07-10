@@ -81,6 +81,51 @@
           <el-menu-item index="/bank/balance-adjustment">余额调节表</el-menu-item>
         </el-sub-menu>
 
+        <el-sub-menu index="document">
+          <template #title>
+            <el-icon><Files /></el-icon>
+            <span>票据管理</span>
+          </template>
+          <el-menu-item index="/document">票据列表</el-menu-item>
+        </el-sub-menu>
+
+        <el-sub-menu index="customer">
+          <template #title>
+            <el-icon><User /></el-icon>
+            <span>客户管理</span>
+          </template>
+          <el-menu-item index="/customer/list">客户列表</el-menu-item>
+        </el-sub-menu>
+
+        <el-sub-menu index="asset">
+          <template #title>
+            <el-icon><Box /></el-icon>
+            <span>固定资产</span>
+          </template>
+          <el-menu-item index="/asset/category">资产分类</el-menu-item>
+          <el-menu-item index="/asset/list">资产列表</el-menu-item>
+          <el-menu-item index="/asset/depreciation">资产折旧</el-menu-item>
+        </el-sub-menu>
+
+        <el-sub-menu index="salary">
+          <template #title>
+            <el-icon><Coin /></el-icon>
+            <span>工资管理</span>
+          </template>
+          <el-menu-item index="/salary/employee">员工管理</el-menu-item>
+          <el-menu-item index="/salary/sheet">工资表</el-menu-item>
+          <el-menu-item index="/salary/calculation">工资计算</el-menu-item>
+        </el-sub-menu>
+
+        <el-sub-menu index="tax">
+          <template #title>
+            <el-icon><Tickets /></el-icon>
+            <span>税务管理</span>
+          </template>
+          <el-menu-item index="/tax/declaration">税务申报</el-menu-item>
+          <el-menu-item index="/tax/calculation">税务计算</el-menu-item>
+        </el-sub-menu>
+
         <el-sub-menu index="system">
           <template #title>
             <el-icon><Setting /></el-icon>

@@ -14,6 +14,10 @@ export const useUserStore = defineStore('user', () => {
     token.value = res.data.token
     userInfo.value = res.data.userInfo
     localStorage.setItem('token', res.data.token)
+    // 存储 refresh token,用于 accessToken 过期后刷新
+    if (res.data.refreshToken) {
+      localStorage.setItem('refreshToken', res.data.refreshToken)
+    }
   }
 
   async function getUserInfo() {
@@ -29,6 +33,7 @@ export const useUserStore = defineStore('user', () => {
       token.value = ''
       userInfo.value = null
       localStorage.removeItem('token')
+      localStorage.removeItem('refreshToken')
     }
   }
 
