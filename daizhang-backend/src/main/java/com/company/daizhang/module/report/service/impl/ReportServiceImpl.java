@@ -1433,7 +1433,7 @@ public class ReportServiceImpl implements ReportService {
         sb.append("<div class=\"report-title\">现金流量表</div>");
         sb.append("<div class=\"report-period\">会计期间：").append(periodTitle).append("</div>");
         sb.append("<table>");
-        sb.append("<thead><tr><th>类别</th><th>项目</th><th class=\"num\">金额</th></tr></thead>");
+        sb.append("<thead><tr><th>类别</th><th>项目</th><th class=\"num\">金额</th><th class=\"num\">本年累计</th></tr></thead>");
         sb.append("<tbody>");
         if (vo.getItems() != null) {
             for (CashFlowItemVO item : vo.getItems()) {
@@ -1441,29 +1441,40 @@ public class ReportServiceImpl implements ReportService {
                 sb.append("<td>").append(esc(item.getCategory())).append("</td>");
                 sb.append("<td>").append(esc(item.getItemName())).append("</td>");
                 sb.append("<td class=\"num\">").append(formatAmount(item.getAmount())).append("</td>");
+                sb.append("<td class=\"num\"></td>");
                 sb.append("</tr>");
             }
         }
         sb.append("<tr class=\"total\"><td>经营活动</td><td>现金流入小计</td>");
-        sb.append("<td class=\"num\">").append(formatAmount(vo.getOperatingInflow())).append("</td></tr>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getOperatingInflow())).append("</td>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getOperatingInflowYear())).append("</td></tr>");
         sb.append("<tr class=\"total\"><td></td><td>现金流出小计</td>");
-        sb.append("<td class=\"num\">").append(formatAmount(vo.getOperatingOutflow())).append("</td></tr>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getOperatingOutflow())).append("</td>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getOperatingOutflowYear())).append("</td></tr>");
         sb.append("<tr class=\"total\"><td></td><td>现金净额</td>");
-        sb.append("<td class=\"num\">").append(formatAmount(vo.getOperatingNetFlow())).append("</td></tr>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getOperatingNetFlow())).append("</td>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getOperatingNetFlowYear())).append("</td></tr>");
         sb.append("<tr class=\"total\"><td>投资活动</td><td>现金流入小计</td>");
-        sb.append("<td class=\"num\">").append(formatAmount(vo.getInvestingInflow())).append("</td></tr>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getInvestingInflow())).append("</td>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getInvestingInflowYear())).append("</td></tr>");
         sb.append("<tr class=\"total\"><td></td><td>现金流出小计</td>");
-        sb.append("<td class=\"num\">").append(formatAmount(vo.getInvestingOutflow())).append("</td></tr>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getInvestingOutflow())).append("</td>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getInvestingOutflowYear())).append("</td></tr>");
         sb.append("<tr class=\"total\"><td></td><td>现金净额</td>");
-        sb.append("<td class=\"num\">").append(formatAmount(vo.getInvestingNetFlow())).append("</td></tr>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getInvestingNetFlow())).append("</td>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getInvestingNetFlowYear())).append("</td></tr>");
         sb.append("<tr class=\"total\"><td>筹资活动</td><td>现金流入小计</td>");
-        sb.append("<td class=\"num\">").append(formatAmount(vo.getFinancingInflow())).append("</td></tr>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getFinancingInflow())).append("</td>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getFinancingInflowYear())).append("</td></tr>");
         sb.append("<tr class=\"total\"><td></td><td>现金流出小计</td>");
-        sb.append("<td class=\"num\">").append(formatAmount(vo.getFinancingOutflow())).append("</td></tr>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getFinancingOutflow())).append("</td>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getFinancingOutflowYear())).append("</td></tr>");
         sb.append("<tr class=\"total\"><td></td><td>现金净额</td>");
-        sb.append("<td class=\"num\">").append(formatAmount(vo.getFinancingNetFlow())).append("</td></tr>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getFinancingNetFlow())).append("</td>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getFinancingNetFlowYear())).append("</td></tr>");
         sb.append("<tr class=\"total\"><td></td><td>现金净增加额</td>");
-        sb.append("<td class=\"num\">").append(formatAmount(vo.getNetIncrease())).append("</td></tr>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getNetIncrease())).append("</td>");
+        sb.append("<td class=\"num\">").append(formatAmount(vo.getNetIncreaseYear())).append("</td></tr>");
         sb.append("</tbody></table>");
         sb.append("<div class=\"footer\">打印日期：").append(printDate).append("</div>");
         return sb.toString();

@@ -38,6 +38,9 @@ public class JwtUtils {
     @Value("${jwt.expiration:86400}")
     private Long expiration;
 
+    @Value("${jwt.refresh-expiration:604800}")
+    private Long refreshExpiration;
+
     @PostConstruct
     public void validateSecret() {
         if (secret == null || secret.isEmpty()) {
@@ -76,6 +79,25 @@ public class JwtUtils {
                 .subject(username)
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + expiration * 1000))
+                .signWith(getSigningKey())
+                .compact();
+    }
+
+    /**
+     * 生成refresh token,有效期由 jwt.refresh-expiration 配置(默认7天)。
+     * claims 中加 type=refresh 以与 accessToken 区分。
+     */
+    public String generateRefreshToken(Long userId, String username) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId", userId);
+        claims.put("username", username);
+        claims.put("type", "refresh");
+
+        return Jwts.builder()
+                .claims(claims)
+                .subject(username)
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + refreshExpiration * 1000))
                 .signWith(getSigningKey())
                 .compact();
     }

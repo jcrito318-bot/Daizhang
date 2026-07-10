@@ -11,6 +11,7 @@ import com.company.daizhang.module.system.entity.LoginLog;
 import com.company.daizhang.module.system.service.LoginLogService;
 import com.company.daizhang.module.system.service.SysUserService;
 import com.company.daizhang.module.system.vo.UserVO;
+import io.jsonwebtoken.Claims;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -65,9 +66,11 @@ public class AuthController {
 
             SecurityUserDetails userDetails = (SecurityUserDetails) authentication.getPrincipal();
             String token = jwtUtils.generateToken(userDetails.getUserId(), userDetails.getUsername());
+            String refreshToken = jwtUtils.generateRefreshToken(userDetails.getUserId(), userDetails.getUsername());
 
             LoginResponse response = new LoginResponse();
             response.setToken(token);
+            response.setRefreshToken(refreshToken);
 
             // 从数据库查询完整用户信息
             UserVO userVO = sysUserService.getUserById(userDetails.getUserId());
@@ -82,6 +85,38 @@ public class AuthController {
             saveLoginLog(request.getUsername(), null, 1, 0, clientIp, userAgent, "用户名或密码错误");
             return Result.error(401, "用户名或密码错误");
         }
+    }
+
+    @PostMapping("/refresh")
+    @Operation(summary = "刷新Token")
+    public Result<LoginResponse> refresh(@RequestHeader("Authorization") String refreshToken) {
+        // 提取token(去掉Bearer前缀)
+        String token = refreshToken.startsWith("Bearer ") ? refreshToken.substring(7) : refreshToken;
+
+        // 校验refresh token并解析claims(validateToken已包含签名校验与过期校验)
+        Claims claims;
+        try {
+            claims = jwtUtils.validateToken(token);
+        } catch (Exception e) {
+            return Result.error(401, "refresh token无效或已过期");
+        }
+
+        // 校验token类型(必须是refresh类型,防止用accessToken调用刷新)
+        String tokenType = (String) claims.get("type");
+        if (!"refresh".equals(tokenType)) {
+            return Result.error(401, "非refresh token");
+        }
+
+        Long userId = claims.get("userId", Long.class);
+        String username = claims.getSubject();
+
+        // 生成新的accessToken;refresh token不重新签发,用满7天后需重新登录,避免无限刷新
+        String newAccessToken = jwtUtils.generateToken(userId, username);
+
+        LoginResponse response = new LoginResponse();
+        response.setToken(newAccessToken);
+        response.setRefreshToken(token);
+        return Result.success("刷新成功", response);
     }
 
     @PostMapping("/logout")

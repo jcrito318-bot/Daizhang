@@ -271,10 +271,33 @@ public class SubjectServiceImpl extends ServiceImpl<SubjectMapper, Subject> impl
         
         // 在 copyProperties 之前保存原状态,用于检测禁用操作
         Integer originalStatus = subject.getStatus();
+        // 保存原类别,用于校验修改后与父/子科目类别一致性
+        String originalCategory = subject.getCategory();
 
         BeanUtil.copyProperties(request, subject);
         subject.setName(request.getSubjectName());
         subject.setIsAuxiliary(request.getAuxiliaryAccounting());
+
+        // 业务校验：类别一致性(createSubject有父子类别校验,update需对齐)
+        // 修改一个有子科目的科目类别,会导致子科目类别与父科目不一致
+        if (request.getCategory() != null && !request.getCategory().equals(originalCategory)) {
+            // 有子科目时不允许修改类别(避免子科目类别不一致)
+            Long childCount = this.count(new LambdaQueryWrapper<Subject>()
+                    .eq(Subject::getParentId, id)
+                    .eq(Subject::getAccountSetId, subject.getAccountSetId()));
+            if (childCount > 0) {
+                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                        "该科目存在下级科目，不允许修改类别");
+            }
+            // 有父科目时,父科目类别必须一致
+            if (subject.getParentId() != null && subject.getParentId() > 0) {
+                Subject parent = this.getById(subject.getParentId());
+                if (parent != null && !request.getCategory().equals(parent.getCategory())) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                            "科目类别必须与父科目一致: " + parent.getCategory());
+                }
+            }
+        }
 
         // 业务校验：禁用科目时校验凭证引用
         // 被凭证引用的科目禁用后,科目树过滤停用科目会导致历史凭证科目解析失败
