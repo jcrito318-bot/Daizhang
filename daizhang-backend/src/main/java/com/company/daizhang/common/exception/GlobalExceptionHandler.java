@@ -81,6 +81,16 @@ public class GlobalExceptionHandler {
         return Result.error(404, "请求的资源不存在");
     }
 
+    @ExceptionHandler(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<Void> handleMethodArgumentTypeMismatchException(org.springframework.web.method.annotation.MethodArgumentTypeMismatchException e) {
+        // 路径参数类型转换失败(如 /asset/category/list 匹配 /{id} 时 "list" 无法转 Long)
+        // 原先被通用 Exception 处理器捕获返回500,现返回400并提示具体参数名
+        log.warn("参数类型转换失败: {} 期望类型: {}", e.getValue(), e.getRequiredType());
+        return Result.error(ErrorCode.PARAM_ERROR.getCode(),
+                "参数类型错误: " + e.getName() + " 期望" + (e.getRequiredType() != null ? e.getRequiredType().getSimpleName() : "正确") + "类型");
+    }
+
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public Result<Void> handleException(Exception e) {
