@@ -63,7 +63,23 @@ export const logApi = {
 }
 
 export const dashboardApi = {
-  stats(accountSetId?: number): Promise<Result<DashboardStatsVO>> {
-    return request.get('/dashboard/stats', { params: { accountSetId } })
+  // 后端端点为 GET /dashboard(返回 DashboardVO,含 summary 嵌套对象),
+  // 前端 Dashboard 期望扁平的 DashboardStatsVO,此处做字段映射适配
+  async stats(accountSetId?: number): Promise<Result<DashboardStatsVO>> {
+    const res = await request.get('/dashboard')
+    const vo = res.data as any
+    const summary = vo?.summary || {}
+    // 映射后端 DashboardSummary 字段到前端 DashboardStatsVO
+    res.data = {
+      accountSetCount: summary.totalAccountSets ?? 0,
+      monthVoucherCount: summary.unauditedVoucherCount ?? 0,
+      pendingAuditCount: summary.unauditedVoucherCount ?? 0,
+      pendingTaxCount: summary.undeclaredTaxCount ?? 0,
+      totalAssets: 0,
+      totalRevenue: 0,
+      totalProfit: 0,
+      cashBalance: 0
+    } as DashboardStatsVO
+    return res as unknown as Result<DashboardStatsVO>
   }
 }
