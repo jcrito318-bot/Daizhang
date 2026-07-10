@@ -11,10 +11,10 @@
         </div>
       </template>
 
-      <el-form :model="form" label-width="100px" class="voucher-header">
+      <el-form ref="formRef" :model="form" :rules="formRules" label-width="100px" class="voucher-header">
         <el-row :gutter="20">
           <el-col :span="6">
-            <el-form-item label="凭证日期" required>
+            <el-form-item label="凭证日期" prop="voucherDate">
               <el-date-picker
                 v-model="form.voucherDate"
                 type="date"
@@ -25,7 +25,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="6">
-            <el-form-item label="凭证字">
+            <el-form-item label="凭证字" prop="voucherWordId">
               <el-select v-model="form.voucherWordId" placeholder="请选择凭证字" style="width: 100%">
                 <el-option
                   v-for="word in voucherWordList"
@@ -60,7 +60,8 @@
         </el-table-column>
         <el-table-column label="摘要" min-width="200">
           <template #default="{ row }">
-            <el-input v-model="row.summary" placeholder="请输入摘要" />
+            <el-input v-model="row.summary" placeholder="请输入摘要" :class="{ 'field-error': detailTouched && !row.summary }" @blur="markDetailTouched" />
+            <div v-if="detailTouched && !row.summary" class="inline-error">请输入摘要</div>
           </template>
         </el-table-column>
         <el-table-column label="科目" min-width="250">
@@ -70,6 +71,8 @@
               placeholder="请选择科目"
               filterable
               style="width: 100%"
+              :class="{ 'field-error': detailTouched && !row.subjectId }"
+              @blur="markDetailTouched"
             >
               <el-option
                 v-for="subject in flatSubjects"
@@ -78,6 +81,7 @@
                 :value="subject.id"
               />
             </el-select>
+            <div v-if="detailTouched && !row.subjectId" class="inline-error">请选择科目</div>
           </template>
         </el-table-column>
         <el-table-column label="借方金额" width="150" align="right">
@@ -122,8 +126,8 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { voucherApi } from '@/api/voucher'
 import { subjectApi } from '@/api/subject'
 import { useAppStore } from '@/stores/app'
@@ -134,11 +138,16 @@ const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
 
+const formRef = ref<FormInstance>()
 const submitLoading = ref(false)
 const isEdit = ref(false)
 const editId = ref<number>(0)
 const voucherWordList = ref<VoucherWordVO[]>([])
 const subjectTree = ref<SubjectVO[]>([])
+// 分录校验标记:用户尝试提交后置为true,显示字段级错误
+const detailTouched = ref(false)
+// 表单是否有未保存的改动(用于离开提示)
+const formDirty = ref(false)
 
 const flatSubjects = computed(() => {
   const result: SubjectVO[] = []
@@ -154,7 +163,7 @@ const flatSubjects = computed(() => {
   return result
 })
 
-const form = reactive<VoucherCreateRequest>({
+const form = reactive<VoucherCreateRequest & { attachmentCount?: number }>({
   accountSetId: appStore.currentAccountSetId || 0,
   voucherWordId: undefined,
   voucherDate: new Date().toISOString().slice(0, 10),
@@ -164,9 +173,15 @@ const form = reactive<VoucherCreateRequest>({
   details: [createEmptyDetail()]
 })
 
+// 表头字段校验规则:Element Plus 表单内联红色错误提示
+const formRules: FormRules = {
+  voucherDate: [{ required: true, message: '请选择凭证日期', trigger: 'change' }],
+  voucherWordId: [{ required: true, message: '请选择凭证字', trigger: 'change' }]
+}
+
 const totalDebit = computed(() => form.details.reduce((sum, d) => sum + (d.debit || 0), 0))
 const totalCredit = computed(() => form.details.reduce((sum, d) => sum + (d.credit || 0), 0))
-const isBalanced = computed(() => Math.abs(totalDebit.value - totalCredit.value) < 0.01)
+const isBalanced = computed(() => Math.abs(totalDebit.value - totalCredit.value) < 0.01 && totalDebit.value > 0)
 
 function createEmptyDetail(): VoucherDetailRequest {
   return {
@@ -183,18 +198,25 @@ function formatAmount(val: number): string {
 }
 
 function handleDebitChange(row: VoucherDetailRequest) {
+  formDirty.value = true
   if (row.debit && row.debit > 0) {
     row.credit = 0
   }
 }
 
 function handleCreditChange(row: VoucherDetailRequest) {
+  formDirty.value = true
   if (row.credit && row.credit > 0) {
     row.debit = 0
   }
 }
 
+function markDetailTouched() {
+  detailTouched.value = true
+}
+
 function handleAddRow() {
+  formDirty.value = true
   form.details.push(createEmptyDetail())
 }
 
@@ -203,6 +225,7 @@ function handleRemoveRow(index: number) {
     ElMessage.warning('至少保留一行分录')
     return
   }
+  formDirty.value = true
   form.details.splice(index, 1)
 }
 
@@ -210,47 +233,65 @@ function handleBack() {
   router.push('/voucher')
 }
 
+// 标记有任意分录填写了内容(用于判断是否需要离开提示)
+function hasAnyDetailFilled(): boolean {
+  return form.details.some(d => d.summary || d.subjectId || (d.debit && d.debit > 0) || (d.credit && d.credit > 0))
+}
+
 async function handleSubmit() {
-  if (!form.voucherDate) {
-    ElMessage.warning('请选择凭证日期')
-    return
-  }
-
-  const validDetails = form.details.filter(d => d.subjectId && (d.debit > 0 || d.credit > 0))
-  if (validDetails.length === 0) {
-    ElMessage.warning('请至少填写一行有效分录')
-    return
-  }
-
-  if (!isBalanced.value) {
-    ElMessage.warning('借贷不平衡，请检查金额')
-    return
-  }
-
-  const date = new Date(form.voucherDate)
-  form.year = date.getFullYear()
-  form.month = date.getMonth() + 1
-  form.accountSetId = appStore.currentAccountSetId || 0
-
-  submitLoading.value = true
-  try {
-    const submitData = {
-      ...form,
-      details: validDetails.map((d, i) => ({ ...d, lineNo: i + 1 }))
+  detailTouched.value = true
+  // 表头校验
+  if (!formRef.value) return
+  await formRef.value.validate(async (valid) => {
+    if (!valid) {
+      ElMessage.warning('请完善表头信息')
+      return
     }
-    if (isEdit.value) {
-      await voucherApi.update(editId.value, submitData)
-      ElMessage.success('更新成功')
-    } else {
-      await voucherApi.create(submitData)
-      ElMessage.success('创建成功')
+
+    const validDetails = form.details.filter(d => d.subjectId && (d.debit > 0 || d.credit > 0))
+    if (validDetails.length === 0) {
+      ElMessage.warning('请至少填写一行有效分录(含科目和金额)')
+      return
     }
-    router.push('/voucher')
-  } catch {
-    // handled by interceptor
-  } finally {
-    submitLoading.value = false
-  }
+
+    // 校验有效分录的摘要
+    const missingSummary = validDetails.find(d => !d.summary)
+    if (missingSummary) {
+      ElMessage.warning('请填写所有分录的摘要')
+      return
+    }
+
+    if (!isBalanced.value) {
+      ElMessage.warning('借贷不平衡，请检查金额')
+      return
+    }
+
+    const date = new Date(form.voucherDate)
+    form.year = date.getFullYear()
+    form.month = date.getMonth() + 1
+    form.accountSetId = appStore.currentAccountSetId || 0
+
+    submitLoading.value = true
+    try {
+      const submitData = {
+        ...form,
+        details: validDetails.map((d, i) => ({ ...d, lineNo: i + 1 }))
+      }
+      if (isEdit.value) {
+        await voucherApi.update(editId.value, submitData)
+        ElMessage.success('更新成功')
+      } else {
+        await voucherApi.create(submitData)
+        ElMessage.success('创建成功')
+      }
+      formDirty.value = false
+      router.push('/voucher')
+    } catch {
+      // handled by interceptor
+    } finally {
+      submitLoading.value = false
+    }
+  })
 }
 
 async function loadVoucherDetail(id: number) {
@@ -275,15 +316,40 @@ async function loadVoucherDetail(id: number) {
       quantity: d.quantity || undefined,
       unitPrice: d.unitPrice || undefined
     }))
+    // 编辑模式加载完数据后,dirty 重置(尚未改动)
+    formDirty.value = false
   } catch {
     // handled by interceptor
   }
 }
 
+// 离开页面提示:有未保存改动时弹窗确认
+onBeforeRouteLeave(async (_to, _from, next) => {
+  if (!formDirty.value) {
+    next()
+    return
+  }
+  // 仅在有实际填写内容时才提示,避免空表单也弹窗
+  if (!hasAnyDetailFilled() && !isEdit.value) {
+    next()
+    return
+  }
+  try {
+    await ElMessageBox.confirm('当前凭证尚未保存，离开后数据将丢失，是否继续？', '离开确认', {
+      confirmButtonText: '离开',
+      cancelButtonText: '继续编辑',
+      type: 'warning'
+    })
+    next()
+  } catch {
+    next(false)
+  }
+})
+
 onMounted(async () => {
   const id = route.params.id as string
   if (id) {
-    await loadVoucherDetail(Number(id))
+    await loadVoucherDetail(id)
   }
 
   const accountSetId = appStore.currentAccountSetId || form.accountSetId
@@ -345,5 +411,21 @@ onMounted(async () => {
 .add-row-btn {
   text-align: center;
   padding: 8px 0;
+}
+
+// 字段内联错误提示
+.inline-error {
+  color: #f56c6c;
+  font-size: 12px;
+  line-height: 1;
+  padding-top: 4px;
+}
+
+// 字段错误时输入框红色边框
+:deep(.field-error) {
+  .el-input__wrapper,
+  .el-select__wrapper {
+    box-shadow: 0 0 0 1px #f56c6c inset !important;
+  }
 }
 </style>

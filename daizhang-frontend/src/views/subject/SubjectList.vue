@@ -10,7 +10,7 @@
             @change="loadTree"
           >
             <el-option
-              v-for="item in accountSetList"
+              v-for="item in appStore.accountSetList"
               :key="item.id"
               :label="item.name"
               :value="item.id"
@@ -102,10 +102,10 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { subjectApi } from '@/api/subject'
-import { accountSetApi } from '@/api/accountset'
+import { useAppStore } from '@/stores/app'
 import type { SubjectVO, SubjectCreateRequest } from '@/types/subject'
-import type { AccountSetVO } from '@/types/accountset'
 
+const appStore = useAppStore()
 const treeRef = ref()
 const formRef = ref<FormInstance>()
 const dialogVisible = ref(false)
@@ -114,7 +114,6 @@ const isEdit = ref(false)
 const editId = ref<number>(0)
 const dialogTitle = ref('新增科目')
 const accountSetId = ref<number>(0)
-const accountSetList = ref<AccountSetVO[]>([])
 const treeData = ref<SubjectVO[]>([])
 
 const treeProps = {
@@ -235,10 +234,9 @@ async function handleDelete(data: SubjectVO) {
 
 onMounted(async () => {
   try {
-    const res = await accountSetApi.getList()
-    accountSetList.value = res.data
-    if (accountSetList.value.length > 0) {
-      accountSetId.value = accountSetList.value[0].id
+    const list = await appStore.loadAccountSetList()
+    if (list.length > 0) {
+      accountSetId.value = appStore.currentAccountSetId || list[0].id
       loadTree()
     }
   } catch {

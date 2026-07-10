@@ -201,6 +201,13 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '客户详情' }
       }
     ]
+  },
+  {
+    // 404 兜底:未知路由显示NotFound页,避免白屏
+    path: '/:pathMatch(.*)*',
+    name: 'NotFound',
+    component: () => import('@/views/error/NotFound.vue'),
+    meta: { title: '页面不存在' }
   }
 ]
 

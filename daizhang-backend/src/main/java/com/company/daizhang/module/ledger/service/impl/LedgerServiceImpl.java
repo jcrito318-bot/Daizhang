@@ -20,6 +20,7 @@ import com.company.daizhang.module.ledger.mapper.MultiColumnConfigMapper;
 import com.company.daizhang.module.ledger.service.LedgerService;
 import com.company.daizhang.module.ledger.vo.AccountCheckVO;
 import com.company.daizhang.module.ledger.vo.AgingAnalysisVO;
+import com.company.daizhang.module.ledger.vo.AuxiliaryBalanceVO;
 import com.company.daizhang.module.ledger.vo.AuxiliaryDetailLedgerDetailVO;
 import com.company.daizhang.module.ledger.vo.AuxiliaryDetailLedgerVO;
 import com.company.daizhang.module.ledger.vo.CashJournalVO;
@@ -2157,5 +2158,209 @@ public class LedgerServiceImpl implements LedgerService {
         headerStyle.setFont(headerFont);
         headerStyle.setAlignment(HorizontalAlignment.CENTER);
         return headerStyle;
+    }
+
+    /**
+     * 辅助核算余额表
+     * 按"科目 + 辅助核算项"维度汇总期初/本期发生/期末借贷方余额
+     * 期初余额算法与 auxiliaryDetailLedger 一致:从年初至查询月份之前(不含)的已过账凭证明细累计
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public List<AuxiliaryBalanceVO> auxiliaryBalance(Long accountSetId, Long categoryId, Integer year, Integer month) {
+        if (accountSetId == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "账套ID不能为空");
+        }
+        if (year == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "年度不能为空");
+        }
+        AccountSet accountSet = accountSetMapper.selectById(accountSetId);
+        if (accountSet == null) {
+            throw new BusinessException(ErrorCode.LEDGER_ACCOUNT_SET_NOT_FOUND);
+        }
+        accountSetAccessService.checkAccess(accountSetId);
+        log.info("辅助核算余额表查询: accountSetId={}, categoryId={}, year={}, month={}", accountSetId, categoryId, year, month);
+
+        // 1. 查询本年已过账凭证(用于本期发生额;若指定month则仅查该月)
+        LambdaQueryWrapper<Voucher> voucherWrapper = new LambdaQueryWrapper<>();
+        voucherWrapper.eq(Voucher::getAccountSetId, accountSetId)
+                .eq(Voucher::getStatus, 2)
+                .eq(Voucher::getYear, year);
+        if (month != null) {
+            voucherWrapper.eq(Voucher::getMonth, month);
+        }
+        List<Voucher> vouchers = voucherMapper.selectList(voucherWrapper);
+        List<Long> voucherIds = vouchers.stream().map(Voucher::getId).collect(Collectors.toList());
+
+        // 2. 查询本年已过账凭证(用于期初;month之前,不含month)
+        List<Long> beforeVoucherIds = Collections.emptyList();
+        if (month != null) {
+            LambdaQueryWrapper<Voucher> beforeWrapper = new LambdaQueryWrapper<>();
+            beforeWrapper.eq(Voucher::getAccountSetId, accountSetId)
+                    .eq(Voucher::getStatus, 2)
+                    .eq(Voucher::getYear, year)
+                    .lt(Voucher::getMonth, month);
+            List<Voucher> beforeVouchers = voucherMapper.selectList(beforeWrapper);
+            beforeVoucherIds = beforeVouchers.stream().map(Voucher::getId).collect(Collectors.toList());
+        }
+
+        // 3. 查询有辅助核算的凭证明细(本期)
+        List<VoucherDetail> periodDetails = Collections.emptyList();
+        if (!voucherIds.isEmpty()) {
+            LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
+            detailWrapper.in(VoucherDetail::getVoucherId, voucherIds)
+                    .isNotNull(VoucherDetail::getAuxiliaryId)
+                    .ne(VoucherDetail::getAuxiliaryId, 0);
+            periodDetails = voucherDetailMapper.selectList(detailWrapper);
+        }
+
+        // 4. 查询期初凭证明细(month之前)
+        List<VoucherDetail> beforeDetails = Collections.emptyList();
+        if (!beforeVoucherIds.isEmpty()) {
+            LambdaQueryWrapper<VoucherDetail> beforeDetailWrapper = new LambdaQueryWrapper<>();
+            beforeDetailWrapper.in(VoucherDetail::getVoucherId, beforeVoucherIds)
+                    .isNotNull(VoucherDetail::getAuxiliaryId)
+                    .ne(VoucherDetail::getAuxiliaryId, 0);
+            beforeDetails = voucherDetailMapper.selectList(beforeDetailWrapper);
+        }
+
+        // 5. 收集所有涉及的 auxiliaryId,批量查辅助核算项目和类别
+        Set<Long> auxiliaryIds = new HashSet<>();
+        for (VoucherDetail d : periodDetails) { auxiliaryIds.add(d.getAuxiliaryId()); }
+        for (VoucherDetail d : beforeDetails) { auxiliaryIds.add(d.getAuxiliaryId()); }
+        Map<Long, AuxiliaryItem> itemMap = Collections.emptyMap();
+        Map<Long, AuxiliaryCategory> categoryMap = Collections.emptyMap();
+        if (!auxiliaryIds.isEmpty()) {
+            List<AuxiliaryItem> items = auxiliaryItemMapper.selectBatchIds(auxiliaryIds);
+            itemMap = items.stream().collect(Collectors.toMap(AuxiliaryItem::getId, i -> i));
+            Set<Long> categoryIds = items.stream()
+                    .map(AuxiliaryItem::getCategoryId)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toSet());
+            if (!categoryIds.isEmpty()) {
+                categoryMap = auxiliaryCategoryMapper.selectBatchIds(categoryIds).stream()
+                        .collect(Collectors.toMap(AuxiliaryCategory::getId, c -> c));
+            }
+        }
+
+        // 6. 按 categoryId 过滤(若指定)
+        final Map<Long, AuxiliaryItem> finalItemMap = itemMap;
+        final Map<Long, AuxiliaryCategory> finalCategoryMap = categoryMap;
+        if (categoryId != null) {
+            periodDetails = periodDetails.stream()
+                    .filter(d -> matchesCategory(d.getAuxiliaryId(), categoryId, finalItemMap))
+                    .collect(Collectors.toList());
+            beforeDetails = beforeDetails.stream()
+                    .filter(d -> matchesCategory(d.getAuxiliaryId(), categoryId, finalItemMap))
+                    .collect(Collectors.toList());
+        }
+
+        // 7. 收集涉及的 subjectId,批量查科目
+        Set<Long> subjectIds = new HashSet<>();
+        for (VoucherDetail d : periodDetails) { subjectIds.add(d.getSubjectId()); }
+        for (VoucherDetail d : beforeDetails) { subjectIds.add(d.getSubjectId()); }
+        Map<Long, Subject> subjectMap = Collections.emptyMap();
+        if (!subjectIds.isEmpty()) {
+            subjectMap = subjectMapper.selectBatchIds(subjectIds).stream()
+                    .collect(Collectors.toMap(Subject::getId, s -> s));
+        }
+
+        // 8. 按 (subjectId, auxiliaryId) 分组聚合期初和本期发生额
+        // key = subjectId + "|" + auxiliaryId
+        Map<String, BigDecimal> beginNetMap = new HashMap<>();      // 净额(借-贷)
+        Map<String, BigDecimal> periodDebitMap = new HashMap<>();
+        Map<String, BigDecimal> periodCreditMap = new HashMap<>();
+        Map<String, Long> subjMap = new HashMap<>();
+        Map<String, Long> auxMap = new HashMap<>();
+
+        for (VoucherDetail d : beforeDetails) {
+            String key = d.getSubjectId() + "|" + d.getAuxiliaryId();
+            BigDecimal debit = d.getDebit() != null ? d.getDebit() : BigDecimal.ZERO;
+            BigDecimal credit = d.getCredit() != null ? d.getCredit() : BigDecimal.ZERO;
+            beginNetMap.merge(key, debit.subtract(credit), BigDecimal::add);
+            subjMap.putIfAbsent(key, d.getSubjectId());
+            auxMap.putIfAbsent(key, d.getAuxiliaryId());
+        }
+        for (VoucherDetail d : periodDetails) {
+            String key = d.getSubjectId() + "|" + d.getAuxiliaryId();
+            BigDecimal debit = d.getDebit() != null ? d.getDebit() : BigDecimal.ZERO;
+            BigDecimal credit = d.getCredit() != null ? d.getCredit() : BigDecimal.ZERO;
+            periodDebitMap.merge(key, debit, BigDecimal::add);
+            periodCreditMap.merge(key, credit, BigDecimal::add);
+            subjMap.putIfAbsent(key, d.getSubjectId());
+            auxMap.putIfAbsent(key, d.getAuxiliaryId());
+        }
+
+        // 9. 构建VO列表
+        List<AuxiliaryBalanceVO> result = new ArrayList<>();
+        for (String key : subjMap.keySet()) {
+            Long subjectId = subjMap.get(key);
+            Long auxiliaryId = auxMap.get(key);
+            Subject subject = subjectMap.get(subjectId);
+            if (subject == null) continue;
+            AuxiliaryItem item = itemMap.get(auxiliaryId);
+            if (item == null) continue;
+
+            int balanceDirection = (subject.getBalanceDirection() != null) ? subject.getBalanceDirection() : 1;
+            BigDecimal beginNet = beginNetMap.getOrDefault(key, BigDecimal.ZERO);
+            BigDecimal periodDebit = periodDebitMap.getOrDefault(key, BigDecimal.ZERO);
+            BigDecimal periodCredit = periodCreditMap.getOrDefault(key, BigDecimal.ZERO);
+
+            // 期初按方向拆借/贷(与 auxiliaryDetailLedger 一致)
+            BigDecimal beginDebit = beginNet.compareTo(BigDecimal.ZERO) >= 0 ? beginNet : BigDecimal.ZERO;
+            BigDecimal beginCredit = beginNet.compareTo(BigDecimal.ZERO) < 0 ? beginNet.negate() : BigDecimal.ZERO;
+
+            // 期末 = 期初净额 + 本期净额(按方向)
+            BigDecimal endNet;
+            if (balanceDirection == 1) {
+                // 借方科目: 期末净 = 期初借 - 期初贷 + 本期借 - 本期贷
+                endNet = beginDebit.subtract(beginCredit).add(periodDebit).subtract(periodCredit);
+            } else {
+                // 贷方科目: 期末净 = 期初贷 - 期初借 + 本期贷 - 本期借
+                endNet = beginCredit.subtract(beginDebit).add(periodCredit).subtract(periodDebit);
+            }
+            BigDecimal endDebit = endNet.compareTo(BigDecimal.ZERO) >= 0 ? endNet : BigDecimal.ZERO;
+            BigDecimal endCredit = endNet.compareTo(BigDecimal.ZERO) < 0 ? endNet.negate() : BigDecimal.ZERO;
+
+            AuxiliaryBalanceVO vo = new AuxiliaryBalanceVO();
+            vo.setSubjectCode(subject.getCode());
+            vo.setSubjectName(subject.getName());
+            vo.setAuxiliaryId(auxiliaryId);
+            vo.setAuxiliaryItemName(item.getItemName());
+            vo.setAuxiliaryCategoryId(item.getCategoryId());
+            if (item.getCategoryId() != null) {
+                AuxiliaryCategory cat = categoryMap.get(item.getCategoryId());
+                if (cat != null) {
+                    vo.setAuxiliaryCategoryName(cat.getCategoryName());
+                }
+            }
+            vo.setBeginDebit(beginDebit);
+            vo.setBeginCredit(beginCredit);
+            vo.setPeriodDebit(periodDebit);
+            vo.setPeriodCredit(periodCredit);
+            vo.setEndDebit(endDebit);
+            vo.setEndCredit(endCredit);
+            int cmp = endNet.compareTo(BigDecimal.ZERO);
+            vo.setBalanceDirection(cmp > 0 ? "借" : (cmp < 0 ? "贷" : "平"));
+            result.add(vo);
+        }
+
+        // 10. 排序:科目编码 → 类别名 → 项目名
+        result.sort(Comparator
+                .comparing(AuxiliaryBalanceVO::getSubjectCode, Comparator.nullsLast(String::compareTo))
+                .thenComparing(AuxiliaryBalanceVO::getAuxiliaryCategoryName, Comparator.nullsLast(String::compareTo))
+                .thenComparing(AuxiliaryBalanceVO::getAuxiliaryItemName, Comparator.nullsLast(String::compareTo)));
+
+        log.info("辅助核算余额表查询成功,共 {} 条记录", result.size());
+        return result;
+    }
+
+    /**
+     * 判断辅助核算项是否属于指定类别
+     */
+    private boolean matchesCategory(Long auxiliaryId, Long categoryId, Map<Long, AuxiliaryItem> itemMap) {
+        if (auxiliaryId == null || categoryId == null) return false;
+        AuxiliaryItem item = itemMap.get(auxiliaryId);
+        return item != null && categoryId.equals(item.getCategoryId());
     }
 }

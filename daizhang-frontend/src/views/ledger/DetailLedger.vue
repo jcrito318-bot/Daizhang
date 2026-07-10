@@ -10,7 +10,7 @@
             @change="handleAccountSetChange"
           >
             <el-option
-              v-for="item in accountSetList"
+              v-for="item in appStore.accountSetList"
               :key="item.id"
               :label="item.name"
               :value="item.id"
@@ -93,18 +93,15 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ledgerApi } from '@/api/ledger'
-import { accountSetApi } from '@/api/accountset'
 import { subjectApi } from '@/api/subject'
 import { useAppStore } from '@/stores/app'
 import type { DetailLedgerVO, LedgerQueryRequest } from '@/types/ledger'
-import type { AccountSetVO } from '@/types/accountset'
 import type { SubjectVO } from '@/types/subject'
 
 const appStore = useAppStore()
 const loading = ref(false)
 const total = ref(0)
 const tableData = ref<DetailLedgerVO[]>([])
-const accountSetList = ref<AccountSetVO[]>([])
 const subjectTree = ref<SubjectVO[]>([])
 const startMonth = ref(1)
 const endMonth = ref(12)
@@ -163,10 +160,9 @@ function handleSearch() {
 
 onMounted(async () => {
   try {
-    const res = await accountSetApi.getList()
-    accountSetList.value = res.data
-    if (accountSetList.value.length > 0 && !queryForm.accountSetId) {
-      queryForm.accountSetId = accountSetList.value[0].id
+    const list = await appStore.loadAccountSetList()
+    if (list.length > 0 && !queryForm.accountSetId) {
+      queryForm.accountSetId = appStore.currentAccountSetId || list[0].id
     }
     if (queryForm.accountSetId) {
       const subjectRes = await subjectApi.getTree(queryForm.accountSetId)

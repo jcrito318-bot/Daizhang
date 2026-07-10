@@ -1,0 +1,26 @@
+/* 全局基础样式 */
+/* 修复: 全工程无 font-family 声明,导致 EP --el-font-family 变量未生效到元素,
+   渲染回退为 Times New Roman 衬线体,不适合中文财务系统。
+   此处显式声明无衬线字体栈,覆盖 html/body 及所有元素。 */
+html,
+body,
+#app {
+  font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', '微软雅黑', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  color: #303133;
+  background-color: #f0f2f5;
+}
+
+/* 确保所有常用元素继承字体 */
+div, span, p, h1, h2, h3, h4, h5, h6,
+a, button, input, textarea, select,
+table, th, td, label, li, ul, ol {
+  font-family: inherit;
+}

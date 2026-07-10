@@ -10,7 +10,7 @@
             @change="loadPeriods"
           >
             <el-option
-              v-for="item in accountSetList"
+              v-for="item in appStore.accountSetList"
               :key="item.id"
               :label="item.name"
               :value="item.id"
@@ -132,16 +132,13 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAppStore } from '@/stores/app'
-import { accountSetApi } from '@/api/accountset'
 import { periodApi } from '@/api/period'
-import type { AccountSetVO } from '@/types/accountset'
 import type { TrialBalanceResultVO } from '@/api/period'
 
 const appStore = useAppStore()
 
 const loading = ref(false)
 const trialBalanceLoading = ref(false)
-const accountSetList = ref<AccountSetVO[]>([])
 const periodList = ref<any[]>([])
 const selectedPeriod = ref<any>(null)
 
@@ -165,10 +162,9 @@ function formatAmount(val: number): string {
 
 async function loadAccountSets() {
   try {
-    const res = await accountSetApi.getList()
-    accountSetList.value = res.data
-    if (accountSetList.value.length > 0 && !queryForm.accountSetId) {
-      queryForm.accountSetId = accountSetList.value[0].id
+    const list = await appStore.loadAccountSetList()
+    if (list.length > 0 && !queryForm.accountSetId) {
+      queryForm.accountSetId = appStore.currentAccountSetId || list[0].id
       loadPeriods()
     }
   } catch {

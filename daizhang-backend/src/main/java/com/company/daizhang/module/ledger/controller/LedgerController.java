@@ -8,6 +8,7 @@ import com.company.daizhang.module.ledger.dto.SubjectBalanceQueryRequest;
 import com.company.daizhang.module.ledger.service.LedgerService;
 import com.company.daizhang.module.ledger.vo.AccountCheckVO;
 import com.company.daizhang.module.ledger.vo.AgingAnalysisVO;
+import com.company.daizhang.module.ledger.vo.AuxiliaryBalanceVO;
 import com.company.daizhang.module.ledger.vo.AuxiliaryDetailLedgerVO;
 import com.company.daizhang.module.ledger.vo.CashJournalVO;
 import com.company.daizhang.module.ledger.vo.DetailLedgerVO;
@@ -118,16 +119,14 @@ public class LedgerController {
     @Operation(summary = "辅助核算余额表")
     @GetMapping("/auxiliary-balance")
     @RequireAccountSetAccess
-    public Result<List<Map<String, Object>>> auxiliaryBalance(@RequestParam Long accountSetId,
+    public Result<List<AuxiliaryBalanceVO>> auxiliaryBalance(@RequestParam Long accountSetId,
                                                                @RequestParam(required = false) Long categoryId,
                                                                @RequestParam Integer year,
                                                                @RequestParam(required = false) Integer month) {
-        // 辅助核算余额表需按辅助核算维度汇总借贷发生额，
-        // 涉及 voucher(账套/期间) → voucher_detail(auxiliaryId/debit/credit) → auxiliary_item(categoryId) 多表关联聚合，
-        // LedgerService暂未提供该方法，且在Controller中跨表聚合风险较大，故暂返回空列表。
-        // 后续应在LedgerService中实现 auxiliaryBalance 方法并在本端点调用。
-        log.info("辅助核算余额表查询: accountSetId={}, categoryId={}, year={}, month={}", accountSetId, categoryId, year, month);
-        return Result.success(new ArrayList<>());
+        // 按"科目 + 辅助核算项"维度汇总期初/本期发生/期末借贷方余额
+        // 期初从年初至查询月份之前(不含)的已过账凭证明细累计,本期为查询期间发生额
+        List<AuxiliaryBalanceVO> result = ledgerService.auxiliaryBalance(accountSetId, categoryId, year, month);
+        return Result.success(result);
     }
 
     @Operation(summary = "导出明细账Excel")

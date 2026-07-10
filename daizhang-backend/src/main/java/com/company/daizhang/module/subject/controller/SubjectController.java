@@ -19,9 +19,12 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URLEncoder;
@@ -155,6 +158,63 @@ public class SubjectController {
     }
 
     /**
+     * 导出科目列表Excel
+     */
+    @GetMapping("/export")
+    @Operation(summary = "导出科目列表Excel", description = "根据账套ID导出科目列表为Excel")
+    @RequireAccountSetAccess
+    public void export(@RequestParam Long accountSetId,
+                       @RequestParam(required = false) Integer year,
+                       HttpServletResponse response) throws IOException {
+        List<SubjectVO> subjects = subjectService.listSubjectsByAccountSetId(accountSetId);
+
+        byte[] data;
+        try (Workbook workbook = new XSSFWorkbook();
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            Sheet sheet = workbook.createSheet("科目列表");
+
+            CellStyle headerStyle = createHeaderStyle(workbook);
+
+            // 表头
+            Row headerRow = sheet.createRow(0);
+            String[] headers = {"科目编码", "科目名称", "科目类别", "余额方向", "是否辅助核算", "状态"};
+            for (int i = 0; i < headers.length; i++) {
+                Cell cell = headerRow.createCell(i);
+                cell.setCellValue(headers[i]);
+                cell.setCellStyle(headerStyle);
+            }
+
+            // 数据行
+            int rowNum = 1;
+            for (SubjectVO vo : subjects) {
+                Row row = sheet.createRow(rowNum++);
+                row.createCell(0).setCellValue(vo.getSubjectCode() != null ? vo.getSubjectCode() : "");
+                row.createCell(1).setCellValue(vo.getSubjectName() != null ? vo.getSubjectName() : "");
+                row.createCell(2).setCellValue(vo.getCategory() != null ? vo.getCategory() : "");
+                row.createCell(3).setCellValue(balanceDirectionText(vo.getBalanceDirection()));
+                row.createCell(4).setCellValue(vo.getAuxiliaryAccounting() != null && vo.getAuxiliaryAccounting() == 1 ? "是" : "否");
+                row.createCell(5).setCellValue(vo.getStatus() != null && vo.getStatus() == 1 ? "启用" : "禁用");
+            }
+
+            // 列宽
+            sheet.setColumnWidth(0, 15 * 256);
+            sheet.setColumnWidth(1, 25 * 256);
+            sheet.setColumnWidth(2, 14 * 256);
+            sheet.setColumnWidth(3, 12 * 256);
+            sheet.setColumnWidth(4, 15 * 256);
+            sheet.setColumnWidth(5, 10 * 256);
+
+            workbook.write(out);
+            data = out.toByteArray();
+        } catch (IOException e) {
+            log.error("导出科目列表失败", e);
+            throw new RuntimeException("导出科目列表失败", e);
+        }
+
+        writeExcelResponse(response, data, "科目列表_" + accountSetId + ".xlsx");
+    }
+
+    /**
      * 构建树形结构
      */
     private List<SubjectVO> buildTree(List<SubjectVO> subjects, Long parentId) {
@@ -178,6 +238,35 @@ public class SubjectController {
         try (OutputStream os = response.getOutputStream()) {
             os.write(data);
             os.flush();
+        }
+    }
+
+    /**
+     * 表头样式：加粗居中
+     */
+    private CellStyle createHeaderStyle(Workbook workbook) {
+        CellStyle headerStyle = workbook.createCellStyle();
+        Font headerFont = workbook.createFont();
+        headerFont.setBold(true);
+        headerStyle.setFont(headerFont);
+        headerStyle.setAlignment(HorizontalAlignment.CENTER);
+        return headerStyle;
+    }
+
+    /**
+     * 余额方向转换：1-借/2-贷
+     */
+    private String balanceDirectionText(Integer direction) {
+        if (direction == null) {
+            return "";
+        }
+        switch (direction) {
+            case 1:
+                return "借";
+            case 2:
+                return "贷";
+            default:
+                return "";
         }
     }
 }

@@ -5,6 +5,7 @@ import com.company.daizhang.module.ledger.dto.LedgerQueryRequest;
 import com.company.daizhang.module.ledger.dto.SubjectBalanceQueryRequest;
 import com.company.daizhang.module.ledger.vo.AccountCheckVO;
 import com.company.daizhang.module.ledger.vo.AgingAnalysisVO;
+import com.company.daizhang.module.ledger.vo.AuxiliaryBalanceVO;
 import com.company.daizhang.module.ledger.vo.AuxiliaryDetailLedgerVO;
 import com.company.daizhang.module.ledger.vo.CashJournalVO;
 import com.company.daizhang.module.ledger.vo.DetailLedgerVO;
@@ -67,6 +68,17 @@ public interface LedgerService {
      * @param month        月份（可为空，表示查询全年）
      */
     AuxiliaryDetailLedgerVO auxiliaryDetailLedger(Long accountSetId, Long subjectId, Long auxiliaryId, Integer year, Integer month);
+
+    /**
+     * 辅助核算余额表
+     * 按"科目 + 辅助核算项"维度汇总期初/本期发生/期末借贷方余额
+     *
+     * @param accountSetId 账套ID
+     * @param categoryId   辅助核算类别ID（可选，为空查全部类别）
+     * @param year         年度
+     * @param month        月份（可选，为空查全年）
+     */
+    List<AuxiliaryBalanceVO> auxiliaryBalance(Long accountSetId, Long categoryId, Integer year, Integer month);
 
     /**
      * 导出明细账Excel

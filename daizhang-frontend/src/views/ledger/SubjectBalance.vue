@@ -9,7 +9,7 @@
             style="width: 200px"
           >
             <el-option
-              v-for="item in accountSetList"
+              v-for="item in appStore.accountSetList"
               :key="item.id"
               :label="item.name"
               :value="item.id"
@@ -86,15 +86,12 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ledgerApi } from '@/api/ledger'
-import { accountSetApi } from '@/api/accountset'
 import { useAppStore } from '@/stores/app'
 import type { SubjectBalanceVO, SubjectBalanceQueryRequest } from '@/types/ledger'
-import type { AccountSetVO } from '@/types/accountset'
 
 const appStore = useAppStore()
 const loading = ref(false)
 const tableData = ref<SubjectBalanceVO[]>([])
-const accountSetList = ref<AccountSetVO[]>([])
 
 const queryForm = reactive<SubjectBalanceQueryRequest>({
   accountSetId: appStore.currentAccountSetId || 0,
@@ -123,10 +120,9 @@ function handleSearch() {
 
 onMounted(async () => {
   try {
-    const res = await accountSetApi.getList()
-    accountSetList.value = res.data
-    if (accountSetList.value.length > 0 && !queryForm.accountSetId) {
-      queryForm.accountSetId = accountSetList.value[0].id
+    const list = await appStore.loadAccountSetList()
+    if (list.length > 0 && !queryForm.accountSetId) {
+      queryForm.accountSetId = appStore.currentAccountSetId || list[0].id
     }
   } catch {
     // handled by interceptor

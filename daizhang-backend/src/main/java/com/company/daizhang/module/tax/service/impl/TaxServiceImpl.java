@@ -20,6 +20,10 @@ import com.company.daizhang.module.customer.entity.Customer;
 import com.company.daizhang.module.customer.mapper.CustomerMapper;
 import com.company.daizhang.module.subject.entity.Subject;
 import com.company.daizhang.module.subject.mapper.SubjectMapper;
+import com.company.daizhang.module.voucher.entity.Voucher;
+import com.company.daizhang.module.voucher.entity.VoucherDetail;
+import com.company.daizhang.module.voucher.mapper.VoucherDetailMapper;
+import com.company.daizhang.module.voucher.mapper.VoucherMapper;
 import com.company.daizhang.module.tax.service.TaxService;
 import com.company.daizhang.module.tax.vo.TaxCheckResultVO;
 import com.company.daizhang.module.tax.vo.TaxCheckSummaryVO;
@@ -64,6 +68,9 @@ public class TaxServiceImpl implements TaxService {
     private final TaxDeclarationMapper taxDeclarationMapper;
     private final CustomerMapper customerMapper;
     private final com.company.daizhang.module.salary.mapper.EmployeeMapper employeeMapper;
+    // 用于增值税申报表从凭证归集税金(销项=应交税费贷方,进项=应交税费借方)
+    private final VoucherMapper voucherMapper;
+    private final VoucherDetailMapper voucherDetailMapper;
 
     /**
      * 残疾人就业保障金安置比例（1.5%）。
@@ -467,7 +474,7 @@ public class TaxServiceImpl implements TaxService {
                      .le(OutputInvoice::getInvoiceDate, monthEnd);
         List<OutputInvoice> outputInvoices = outputInvoiceMapper.selectList(outputWrapper);
 
-        BigDecimal outputTax = outputInvoices.stream()
+        BigDecimal outputTaxFromInvoice = outputInvoices.stream()
                 .map(i -> i.getTaxAmount() != null ? i.getTaxAmount() : BigDecimal.ZERO)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
@@ -478,9 +485,20 @@ public class TaxServiceImpl implements TaxService {
                     .le(InputInvoice::getInvoiceDate, monthEnd);
         List<InputInvoice> inputInvoices = inputInvoiceMapper.selectList(inputWrapper);
 
-        BigDecimal inputTax = inputInvoices.stream()
+        BigDecimal inputTaxFromInvoice = inputInvoices.stream()
                 .map(i -> i.getTaxAmount() != null ? i.getTaxAmount() : BigDecimal.ZERO)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        // 从凭证归集税金:应交税费科目(编码2221开头)的贷方=销项税额,借方=进项税额
+        // 修复:原仅从发票表归集,导致有凭证无发票时申报表恒为0
+        BigDecimal[] voucherTax = sumVatTaxFromVouchers(accountSet.getId(), year, month);
+        BigDecimal outputTaxFromVoucher = voucherTax[0];
+        BigDecimal inputTaxFromVoucher = voucherTax[1];
+
+        // 合并取较大值:发票与凭证任一有数据即计入,避免遗漏
+        // (发票和凭证可能只录了一方,取较大值能覆盖两种业务场景)
+        BigDecimal outputTax = outputTaxFromInvoice.max(outputTaxFromVoucher);
+        BigDecimal inputTax = inputTaxFromInvoice.max(inputTaxFromVoucher);
 
         // 应纳税额 = 销项税额 - 进项税额
         BigDecimal taxAmount = outputTax.subtract(inputTax);
@@ -498,6 +516,49 @@ public class TaxServiceImpl implements TaxService {
         vo.setTaxAmount(taxAmount);
         vo.setItems(items);
         return vo;
+    }
+
+    /**
+     * 从凭证归集增值税销项/进项税额
+     * 销项税额 = 应交税费科目(编码2221开头)本期贷方合计
+     * 进项税额 = 应交税费科目(编码2221开头)本期借方合计
+     *
+     * @return [0]=销项税额(贷方), [1]=进项税额(借方)
+     */
+    private BigDecimal[] sumVatTaxFromVouchers(Long accountSetId, Integer year, Integer month) {
+        try {
+            // 查询本期已过账凭证(status=2)
+            LambdaQueryWrapper<Voucher> voucherWrapper = new LambdaQueryWrapper<>();
+            voucherWrapper.eq(Voucher::getAccountSetId, accountSetId)
+                    .eq(Voucher::getStatus, 2)
+                    .eq(Voucher::getYear, year)
+                    .eq(Voucher::getMonth, month);
+            List<Voucher> vouchers = voucherMapper.selectList(voucherWrapper);
+            if (vouchers.isEmpty()) {
+                return new BigDecimal[]{BigDecimal.ZERO, BigDecimal.ZERO};
+            }
+            List<Long> voucherIds = vouchers.stream().map(Voucher::getId).collect(Collectors.toList());
+
+            // 查询应交税费科目(编码2221开头)的明细
+            // subjectCode为冗余字段,直接用likeRight匹配前缀,避免再查科目表
+            LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
+            detailWrapper.in(VoucherDetail::getVoucherId, voucherIds)
+                    .likeRight(VoucherDetail::getSubjectCode, "2221");
+            List<VoucherDetail> details = voucherDetailMapper.selectList(detailWrapper);
+
+            BigDecimal outputTax = BigDecimal.ZERO;  // 贷方=销项
+            BigDecimal inputTax = BigDecimal.ZERO;   // 借方=进项
+            for (VoucherDetail d : details) {
+                BigDecimal debit = d.getDebit() != null ? d.getDebit() : BigDecimal.ZERO;
+                BigDecimal credit = d.getCredit() != null ? d.getCredit() : BigDecimal.ZERO;
+                inputTax = inputTax.add(debit);
+                outputTax = outputTax.add(credit);
+            }
+            return new BigDecimal[]{outputTax, inputTax};
+        } catch (Exception e) {
+            log.warn("从凭证归集增值税税额失败,回退为0: {}", e.getMessage());
+            return new BigDecimal[]{BigDecimal.ZERO, BigDecimal.ZERO};
+        }
     }
 
     /**

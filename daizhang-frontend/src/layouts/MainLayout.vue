@@ -1,18 +1,24 @@
 <template>
   <el-container class="main-layout">
-    <el-aside :width="appStore.sidebarCollapsed ? '64px' : '220px'" class="sidebar">
+    <!-- 移动端遮罩 -->
+    <div v-if="isMobile && mobileSidebarOpen" class="mobile-overlay" @click="closeMobileSidebar"></div>
+    <el-aside
+      :width="sidebarWidth"
+      :class="['sidebar', { 'sidebar-mobile': isMobile, 'sidebar-mobile-open': isMobile && mobileSidebarOpen }]"
+    >
       <div class="logo">
         <img src="@/assets/vite.svg" alt="logo" class="logo-img" />
-        <span v-show="!appStore.sidebarCollapsed" class="logo-text">代账系统</span>
+        <span v-show="!isSidebarCollapsed" class="logo-text">代账系统</span>
       </div>
       <el-menu
         :default-active="activeMenu"
-        :collapse="appStore.sidebarCollapsed"
+        :collapse="isSidebarCollapsed"
         :collapse-transition="false"
         router
         background-color="#304156"
         text-color="#bfcbd9"
         active-text-color="#409eff"
+        @select="closeMobileSidebar"
       >
         <el-menu-item index="/dashboard">
           <el-icon><HomeFilled /></el-icon>
@@ -142,9 +148,10 @@
     <el-container class="main-container">
       <el-header class="header">
         <div class="header-left">
-          <el-icon class="collapse-btn" @click="appStore.toggleSidebar">
-            <Fold v-if="!appStore.sidebarCollapsed" />
-            <Expand v-else />
+          <el-icon class="collapse-btn" @click="toggleMobileSidebar">
+            <Fold v-if="!isSidebarCollapsed && !isMobile" />
+            <Expand v-else-if="appStore.sidebarCollapsed && !isMobile" />
+            <Menu v-else />
           </el-icon>
           <el-breadcrumb separator="/">
             <el-breadcrumb-item :to="{ path: '/dashboard' }">首页</el-breadcrumb-item>
@@ -155,13 +162,13 @@
         </div>
         <div class="header-right">
           <el-select
-            v-model="currentAccountSetId"
+            v-model="appStore.currentAccountSetId"
             placeholder="请选择账套"
             class="account-set-select"
             @change="handleAccountSetChange"
           >
             <el-option
-              v-for="item in accountSetList"
+              v-for="item in appStore.accountSetList"
               :key="item.id"
               :label="item.name"
               :value="item.id"
@@ -191,23 +198,55 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
-import { accountSetApi } from '@/api/accountset'
-import type { AccountSetVO } from '@/types/accountset'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const appStore = useAppStore()
 
-const accountSetList = ref<AccountSetVO[]>([])
-const currentAccountSetId = ref<number | null>(appStore.currentAccountSetId)
-
 const activeMenu = computed(() => route.path)
 const currentRoute = computed(() => route)
+
+// 移动端响应式:小屏(<768px)下侧边栏改为抽屉模式
+const isMobile = ref(false)
+const mobileSidebarOpen = ref(false)
+
+// 移动端:抽屉模式下展开=false(用mobileSidebarOpen控制),收起模式恒为收起
+// 桌面端:沿用 sidebarCollapsed
+const isSidebarCollapsed = computed(() => {
+  if (isMobile.value) return false  // 移动端抽屉打开时显示完整菜单,关闭时由CSS隐藏
+  return appStore.sidebarCollapsed
+})
+const sidebarWidth = computed(() => {
+  if (isMobile.value) return '220px'  // 移动端抽屉固定宽度
+  return appStore.sidebarCollapsed ? '64px' : '220px'
+})
+
+function checkMobile() {
+  isMobile.value = window.innerWidth < 768
+  // 进入移动端时关闭抽屉
+  if (isMobile.value) {
+    mobileSidebarOpen.value = false
+  }
+}
+
+function toggleMobileSidebar() {
+  if (isMobile.value) {
+    mobileSidebarOpen.value = !mobileSidebarOpen.value
+  } else {
+    appStore.toggleSidebar()
+  }
+}
+
+function closeMobileSidebar() {
+  if (isMobile.value) {
+    mobileSidebarOpen.value = false
+  }
+}
 
 function handleAccountSetChange(id: number) {
   appStore.setCurrentAccountSet(id)
@@ -223,22 +262,26 @@ async function handleCommand(command: string) {
 }
 
 onMounted(async () => {
+  checkMobile()
+  window.addEventListener('resize', checkMobile)
   try {
     if (!userStore.userInfo) {
       await userStore.getUserInfo()
     }
-    const res = await accountSetApi.getList()
-    accountSetList.value = res.data
-    if (accountSetList.value.length > 0 && !appStore.currentAccountSetId) {
-      const firstId = accountSetList.value[0].id
-      currentAccountSetId.value = firstId
-      appStore.setCurrentAccountSet(firstId)
-    } else {
-      currentAccountSetId.value = appStore.currentAccountSetId
-    }
+    // 通过 store 加载账套列表(带缓存),避免每次进入页面重复请求
+    await appStore.loadAccountSetList()
   } catch {
     // ignore
   }
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', checkMobile)
+})
+
+// 路由切换时,移动端自动关闭抽屉
+watch(() => route.path, () => {
+  closeMobileSidebar()
 })
 </script>
 
@@ -247,10 +290,36 @@ onMounted(async () => {
   height: 100vh;
 }
 
+// 移动端遮罩
+.mobile-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+}
+
 .sidebar {
   background-color: #304156;
   transition: width 0.3s;
   overflow: hidden;
+
+  // 移动端:抽屉模式,默认隐藏,通过 translateX 滑入
+  &.sidebar-mobile {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 1000;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+
+    &.sidebar-mobile-open {
+      transform: translateX(0);
+    }
+  }
 
   .logo {
     height: 60px;

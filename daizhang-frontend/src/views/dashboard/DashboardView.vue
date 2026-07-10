@@ -150,11 +150,21 @@ async function loadStats() {
 }
 
 async function loadRecentVouchers() {
+  // 等待账套列表加载完成,避免 accountSetId=0 时查不到数据
+  // (修复 Dashboard 最近凭证表恒为空,而凭证列表却有数据的不一致问题)
+  if (!appStore.accountSetListLoaded) {
+    await appStore.loadAccountSetList()
+  }
+  const accountSetId = appStore.currentAccountSetId
+  if (!accountSetId) {
+    recentVouchers.value = []
+    return
+  }
   voucherLoading.value = true
   try {
     const now = new Date()
     const res = await voucherApi.getPage({
-      accountSetId: appStore.currentAccountSetId || 0,
+      accountSetId,
       year: now.getFullYear(),
       month: now.getMonth() + 1,
       pageNum: 1,

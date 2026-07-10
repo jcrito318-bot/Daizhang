@@ -1,5 +1,7 @@
 package com.company.daizhang.module.customer.dto;
 
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
@@ -69,8 +71,9 @@ public class CustomerCreateRequest {
     private LocalDate serviceEndDate;
 
     /**
-     * 信用额度
+     * 信用额度(不可为负数)
      */
+    @DecimalMin(value = "0", message = "信用额度不能为负数")
     private BigDecimal creditLimit;
 
     /**
@@ -89,8 +92,9 @@ public class CustomerCreateRequest {
     private String contactPhone;
 
     /**
-     * 邮箱
+     * 邮箱(填写时必须为合法格式)
      */
+    @Email(message = "邮箱格式不正确")
     private String email;
 
     /**
