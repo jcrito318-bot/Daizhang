@@ -41,6 +41,10 @@ public class PeriodController {
                                               @RequestParam int year,
                                               @RequestParam int month) {
         ClosePeriodResultVO result = periodService.closePeriod(accountSetId, year, month);
+        if (result != null && !result.isSuccess()) {
+            // 结账失败(存在未审核/未过账凭证),返回业务错误码,便于客户端识别
+            return Result.error(400, result.getMessage() != null ? result.getMessage() : "结账失败，存在未处理凭证");
+        }
         return Result.success(result);
     }
 

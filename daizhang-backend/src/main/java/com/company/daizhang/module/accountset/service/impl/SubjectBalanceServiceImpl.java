@@ -18,6 +18,7 @@ import com.company.daizhang.module.subject.entity.Subject;
 import com.company.daizhang.module.subject.mapper.SubjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,6 +41,7 @@ public class SubjectBalanceServiceImpl extends ServiceImpl<SubjectBalanceMapper,
     private final AccountBalanceMapper accountBalanceMapper;
     private final SubjectMapper subjectMapper;
     private final AccountPeriodMapper accountPeriodMapper;
+    private final JdbcTemplate jdbcTemplate;
 
     /**
      * 期次：期初
@@ -74,11 +76,16 @@ public class SubjectBalanceServiceImpl extends ServiceImpl<SubjectBalanceMapper,
         }
 
         // 先删除该账套该年度的旧数据
-        LambdaQueryWrapper<SubjectBalance> deleteWrapper = new LambdaQueryWrapper<>();
-        deleteWrapper.eq(SubjectBalance::getAccountSetId, accountSetId)
-                     .eq(SubjectBalance::getYear, year)
-                     .eq(SubjectBalance::getPeriod, PERIOD_BEGIN);
-        this.remove(deleteWrapper);
+        // 注意:SubjectBalance 继承 BaseEntity,deleted 字段标注了 @TableLogic,且
+        // application.yml 全局开启逻辑删除。this.remove() 仅做逻辑删除(UPDATE deleted=1),
+        // 旧记录(含此前逻辑删除的记录)仍占用唯一键 (account_set_id, subject_id, year, period),
+        // 而 uk_subject_balance 未包含 deleted 字段,导致重复录入时 this.save() 插入新行
+        // 触发唯一约束冲突返回 500,saveBatch 非幂等。
+        // 此处改用 JdbcTemplate 执行物理删除(共享 DataSource,参与当前 @Transactional),
+        // 清理活动记录与历史逻辑删除记录,保证重复录入幂等。
+        jdbcTemplate.update(
+                "DELETE FROM acc_subject_balance WHERE account_set_id = ? AND `year` = ? AND period = ?",
+                accountSetId, year, PERIOD_BEGIN);
 
         // 批量插入新数据
         if (requests != null && !requests.isEmpty()) {
@@ -114,12 +121,29 @@ public class SubjectBalanceServiceImpl extends ServiceImpl<SubjectBalanceMapper,
                 throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
                         "期初余额借贷不平衡(借方合计:" + totalDebit + ", 贷方合计:" + totalCredit + ")");
             }
+            // 构建科目ID→科目对象映射(科目归属校验时已查询),用于回填subjectCode/subjectName
+            // 前端请求可能只传subjectId,而acc_subject_balance表的subject_code列不允许NULL
+            Map<Long, Subject> subjectMap = subjectMapper.selectList(new LambdaQueryWrapper<Subject>()
+                    .eq(Subject::getAccountSetId, accountSetId)
+                    .in(Subject::getId, subjectIds))
+                    .stream().collect(Collectors.toMap(Subject::getId, s -> s));
+
             for (SubjectBalanceRequest request : requests) {
                 SubjectBalance balance = new SubjectBalance();
                 BeanUtil.copyProperties(request, balance);
                 balance.setAccountSetId(accountSetId);
                 balance.setYear(year);
                 balance.setPeriod(PERIOD_BEGIN);
+                // 回填subjectCode/subjectName(前端可能未传,但DB要求非NULL)
+                Subject subj = subjectMap.get(request.getSubjectId());
+                if (subj != null) {
+                    if (balance.getSubjectCode() == null) {
+                        balance.setSubjectCode(subj.getCode());
+                    }
+                    if (balance.getSubjectName() == null) {
+                        balance.setSubjectName(subj.getName());
+                    }
+                }
                 if (balance.getBeginDebit() == null) {
                     balance.setBeginDebit(BigDecimal.ZERO);
                 }

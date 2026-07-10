@@ -1,8 +1,11 @@
 package com.company.daizhang.module.ai.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
+import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.ai.dto.AccountingSuggestRequest;
@@ -120,6 +123,25 @@ public class AiController {
             log.error("票据识别失败", e);
             return Result.error(500, "票据识别失败：" + e.getMessage());
         }
+    }
+
+    /**
+     * OCR识别历史
+     * OCR识别结果保存在document模块的票据表中(ocr_content字段不为空即为OCR来源)
+     */
+    @GetMapping("/ocr/history")
+    @Operation(summary = "OCR识别历史", description = "分页查询OCR识别产生的票据记录(ocr_content非空)")
+    @RequireAccountSetAccess
+    public Result<PageResult<Document>> ocrHistory(@RequestParam Long accountSetId,
+                                                     @RequestParam(defaultValue = "1") int pageNum,
+                                                     @RequestParam(defaultValue = "10") int pageSize) {
+        Page<Document> page = new Page<>(pageNum, pageSize);
+        LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<Document>()
+                .eq(Document::getAccountSetId, accountSetId)
+                .isNotNull(Document::getOcrContent)
+                .orderByDesc(Document::getCreateTime);
+        Page<Document> result = documentService.page(page, wrapper);
+        return Result.success(new PageResult<>(result.getRecords(), result.getTotal(), pageNum, pageSize));
     }
 
     /**

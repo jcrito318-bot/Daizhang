@@ -1,8 +1,13 @@
 package com.company.daizhang.module.subject.controller;
 
+import cn.hutool.core.util.StrUtil;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.company.daizhang.common.annotation.RequireAccountSetAccess;
+import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.common.vo.ImportResultVO;
+import com.company.daizhang.module.subject.entity.Subject;
 import com.company.daizhang.module.subject.dto.SubjectCreateRequest;
 import com.company.daizhang.module.subject.dto.SubjectUpdateRequest;
 import com.company.daizhang.module.subject.service.SubjectImportService;
@@ -59,6 +64,29 @@ public class SubjectController {
     public Result<SubjectVO> getById(@PathVariable Long id) {
         SubjectVO subject = subjectService.getSubjectById(id);
         return Result.success(subject);
+    }
+
+    /**
+     * 分页查询科目
+     */
+    @GetMapping("/page")
+    @Operation(summary = "分页查询科目", description = "根据账套ID分页查询科目，支持按编码/名称/类别筛选")
+    @RequireAccountSetAccess
+    public Result<PageResult<Subject>> page(@RequestParam Long accountSetId,
+                                             @RequestParam(defaultValue = "1") int pageNum,
+                                             @RequestParam(defaultValue = "10") int pageSize,
+                                             @RequestParam(required = false) String subjectCode,
+                                             @RequestParam(required = false) String subjectName,
+                                             @RequestParam(required = false) String category) {
+        Page<Subject> page = new Page<>(pageNum, pageSize);
+        LambdaQueryWrapper<Subject> wrapper = new LambdaQueryWrapper<Subject>()
+                .eq(Subject::getAccountSetId, accountSetId)
+                .like(StrUtil.isNotBlank(subjectCode), Subject::getCode, subjectCode)
+                .like(StrUtil.isNotBlank(subjectName), Subject::getName, subjectName)
+                .eq(StrUtil.isNotBlank(category), Subject::getCategory, category)
+                .orderByAsc(Subject::getCode);
+        Page<Subject> result = subjectService.page(page, wrapper);
+        return Result.success(new PageResult<>(result.getRecords(), result.getTotal(), pageNum, pageSize));
     }
 
     /**

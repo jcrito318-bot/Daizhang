@@ -53,11 +53,32 @@ public class GlobalExceptionHandler {
         return Result.error(ErrorCode.PARAM_ERROR.getCode(), message);
     }
 
+    @ExceptionHandler(org.springframework.web.bind.MissingServletRequestParameterException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public Result<Void> handleMissingServletRequestParameterException(org.springframework.web.bind.MissingServletRequestParameterException e) {
+        log.warn("缺少必需参数: {}", e.getParameterName());
+        return Result.error(ErrorCode.PARAM_ERROR.getCode(), "缺少必需参数: " + e.getParameterName());
+    }
+
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    @ResponseStatus(HttpStatus.METHOD_NOT_ALLOWED)
+    public Result<Void> handleHttpRequestMethodNotSupportedException(org.springframework.web.HttpRequestMethodNotSupportedException e) {
+        log.warn("请求方法不支持: {}", e.getMessage());
+        return Result.error(405, "请求方法不支持: " + e.getMethod());
+    }
+
     @ExceptionHandler(AccessDeniedException.class)
     @ResponseStatus(HttpStatus.FORBIDDEN)
     public Result<Void> handleAccessDeniedException(AccessDeniedException e) {
         log.warn("访问被拒绝: {}", e.getMessage());
         return Result.error(ErrorCode.FORBIDDEN.getCode(), "权限不足，禁止访问");
+    }
+
+    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public Result<Void> handleNoResourceFoundException(org.springframework.web.servlet.resource.NoResourceFoundException e) {
+        log.warn("资源未找到: {}", e.getResourcePath());
+        return Result.error(404, "请求的资源不存在");
     }
 
     @ExceptionHandler(Exception.class)
