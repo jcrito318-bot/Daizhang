@@ -173,9 +173,11 @@ public class AiController {
                 request.getAmount()
             );
             return Result.success(result);
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("智能记账建议生成失败", e);
-            return Result.error(500, "生成记账建议失败：" + e.getMessage());
+            return Result.error(500, "生成记账建议失败，请稍后重试");
         }
     }
 
@@ -195,9 +197,11 @@ public class AiController {
 
             String result = glmAiService.chat(question);
             return Result.success(result);
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("AI财税问答失败", e);
-            return Result.error(500, "AI财税问答失败：" + e.getMessage());
+            return Result.error(500, "AI财税问答失败，请稍后重试");
         }
     }
 
@@ -233,9 +237,11 @@ public class AiController {
             // 5. 返回DocumentVO
             DocumentVO documentVO = documentService.getDocumentById(document.getId());
             return Result.success(documentVO);
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("票据识别并保存失败", e);
-            return Result.error(500, "票据识别并保存失败：" + e.getMessage());
+            return Result.error(500, "票据识别并保存失败，请稍后重试");
         }
     }
 
@@ -319,7 +325,9 @@ public class AiController {
             invoiceService.createInputInvoice(request);
             log.info("进项发票创建成功，发票号码：{}", invoiceNumber);
         } catch (Exception e) {
-            log.warn("创建进项发票失败，发票号码：{}，原因：{}", invoiceNumber, e.getMessage());
+            // 不吞异常:抛出BusinessException使事务回滚,避免Document已保存但Invoice创建失败时数据不一致
+            log.error("创建进项发票失败，发票号码：{}，原因：{}", invoiceNumber, e.getMessage(), e);
+            throw new BusinessException("进项发票创建失败，发票号码：" + invoiceNumber + "，原因：" + e.getMessage());
         }
     }
 

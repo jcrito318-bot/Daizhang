@@ -959,11 +959,8 @@ public class ReportServiceImpl implements ReportService {
             items.add(item);
 
             // 调整方向约定:original/adjusted带符号,正数=流入,负数=流出(绝对值为流出金额)
-            // 采用"替换式"计算:先从原归属方向扣除original,再把adjusted加到对应方向
-            // 原实现仅按diff正负判定方向,对流出项的"调减"会出错:
-            //   例如 original=-100, adjusted=-80(流出从100调减为80), diff=20
-            //   原逻辑:diff>0 → inflow += 20(错误,虚增流入)
-            //   正确:outflow应从100变为80,即outflow -= 20
+            // 采用"替换式"计算:分别计算original与adjusted的流入/流出分量,再求delta
+            //   流出项调减(如 original=-100, adjusted=-80)得到 outflowDelta=-20,outflow正确减少
             BigDecimal originalInflow = original.compareTo(BigDecimal.ZERO) > 0 ? original : BigDecimal.ZERO;
             BigDecimal originalOutflow = original.compareTo(BigDecimal.ZERO) < 0 ? original.negate() : BigDecimal.ZERO;
             BigDecimal adjustedInflow = adjusted.compareTo(BigDecimal.ZERO) > 0 ? adjusted : BigDecimal.ZERO;

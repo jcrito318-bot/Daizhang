@@ -49,6 +49,7 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
     private final SysUserMapper sysUserMapper;
     private final AccountSetAccessService accountSetAccessService;
 
+    @Transactional(readOnly = true)
     @Override
     public PageResult<DocumentVO> pageDocuments(DocumentQueryRequest request) {
         Page<Document> page = new Page<>(request.getPageNum(), request.getPageSize());
@@ -74,6 +75,7 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
         return new PageResult<>(voList, result.getTotal(), request.getPageNum(), request.getPageSize());
     }
 
+    @Transactional(readOnly = true)
     @Override
     public DocumentVO getDocumentById(Long id) {
         Document document = this.getById(id);

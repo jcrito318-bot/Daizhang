@@ -143,6 +143,7 @@ const loadData = async () => {
     pagination.total = res.data.total
   } catch (error) {
     console.error(error)
+    ElMessage.error('加载员工列表失败')
   } finally {
     loading.value = false
   }

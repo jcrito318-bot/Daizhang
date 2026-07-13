@@ -95,6 +95,7 @@ import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
 import { dashboardApi } from '@/api/system'
 import { voucherApi } from '@/api/voucher'
+import { formatAmount as formatAmountUtil } from '@/utils/format'
 import type { DashboardStatsVO } from '@/types/system'
 import type { VoucherVO } from '@/types/voucher'
 
@@ -128,9 +129,8 @@ function statusTagType(status: number): string {
   return map[status] || 'info'
 }
 
-function formatAmount(val: number): string {
-  if (val === 0) return ''
-  return val.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+function formatAmount(val: number | string | null | undefined): string {
+  return formatAmountUtil(val)
 }
 
 function goToVoucherList() {

@@ -105,6 +105,7 @@ const loadData = async () => {
     pagination.total = res.data.total
   } catch (error) {
     console.error(error)
+    ElMessage.error('加载折旧记录失败')
   } finally {
     loading.value = false
   }

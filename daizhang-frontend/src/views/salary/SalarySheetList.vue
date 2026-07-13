@@ -109,6 +109,7 @@ const loadData = async () => {
     pagination.total = res.data.total
   } catch (error) {
     console.error(error)
+    ElMessage.error('加载工资表失败')
   } finally {
     loading.value = false
   }

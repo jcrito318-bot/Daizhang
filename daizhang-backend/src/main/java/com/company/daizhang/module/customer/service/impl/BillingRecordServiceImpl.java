@@ -46,6 +46,7 @@ public class BillingRecordServiceImpl implements BillingRecordService {
 
     private static final BigDecimal DEFAULT_TAX_RATE = new BigDecimal("0.06");
 
+    @Transactional(readOnly = true)
     @Override
     public PageResult<BillingRecordVO> pageBillingRecords(BillingRecordQueryRequest request) {
         Page<BillingRecord> page = new Page<>(request.getPageNum(), request.getPageSize());
@@ -79,6 +80,7 @@ public class BillingRecordServiceImpl implements BillingRecordService {
         return new PageResult<>(voList, result.getTotal(), request.getPageNum(), request.getPageSize());
     }
 
+    @Transactional(readOnly = true)
     @Override
     public BillingRecordVO getBillingRecordById(Long id) {
         BillingRecord record = billingRecordMapper.selectById(id);
@@ -94,6 +96,7 @@ public class BillingRecordServiceImpl implements BillingRecordService {
         return convertToVO(record);
     }
 
+    @Transactional(readOnly = true)
     @Override
     public List<BillingRecordVO> listBillingRecordsByCustomerId(Long customerId) {
         LambdaQueryWrapper<BillingRecord> wrapper = new LambdaQueryWrapper<>();

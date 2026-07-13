@@ -61,6 +61,7 @@ public class AccountSetServiceImpl extends ServiceImpl<AccountSetMapper, Account
     private final UserAccountSetMapper userAccountSetMapper;
     private final AccountSetAccessService accountSetAccessService;
     
+    @Transactional(readOnly = true)
     @Override
     public PageResult<AccountSetVO> pageAccountSets(AccountSetQueryRequest request) {
         Page<AccountSet> page = new Page<>(request.getPageNum(), request.getPageSize());
@@ -90,6 +91,7 @@ public class AccountSetServiceImpl extends ServiceImpl<AccountSetMapper, Account
         return new PageResult<>(voList, result.getTotal(), request.getPageNum(), request.getPageSize());
     }
 
+    @Transactional(readOnly = true)
     @Override
     public List<AccountSetVO> listAllAccountSets() {
         // IDOR治理:仅返回当前用户有权限访问的账套(超级管理员返回null表示不限制)
@@ -110,6 +112,7 @@ public class AccountSetServiceImpl extends ServiceImpl<AccountSetMapper, Account
                 .collect(Collectors.toList());
     }
     
+    @Transactional(readOnly = true)
     @Override
     public AccountSetVO getAccountSetById(Long id) {
         AccountSet accountSet = this.getById(id);

@@ -61,6 +61,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { customerApi, contractApi } from '@/api/customer'
+import { ElMessage } from 'element-plus'
 
 const route = useRoute()
 const router = useRouter()
@@ -82,6 +83,7 @@ const loadDetail = async () => {
     customer.value = res.data
   } catch (error) {
     console.error(error)
+    ElMessage.error('加载客户详情失败')
   } finally {
     loading.value = false
   }
@@ -96,6 +98,7 @@ const loadContracts = async () => {
     contracts.value = res.data || []
   } catch (error) {
     console.error(error)
+    ElMessage.error('加载关联合同失败')
   }
 }
 

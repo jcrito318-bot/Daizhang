@@ -43,6 +43,7 @@ public class DashboardServiceImpl implements DashboardService {
     private static final String TODO_SERVICE_TASK = "SERVICE_TASK";
     private static final String TODO_TAX_DECLARATION = "TAX_DECLARATION";
     private static final String TODO_VOUCHER_AUDIT = "VOUCHER_AUDIT";
+    private static final String QUERY_LIMIT = "LIMIT 500";
 
     @Override
     @Transactional(readOnly = true)
@@ -65,7 +66,7 @@ public class DashboardServiceImpl implements DashboardService {
         LambdaQueryWrapper<AccountSet> asWrapper = new LambdaQueryWrapper<>();
         applyAccessFilter(asWrapper, AccountSet::getId, accessibleIds);
         asWrapper.orderByDesc(AccountSet::getUpdateTime)
-                 .last("LIMIT 500");
+                 .last(QUERY_LIMIT);
         List<AccountSet> accountSets = accountSetMapper.selectList(asWrapper);
 
         // 2. 查询待办服务任务（taskStatus < 2,限量500防止OOM）
@@ -73,7 +74,7 @@ public class DashboardServiceImpl implements DashboardService {
         applyAccessFilter(taskWrapper, ServiceTask::getAccountSetId, accessibleIds);
         taskWrapper.lt(ServiceTask::getTaskStatus, 2)
                 .orderByDesc(ServiceTask::getCreateTime)
-                .last("LIMIT 500");
+                .last(QUERY_LIMIT);
         List<ServiceTask> pendingTasks = serviceTaskMapper.selectList(taskWrapper);
         Map<Long, List<ServiceTask>> taskByAccountSet = pendingTasks.stream()
                 .filter(t -> t.getAccountSetId() != null)
@@ -90,7 +91,7 @@ public class DashboardServiceImpl implements DashboardService {
         applyAccessFilter(voucherWrapper, Voucher::getAccountSetId, accessibleIds);
         voucherWrapper.eq(Voucher::getStatus, 0)
                 .orderByDesc(Voucher::getCreateTime)
-                .last("LIMIT 500");
+                .last(QUERY_LIMIT);
         List<Voucher> unauditedVouchers = voucherMapper.selectList(voucherWrapper);
         Map<Long, List<Voucher>> voucherByAccountSet = unauditedVouchers.stream()
                 .filter(v -> v.getAccountSetId() != null)
@@ -101,7 +102,7 @@ public class DashboardServiceImpl implements DashboardService {
         applyAccessFilter(taxWrapper, TaxDeclaration::getAccountSetId, accessibleIds);
         taxWrapper.eq(TaxDeclaration::getStatus, 0)
                 .orderByDesc(TaxDeclaration::getCreateTime)
-                .last("LIMIT 500");
+                .last(QUERY_LIMIT);
         List<TaxDeclaration> undeclaredTaxes = taxDeclarationMapper.selectList(taxWrapper);
         Map<Long, List<TaxDeclaration>> taxByAccountSet = undeclaredTaxes.stream()
                 .filter(t -> t.getAccountSetId() != null)
@@ -219,7 +220,7 @@ public class DashboardServiceImpl implements DashboardService {
         // 查询账套（用于填充公司名称，限量500防止OOM）
         LambdaQueryWrapper<AccountSet> asWrapper = new LambdaQueryWrapper<>();
         applyAccessFilter(asWrapper, AccountSet::getId, accessibleIds);
-        asWrapper.orderByDesc(AccountSet::getUpdateTime).last("LIMIT 500");
+        asWrapper.orderByDesc(AccountSet::getUpdateTime).last(QUERY_LIMIT);
         List<AccountSet> accountSets = accountSetMapper.selectList(asWrapper);
 
         // 待办服务任务（taskStatus<2，限量500防止OOM）
@@ -227,7 +228,7 @@ public class DashboardServiceImpl implements DashboardService {
         applyAccessFilter(taskWrapper, ServiceTask::getAccountSetId, accessibleIds);
         taskWrapper.lt(ServiceTask::getTaskStatus, 2)
                 .orderByDesc(ServiceTask::getCreateTime)
-                .last("LIMIT 500");
+                .last(QUERY_LIMIT);
         List<ServiceTask> pendingTasks = serviceTaskMapper.selectList(taskWrapper);
 
         // 未审核凭证（status=0，限量500防止OOM）
@@ -235,7 +236,7 @@ public class DashboardServiceImpl implements DashboardService {
         applyAccessFilter(voucherWrapper, Voucher::getAccountSetId, accessibleIds);
         voucherWrapper.eq(Voucher::getStatus, 0)
                 .orderByDesc(Voucher::getCreateTime)
-                .last("LIMIT 500");
+                .last(QUERY_LIMIT);
         List<Voucher> unauditedVouchers = voucherMapper.selectList(voucherWrapper);
 
         // 未申报税务（status=0，限量500防止OOM）
@@ -243,7 +244,7 @@ public class DashboardServiceImpl implements DashboardService {
         applyAccessFilter(taxWrapper, TaxDeclaration::getAccountSetId, accessibleIds);
         taxWrapper.eq(TaxDeclaration::getStatus, 0)
                 .orderByDesc(TaxDeclaration::getCreateTime)
-                .last("LIMIT 500");
+                .last(QUERY_LIMIT);
         List<TaxDeclaration> undeclaredTaxes = taxDeclarationMapper.selectList(taxWrapper);
 
         // 合并各类型，按创建时间倒序

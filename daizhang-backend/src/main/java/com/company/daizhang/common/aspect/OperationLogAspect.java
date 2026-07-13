@@ -31,7 +31,9 @@ import java.time.LocalDateTime;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RequiredArgsConstructor
 public class OperationLogAspect {
-    
+
+    private static final int LOG_DETAIL_MAX_LENGTH = 2000;
+
     private final SysOperationLogService operationLogService;
     
     @Around("@annotation(com.company.daizhang.common.annotation.OperationLog)")
@@ -67,7 +69,7 @@ public class OperationLogAspect {
                     String params = JSONUtil.toJsonStr(args);
                     // 脱敏敏感字段(密码/token/密钥等),防止明文持久化到 sys_operation_log.params
                     params = maskSensitiveFields(params);
-                    operationLog.setParams(StrUtil.sub(params, 0, 2000));
+                    operationLog.setParams(StrUtil.sub(params, 0, LOG_DETAIL_MAX_LENGTH));
                 } catch (Exception e) {
                     operationLog.setParams("参数序列化失败");
                 }
@@ -89,7 +91,7 @@ public class OperationLogAspect {
             return result;
         } catch (Exception e) {
             operationLog.setStatus(0);
-            operationLog.setErrorMsg(StrUtil.sub(e.getMessage(), 0, 2000));
+            operationLog.setErrorMsg(StrUtil.sub(e.getMessage(), 0, LOG_DETAIL_MAX_LENGTH));
             operationLog.setCostTime(System.currentTimeMillis() - startTime);
             throw e;
         } finally {

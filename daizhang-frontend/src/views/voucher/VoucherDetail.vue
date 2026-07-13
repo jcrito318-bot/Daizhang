@@ -59,6 +59,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { voucherApi } from '@/api/voucher'
+import { formatAmount as formatAmountUtil } from '@/utils/format'
 
 interface VoucherDetail {
   lineNo: number
@@ -97,8 +98,9 @@ const voucher = ref<VoucherVO>({
 const totalDebit = computed(() => voucher.value.details.reduce((sum, d) => sum + (d.debit || 0), 0))
 const totalCredit = computed(() => voucher.value.details.reduce((sum, d) => sum + (d.credit || 0), 0))
 
-function formatAmount(val: number): string {
-  return val.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+function formatAmount(val: number | string | null | undefined): string {
+  // 委托统一工具,确保 null/undefined 不抛 NPE
+  return formatAmountUtil(val)
 }
 
 function getStatusType(status: number): string {

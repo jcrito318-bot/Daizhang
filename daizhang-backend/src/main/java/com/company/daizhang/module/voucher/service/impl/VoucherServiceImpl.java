@@ -65,6 +65,7 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
     private final SubjectBalanceMapper subjectBalanceMapper;
     private final AccountSetAccessService accountSetAccessService;
 
+    @Transactional(readOnly = true)
     @Override
     public PageResult<VoucherVO> pageVouchers(VoucherQueryRequest request) {
         // IDOR治理:校验当前用户对该账套的访问权
@@ -102,6 +103,7 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         return new PageResult<>(voList, result.getTotal(), request.getPageNum(), request.getPageSize());
     }
 
+    @Transactional(readOnly = true)
     @Override
     public VoucherVO getVoucherById(Long id) {
         Voucher voucher = this.getById(id);

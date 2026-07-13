@@ -44,6 +44,7 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
     private final BillingRecordMapper billingRecordMapper;
     private final AccountSetAccessService accountSetAccessService;
 
+    @Transactional(readOnly = true)
     @Override
     public PageResult<PaymentVO> pagePayments(PaymentQueryRequest request) {
         Page<PaymentRecord> page = new Page<>(request.getPageNum(), request.getPageSize());
@@ -77,6 +78,7 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
         return new PageResult<>(voList, result.getTotal(), request.getPageNum(), request.getPageSize());
     }
 
+    @Transactional(readOnly = true)
     @Override
     public List<PaymentVO> listPaymentsByCustomerId(Long customerId) {
         LambdaQueryWrapper<PaymentRecord> wrapper = new LambdaQueryWrapper<>();
@@ -102,6 +104,7 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
     @Override
     public List<PaymentVO> listPaymentsByContractId(Long contractId) {
         LambdaQueryWrapper<PaymentRecord> wrapper = new LambdaQueryWrapper<>();
@@ -127,6 +130,7 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
     @Override
     public PaymentVO getPaymentById(Long id) {
         PaymentRecord payment = this.getById(id);

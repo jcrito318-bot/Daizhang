@@ -92,6 +92,7 @@ public class VoucherController {
     @Operation(summary = "批量审核凭证")
     @PostMapping("/batch-audit")
     public Result<Integer> batchAudit(@RequestBody java.util.List<Long> ids) {
+        validateBatchSize(ids);
         int success = voucherService.batchAuditVoucher(ids);
         return Result.success(success);
     }
@@ -99,6 +100,7 @@ public class VoucherController {
     @Operation(summary = "批量反审核凭证")
     @PostMapping("/batch-unaudit")
     public Result<Integer> batchUnaudit(@RequestBody java.util.List<Long> ids) {
+        validateBatchSize(ids);
         int success = voucherService.batchUnauditVoucher(ids);
         return Result.success(success);
     }
@@ -250,6 +252,21 @@ public class VoucherController {
         try (OutputStream os = response.getOutputStream()) {
             os.write(data);
             os.flush();
+        }
+    }
+
+    /**
+     * 批量操作集合大小限制:防止客户端传入超大列表导致长时间事务占用和内存溢出
+     */
+    private void validateBatchSize(java.util.List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new com.company.daizhang.common.exception.BusinessException(
+                    com.company.daizhang.common.exception.ErrorCode.PARAM_ERROR, "批量操作ID列表不能为空");
+        }
+        if (ids.size() > 200) {
+            throw new com.company.daizhang.common.exception.BusinessException(
+                    com.company.daizhang.common.exception.ErrorCode.PARAM_ERROR,
+                    "批量操作数量超过限制(最大200条)，当前：" + ids.size());
         }
     }
 }

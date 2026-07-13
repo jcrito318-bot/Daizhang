@@ -203,6 +203,7 @@ const loadData = async () => {
     pagination.total = res.data.total
   } catch (error) {
     console.error(error)
+    ElMessage.error('加载资产列表失败')
   } finally {
     loading.value = false
   }
@@ -218,6 +219,7 @@ const loadCategories = async () => {
     categories.value = res.data.list
   } catch (error) {
     console.error(error)
+    ElMessage.error('加载资产分类失败')
   }
 }
 

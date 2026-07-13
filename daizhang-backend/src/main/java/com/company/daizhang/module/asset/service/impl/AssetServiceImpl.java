@@ -60,6 +60,7 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
 
     // ==================== 资产分类管理 ====================
 
+    @Transactional(readOnly = true)
     @Override
     public PageResult<AssetCategoryVO> pageCategories(AssetCategoryQueryRequest request) {
         Page<AssetCategory> page = new Page<>(request.getPageNum(), request.getPageSize());
@@ -81,6 +82,7 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         return new PageResult<>(voList, result.getTotal(), request.getPageNum(), request.getPageSize());
     }
 
+    @Transactional(readOnly = true)
     @Override
     public AssetCategoryVO getCategoryById(Long id) {
         AssetCategory category = assetCategoryMapper.selectById(id);
@@ -152,6 +154,7 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         assetCategoryMapper.deleteById(id);
     }
 
+    @Transactional(readOnly = true)
     @Override
     public List<AssetCategoryVO> listCategoryTree(Long accountSetId) {
         LambdaQueryWrapper<AssetCategory> wrapper = new LambdaQueryWrapper<>();
@@ -166,6 +169,7 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
 
     // ==================== 固定资产管理 ====================
 
+    @Transactional(readOnly = true)
     @Override
     public PageResult<FixedAssetVO> pageAssets(FixedAssetQueryRequest request) {
         Page<FixedAsset> page = new Page<>(request.getPageNum(), request.getPageSize());
@@ -188,6 +192,7 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         return new PageResult<>(voList, result.getTotal(), request.getPageNum(), request.getPageSize());
     }
 
+    @Transactional(readOnly = true)
     @Override
     public FixedAssetVO getAssetById(Long id) {
         FixedAsset asset = this.getById(id);
@@ -545,6 +550,7 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
 
     // ==================== 折旧管理 ====================
 
+    @Transactional(readOnly = true)
     @Override
     public PageResult<DepreciationRecordVO> pageDepreciationRecords(DepreciationRecordQueryRequest request) {
         Page<DepreciationRecord> page = new Page<>(request.getPageNum(), request.getPageSize());
@@ -568,6 +574,7 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         return new PageResult<>(voList, result.getTotal(), request.getPageNum(), request.getPageSize());
     }
 
+    @Transactional(readOnly = true)
     @Override
     public DepreciationRecordVO getDepreciationRecordById(Long id) {
         DepreciationRecord record = depreciationRecordMapper.selectById(id);
@@ -755,6 +762,7 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         }
     }
 
+    @Transactional(readOnly = true)
     @Override
     public AssetReportVO getAssetReport(Long accountSetId, Integer year) {
         // 查询该账套所有资产

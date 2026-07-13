@@ -25,6 +25,7 @@
 
     <el-card class="tree-card">
       <el-tree
+        v-loading="loading"
         ref="treeRef"
         :data="treeData"
         :props="treeProps"
@@ -115,6 +116,7 @@ const editId = ref<number>(0)
 const dialogTitle = ref('新增科目')
 const accountSetId = ref<number>(0)
 const treeData = ref<SubjectVO[]>([])
+const loading = ref(false)
 
 const treeProps = {
   children: 'children',
@@ -144,11 +146,14 @@ const formRules: FormRules = {
 
 async function loadTree() {
   if (!accountSetId.value) return
+  loading.value = true
   try {
     const res = await subjectApi.getTree(accountSetId.value)
     treeData.value = res.data
   } catch {
     // handled by interceptor
+  } finally {
+    loading.value = false
   }
 }
 

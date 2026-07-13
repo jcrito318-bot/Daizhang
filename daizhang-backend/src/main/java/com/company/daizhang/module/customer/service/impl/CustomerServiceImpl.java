@@ -75,6 +75,7 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
      */
     private static final List<String> VALID_CUSTOMER_LEVELS = Arrays.asList("VIP", "重要", "普通", "潜在");
 
+    @Transactional(readOnly = true)
     @Override
     public PageResult<CustomerVO> pageCustomers(CustomerQueryRequest request) {
         Page<Customer> page = new Page<>(request.getPageNum(), request.getPageSize());
@@ -131,6 +132,7 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
     @Override
     public CustomerVO getCustomerById(Long id) {
         Customer customer = this.getById(id);
@@ -221,6 +223,7 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         this.removeById(id);
     }
 
+    @Transactional(readOnly = true)
     @Override
     public PageResult<CustomerVO> pageCustomersByLevel(String customerLevel, Integer customerStatus,
                                                        String industryType, int pageNum, int pageSize) {
@@ -250,6 +253,7 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         return new PageResult<>(voList, result.getTotal(), pageNum, pageSize);
     }
 
+    @Transactional(readOnly = true)
     @Override
     public CustomerProfileVO getCustomerProfile(Long customerId) {
         Customer customer = this.getById(customerId);
@@ -526,6 +530,7 @@ public class CustomerServiceImpl extends ServiceImpl<CustomerMapper, Customer> i
         this.updateById(customer);
     }
 
+    @Transactional(readOnly = true)
     @Override
     public List<Map<String, Object>> getCustomerStatistics() {
         // IDOR治理:仅统计当前用户可访问账套下的客户(超级管理员返回null表示不限制)

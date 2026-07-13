@@ -8,6 +8,7 @@ import com.company.daizhang.module.report.vo.BalanceSheetVO;
 import com.company.daizhang.module.report.vo.CashFlowAdjustmentVO;
 import com.company.daizhang.module.report.vo.CashFlowStatementVO;
 import com.company.daizhang.module.report.vo.DepartmentExpenseReportVO;
+import jakarta.validation.Valid;
 import com.company.daizhang.module.report.vo.EquityChangeStatementVO;
 import com.company.daizhang.module.report.vo.IncomeStatementVO;
 import com.company.daizhang.module.report.vo.SubjectBalanceTableVO;
@@ -150,7 +151,7 @@ public class ReportController {
 
     @Operation(summary = "保存现金流量表调整项")
     @PostMapping("/cash-flow-adjustment")
-    public Result<Void> saveAdjustment(@RequestBody CashFlowAdjustmentVO request) {
+    public Result<Void> saveAdjustment(@Valid @RequestBody CashFlowAdjustmentVO request) {
         reportService.saveAdjustment(request);
         return Result.success();
     }

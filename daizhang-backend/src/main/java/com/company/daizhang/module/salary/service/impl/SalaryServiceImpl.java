@@ -74,6 +74,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
 
     // ==================== 员工管理 ====================
 
+    @Transactional(readOnly = true)
     @Override
     public PageResult<EmployeeVO> pageEmployees(EmployeeQueryRequest request) {
         Page<Employee> page = new Page<>(request.getPageNum(), request.getPageSize());
@@ -95,6 +96,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         return new PageResult<>(voList, result.getTotal(), request.getPageNum(), request.getPageSize());
     }
 
+    @Transactional(readOnly = true)
     @Override
     public EmployeeVO getEmployeeById(Long id) {
         Employee employee = employeeMapper.selectById(id);
@@ -263,6 +265,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
 
     // ==================== 薪资表管理 ====================
 
+    @Transactional(readOnly = true)
     @Override
     public PageResult<SalarySheetVO> pageSalarySheets(SalarySheetQueryRequest request) {
         Page<SalarySheet> page = new Page<>(request.getPageNum(), request.getPageSize());
@@ -285,6 +288,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         return new PageResult<>(voList, result.getTotal(), request.getPageNum(), request.getPageSize());
     }
 
+    @Transactional(readOnly = true)
     @Override
     public SalarySheetVO getSalarySheetById(Long id) {
         SalarySheet salarySheet = salarySheetMapper.selectById(id);
@@ -551,7 +555,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
             details.add(debitExpense);
         }
 
-        // 贷：应付职工薪酬 (应发工资总额) —— 负债科目在贷方,原代码错误地放在借方
+        // 贷：应付职工薪酬 (应发工资总额) —— 负债科目在贷方
         VoucherDetailRequest creditPayable = new VoucherDetailRequest();
         creditPayable.setLineNo(lineNo++);
         creditPayable.setSummary("计提" + request.getYear() + "年" + request.getMonth() + "月工资");
@@ -722,37 +726,6 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
             netSalary = BigDecimal.ZERO;
         }
         salarySheet.setNetSalary(netSalary);
-    }
-
-    /**
-     * 计算个人所得税（月度七级超额累进税率）
-     * <p>注意:自2019年起工资薪金个税应按累计预扣预缴法计算,本方法保留仅供兼容,
-     * 实际计算流程已改用 {@link #calculateIncomeTaxByCumulative}。</p>
-     */
-    private BigDecimal calculateIncomeTax(BigDecimal monthlyTaxableIncome) {
-        if (monthlyTaxableIncome.compareTo(BigDecimal.ZERO) <= 0) {
-            return BigDecimal.ZERO;
-        }
-
-        BigDecimal tax;
-        // 税率表（月度）
-        if (monthlyTaxableIncome.compareTo(new BigDecimal("3000")) <= 0) {
-            tax = monthlyTaxableIncome.multiply(new BigDecimal("0.03"));
-        } else if (monthlyTaxableIncome.compareTo(new BigDecimal("12000")) <= 0) {
-            tax = monthlyTaxableIncome.multiply(new BigDecimal("0.10")).subtract(new BigDecimal("210"));
-        } else if (monthlyTaxableIncome.compareTo(new BigDecimal("25000")) <= 0) {
-            tax = monthlyTaxableIncome.multiply(new BigDecimal("0.20")).subtract(new BigDecimal("1410"));
-        } else if (monthlyTaxableIncome.compareTo(new BigDecimal("35000")) <= 0) {
-            tax = monthlyTaxableIncome.multiply(new BigDecimal("0.25")).subtract(new BigDecimal("2660"));
-        } else if (monthlyTaxableIncome.compareTo(new BigDecimal("55000")) <= 0) {
-            tax = monthlyTaxableIncome.multiply(new BigDecimal("0.30")).subtract(new BigDecimal("4410"));
-        } else if (monthlyTaxableIncome.compareTo(new BigDecimal("80000")) <= 0) {
-            tax = monthlyTaxableIncome.multiply(new BigDecimal("0.35")).subtract(new BigDecimal("7160"));
-        } else {
-            tax = monthlyTaxableIncome.multiply(new BigDecimal("0.45")).subtract(new BigDecimal("15160"));
-        }
-
-        return tax.setScale(2, RoundingMode.HALF_UP);
     }
 
     /**

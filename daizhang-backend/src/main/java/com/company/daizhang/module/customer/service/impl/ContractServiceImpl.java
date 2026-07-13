@@ -46,6 +46,7 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
     private final PaymentRecordMapper paymentRecordMapper;
     private final AccountSetAccessService accountSetAccessService;
 
+    @Transactional(readOnly = true)
     @Override
     public PageResult<ContractVO> pageContracts(ContractQueryRequest request) {
         Page<ServiceContract> page = new Page<>(request.getPageNum(), request.getPageSize());
@@ -76,6 +77,7 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
         return new PageResult<>(voList, result.getTotal(), request.getPageNum(), request.getPageSize());
     }
 
+    @Transactional(readOnly = true)
     @Override
     public List<ContractVO> listContractsByCustomerId(Long customerId) {
         // IDOR治理:校验当前用户对该客户所属账套的访问权(读操作用checkAccess)
@@ -95,6 +97,7 @@ public class ContractServiceImpl extends ServiceImpl<ServiceContractMapper, Serv
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
     @Override
     public ContractVO getContractById(Long id) {
         ServiceContract contract = this.getById(id);
