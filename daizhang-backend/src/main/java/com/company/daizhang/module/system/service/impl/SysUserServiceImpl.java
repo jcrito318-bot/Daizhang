@@ -269,14 +269,26 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
             throw new BusinessException(ErrorCode.USER_NOT_FOUND);
         }
         
-        // 不能删除管理员:按角色编码判断(大小写不敏感),同时保护id=1的种子管理员账户
-        // 原代码 CommonConstant.SUPER_ADMIN="ADMIN" 与种子用户名"admin"大小写不一致导致校验失效
-        if (id != null && id.longValue() == 1L) {
-            throw new BusinessException(ErrorCode.USER_CANNOT_DELETE_ADMIN);
-        }
-        if (user.getUsername() != null
-                && CommonConstant.SUPER_ADMIN.equalsIgnoreCase(user.getUsername())) {
-            throw new BusinessException(ErrorCode.USER_CANNOT_DELETE_ADMIN);
+        // 不能删除管理员:基于角色编码判断(与权限判定逻辑一致)
+        // 原实现用硬编码id==1 + username=="ADMIN",与AccountSetAccessService基于ROLE_ADMIN的判定不一致
+        LambdaQueryWrapper<SysUserRole> adminCheckWrapper = new LambdaQueryWrapper<>();
+        adminCheckWrapper.eq(SysUserRole::getUserId, id);
+        List<SysUserRole> adminUserRoles = userRoleMapper.selectList(adminCheckWrapper);
+        if (!adminUserRoles.isEmpty()) {
+            List<Long> roleIds = adminUserRoles.stream()
+                    .map(SysUserRole::getRoleId)
+                    .filter(java.util.Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!roleIds.isEmpty()) {
+                List<SysRole> roles = roleMapper.selectBatchIds(roleIds);
+                boolean isAdmin = roles.stream().anyMatch(r ->
+                        r.getRoleCode() != null && (
+                                "ROLE_ADMIN".equalsIgnoreCase(r.getRoleCode()) ||
+                                CommonConstant.SUPER_ADMIN.equalsIgnoreCase(r.getRoleCode())));
+                if (isAdmin) {
+                    throw new BusinessException(ErrorCode.USER_CANNOT_DELETE_ADMIN);
+                }
+            }
         }
         
         this.removeById(id);
@@ -381,10 +393,24 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
                     .collect(Collectors.toList()));
         }
 
-        // 设置权限（管理员拥有所有权限）
+        // 设置权限:基于角色编码判断管理员(与AccountSetAccessService/删除保护逻辑一致)
+        // 原实现用硬编码roleId==1,与基于ROLE_ADMIN的权限判定不一致
         List<String> permissions = new ArrayList<>();
-        if (userRoles.stream().anyMatch(ur -> ur.getRoleId() != null && ur.getRoleId().longValue() == 1L)) {
-            permissions.add("*");
+        if (!userRoles.isEmpty()) {
+            List<Long> roleIds = userRoles.stream()
+                    .map(SysUserRole::getRoleId)
+                    .filter(java.util.Objects::nonNull)
+                    .collect(Collectors.toList());
+            if (!roleIds.isEmpty()) {
+                List<SysRole> roles = roleMapper.selectBatchIds(roleIds);
+                boolean isAdmin = roles.stream().anyMatch(r ->
+                        r.getRoleCode() != null && (
+                                "ROLE_ADMIN".equalsIgnoreCase(r.getRoleCode()) ||
+                                CommonConstant.SUPER_ADMIN.equalsIgnoreCase(r.getRoleCode())));
+                if (isAdmin) {
+                    permissions.add("*");
+                }
+            }
         }
         vo.setPermissions(permissions);
 

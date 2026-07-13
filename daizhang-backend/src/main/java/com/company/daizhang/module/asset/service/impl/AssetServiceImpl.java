@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.asset.service.AssetService;
 import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.asset.dto.*;
 import com.company.daizhang.module.asset.entity.AssetCategory;
@@ -32,7 +33,10 @@ import com.company.daizhang.module.voucher.dto.VoucherDetailRequest;
 import com.company.daizhang.module.voucher.service.VoucherService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -52,6 +56,15 @@ import java.util.stream.Collectors;
 public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> implements AssetService {
 
     private final AccountSetAccessService accountSetAccessService;
+
+    // 自我注入:使calculateDepreciation调用depreciateSingleAsset时走Spring代理,
+    // 否则@Transactional(REQUIRES_NEW)不生效(同类内部this调用绕过AOP)
+    private AssetService self;
+
+    @Autowired
+    public void setSelf(@Lazy AssetService self) {
+        this.self = self;
+    }
     private final AssetCategoryMapper assetCategoryMapper;
     private final AssetChangeRecordMapper assetChangeRecordMapper;
     private final DepreciationRecordMapper depreciationRecordMapper;
@@ -598,98 +611,113 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
                .in(FixedAsset::getStatus, 0, 1); // 在用+闲置均折旧,已处置(2)不折旧
         List<FixedAsset> assets = this.list(wrapper);
 
+        int successCount = 0;
+        int skipCount = 0;
+        int failCount = 0;
         for (FixedAsset asset : assets) {
-            // 检查是否已存在该月的折旧记录
-            LambdaQueryWrapper<DepreciationRecord> recordWrapper = new LambdaQueryWrapper<>();
-            recordWrapper.eq(DepreciationRecord::getAssetId, asset.getId())
-                        .eq(DepreciationRecord::getYear, request.getYear())
-                        .eq(DepreciationRecord::getMonth, request.getMonth());
-            Long count = depreciationRecordMapper.selectCount(recordWrapper);
-            if (count > 0) {
-                continue; // 已存在折旧记录，跳过
-            }
-
-            // 并发折旧无锁修复:折旧前用 selectById 重新读取资产最新累计折旧/净值/version,
-            // 不用方法入参 asset 列表中的旧值,避免并发触发月度折旧时同一资产被折旧两次、
-            // 累计折旧翻倍、净值计算错误
-            FixedAsset latest = this.getById(asset.getId());
-            if (latest == null) {
-                continue;
-            }
-
-            // 计算本次折旧
-            // 批量折旧遍历账套所有在用资产,任一字段为null会导致整个批次NPE中断。
-            // 与calculateMonthlyDepreciation保持一致的null防御。
-            BigDecimal residualValue = latest.getResidualValue() != null ? latest.getResidualValue() : BigDecimal.ZERO;
-            BigDecimal assetNetValue = latest.getNetValue() != null ? latest.getNetValue() : BigDecimal.ZERO;
-            // 已提足折旧(净值<=残值)跳过,避免负折旧导致累计折旧回退、净值虚增
-            if (assetNetValue.compareTo(residualValue) <= 0) {
-                continue;
-            }
-
-            BigDecimal depreciationAmount;
-            String method = latest.getDepreciationMethod();
-            if ("双倍余额递减法".equals(method) || "年数总和法".equals(method)) {
-                // 双倍余额递减法/年数总和法:基于当前净值/累计折旧/已使用月数每月重新计算,
-                // 避免用资产创建时计算的陈旧月折旧额(latest.getMonthlyDepreciation)导致丧失递减特性
-                Integer usefulLife = latest.getUsefulLife();
-                if (usefulLife == null || usefulLife <= 0) {
-                    continue;
+            try {
+                // 单资产折旧在独立事务中执行:任一资产乐观锁冲突只回滚该资产,
+                // 不影响其他已成功折旧的资产(原实现整批一个失败全回滚)
+                // 通过self代理调用,确保@Transactional(REQUIRES_NEW)生效
+                boolean success = self.depreciateSingleAsset(asset.getId(), request.getYear(), request.getMonth(),
+                        request.getAccountSetId());
+                if (success) {
+                    successCount++;
+                } else {
+                    skipCount++;
                 }
-                BigDecimal originalVal = latest.getPurchaseAmount() != null ? latest.getPurchaseAmount() : BigDecimal.ZERO;
-                depreciationAmount = calculateMonthlyDepreciation(
-                        originalVal,
-                        assetNetValue,
-                        residualValue,
-                        usefulLife,
-                        method
-                );
-                if (depreciationAmount == null || depreciationAmount.compareTo(BigDecimal.ZERO) <= 0) {
-                    continue; // 当月折旧额为0或负,数据异常或已提足,跳过
-                }
-            } else {
-                depreciationAmount = latest.getMonthlyDepreciation();
-                if (depreciationAmount == null) {
-                    continue; // 月折旧额为空,数据不完整,跳过
-                }
-            }
-            BigDecimal accumulatedDepreciation = (latest.getAccumulatedDeprecation() != null ? latest.getAccumulatedDeprecation() : BigDecimal.ZERO).add(depreciationAmount);
-            BigDecimal netValue = assetNetValue.subtract(depreciationAmount);
-
-            // 如果净值小于残值，则调整折旧额,使其恰好将净值降至残值
-            if (netValue.compareTo(residualValue) < 0) {
-                depreciationAmount = assetNetValue.subtract(residualValue);
-                // 守卫:确保折旧额非负,避免累计折旧回退、净值虚增
-                if (depreciationAmount.compareTo(BigDecimal.ZERO) < 0) {
-                    depreciationAmount = BigDecimal.ZERO;
-                }
-                accumulatedDepreciation = (latest.getAccumulatedDeprecation() != null ? latest.getAccumulatedDeprecation() : BigDecimal.ZERO).add(depreciationAmount);
-                netValue = residualValue;
-            }
-
-            // 创建折旧记录
-            DepreciationRecord record = new DepreciationRecord();
-            record.setAccountSetId(request.getAccountSetId());
-            record.setAssetId(latest.getId());
-            record.setAssetCode(latest.getAssetCode());
-            record.setAssetName(latest.getAssetName());
-            record.setYear(request.getYear());
-            record.setMonth(request.getMonth());
-            record.setDepreciationAmount(depreciationAmount);
-            record.setAccumulatedDepreciation(accumulatedDepreciation);
-            record.setNetValue(netValue);
-            depreciationRecordMapper.insert(record);
-
-            // 更新资产的累计折旧和净值,基于 latest 的 version 做乐观锁更新(BaseEntity.@Version
-            // + OptimisticLockerInnerInterceptor)。并发折旧时另一线程已改 version,本次 updateById
-            // 返回 false(影响行数0),抛异常回滚本次折旧记录插入,避免同一资产被折旧两次
-            latest.setAccumulatedDeprecation(accumulatedDepreciation);
-            latest.setNetValue(netValue);
-            boolean updated = this.updateById(latest);
-            if (!updated) {
-                throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "资产折旧并发冲突，请重试");
+            } catch (Exception e) {
+                failCount++;
+                log.warn("资产折旧失败,跳过该资产: assetId={}, code={}", asset.getId(), asset.getAssetCode(), e);
             }
         }
+        if (successCount == 0 && failCount > 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "全部" + failCount + "项资产折旧失败,请查看日志");
+        }
+        log.info("折旧完成: 成功{}项, 跳过{}项, 失败{}项", successCount, skipCount, failCount);
+    }
+
+    /**
+     * 单资产折旧(独立事务):任一资产失败只回滚自身,不影响整批
+     * @return true=折旧成功, false=跳过(已折旧/已提足/数据不完整)
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    public boolean depreciateSingleAsset(Long assetId, Integer year, Integer month, Long accountSetId) {
+        // 检查是否已存在该月的折旧记录
+        LambdaQueryWrapper<DepreciationRecord> recordWrapper = new LambdaQueryWrapper<>();
+        recordWrapper.eq(DepreciationRecord::getAssetId, assetId)
+                    .eq(DepreciationRecord::getYear, year)
+                    .eq(DepreciationRecord::getMonth, month);
+        Long count = depreciationRecordMapper.selectCount(recordWrapper);
+        if (count > 0) {
+            return false; // 已存在折旧记录，跳过
+        }
+
+        // 并发折旧无锁修复:折旧前用 selectById 重新读取资产最新累计折旧/净值/version
+        FixedAsset latest = this.getById(assetId);
+        if (latest == null) {
+            return false;
+        }
+
+        // 计算本次折旧(null防御,避免任一字段为null导致NPE)
+        BigDecimal residualValue = latest.getResidualValue() != null ? latest.getResidualValue() : BigDecimal.ZERO;
+        BigDecimal assetNetValue = latest.getNetValue() != null ? latest.getNetValue() : BigDecimal.ZERO;
+        if (assetNetValue.compareTo(residualValue) <= 0) {
+            return false; // 已提足折旧,跳过
+        }
+
+        BigDecimal depreciationAmount;
+        String method = latest.getDepreciationMethod();
+        if ("双倍余额递减法".equals(method) || "年数总和法".equals(method)) {
+            Integer usefulLife = latest.getUsefulLife();
+            if (usefulLife == null || usefulLife <= 0) {
+                return false;
+            }
+            BigDecimal originalVal = latest.getPurchaseAmount() != null ? latest.getPurchaseAmount() : BigDecimal.ZERO;
+            depreciationAmount = calculateMonthlyDepreciation(
+                    originalVal, assetNetValue, residualValue, usefulLife, method);
+            if (depreciationAmount == null || depreciationAmount.compareTo(BigDecimal.ZERO) <= 0) {
+                return false;
+            }
+        } else {
+            depreciationAmount = latest.getMonthlyDepreciation();
+            if (depreciationAmount == null) {
+                return false;
+            }
+        }
+        BigDecimal accumulatedDepreciation = (latest.getAccumulatedDeprecation() != null ? latest.getAccumulatedDeprecation() : BigDecimal.ZERO).add(depreciationAmount);
+        BigDecimal netValue = assetNetValue.subtract(depreciationAmount);
+
+        if (netValue.compareTo(residualValue) < 0) {
+            depreciationAmount = assetNetValue.subtract(residualValue);
+            if (depreciationAmount.compareTo(BigDecimal.ZERO) < 0) {
+                depreciationAmount = BigDecimal.ZERO;
+            }
+            accumulatedDepreciation = (latest.getAccumulatedDeprecation() != null ? latest.getAccumulatedDeprecation() : BigDecimal.ZERO).add(depreciationAmount);
+            netValue = residualValue;
+        }
+
+        DepreciationRecord record = new DepreciationRecord();
+        record.setAccountSetId(accountSetId);
+        record.setAssetId(latest.getId());
+        record.setAssetCode(latest.getAssetCode());
+        record.setAssetName(latest.getAssetName());
+        record.setYear(year);
+        record.setMonth(month);
+        record.setDepreciationAmount(depreciationAmount);
+        record.setAccumulatedDepreciation(accumulatedDepreciation);
+        record.setNetValue(netValue);
+        depreciationRecordMapper.insert(record);
+
+        // 乐观锁更新:并发折旧时另一线程已改version,updateById返回false,抛异常回滚本次插入
+        latest.setAccumulatedDeprecation(accumulatedDepreciation);
+        latest.setNetValue(netValue);
+        boolean updated = this.updateById(latest);
+        if (!updated) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "资产折旧并发冲突");
+        }
+        return true;
     }
 
     @Override

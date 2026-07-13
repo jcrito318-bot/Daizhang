@@ -11,6 +11,8 @@ import com.company.daizhang.module.salary.entity.SalarySheet;
 import com.company.daizhang.module.salary.mapper.SalarySheetMapper;
 import com.company.daizhang.module.subject.entity.Subject;
 import com.company.daizhang.module.subject.mapper.SubjectMapper;
+import com.company.daizhang.module.tax.entity.TaxDeclaration;
+import com.company.daizhang.module.tax.mapper.TaxDeclarationMapper;
 import com.company.daizhang.module.tax.service.TaxCalculateService;
 import com.company.daizhang.module.tax.vo.TaxCalculationDetailVO;
 import com.company.daizhang.module.tax.vo.TaxCalculationResultVO;
@@ -41,6 +43,7 @@ public class TaxCalculateServiceImpl implements TaxCalculateService {
     private final AccountBalanceMapper accountBalanceMapper;
     private final SubjectMapper subjectMapper;
     private final SalarySheetMapper salarySheetMapper;
+    private final TaxDeclarationMapper taxDeclarationMapper;
 
     /**
      * 税率常量
@@ -315,7 +318,31 @@ public class TaxCalculateServiceImpl implements TaxCalculateService {
                 ? CIT_RATE_SMALL : CIT_RATE_NORMAL;
         // 仅当利润为正时计税
         BigDecimal taxableProfit = totalProfit.compareTo(BigDecimal.ZERO) > 0 ? totalProfit : BigDecimal.ZERO;
-        BigDecimal citAmount = taxableProfit.multiply(taxRate).setScale(2, RoundingMode.HALF_UP);
+        // 累计应纳税额 = 利润总额 × 税率
+        BigDecimal cumulativeTax = taxableProfit.multiply(taxRate).setScale(2, RoundingMode.HALF_UP);
+
+        // 扣除以前季度已预缴税额:企业所得税季度预缴的本期应补(退)税额 = 累计应纳税额 - 以前季度已预缴
+        // 当前季度 = (month-1)/3 + 1,查询本年以前季度已申报的CIT
+        int currentQuarter = (month - 1) / 3 + 1;
+        BigDecimal prepaidTax = BigDecimal.ZERO;
+        if (currentQuarter > 1) {
+            // 以前季度的最后月份:Q1=3月,Q2=6月,Q3=9月
+            int lastQuarterEndMonth = (currentQuarter - 1) * 3;
+            LambdaQueryWrapper<TaxDeclaration> prepaidWrapper = new LambdaQueryWrapper<>();
+            prepaidWrapper.eq(TaxDeclaration::getAccountSetId, accountSetId)
+                    .eq(TaxDeclaration::getYear, year)
+                    .le(TaxDeclaration::getMonth, lastQuarterEndMonth)
+                    .eq(TaxDeclaration::getTaxType, "CIT")
+                    .in(TaxDeclaration::getStatus, 1, 2); // 1=已申报 2=已缴款
+            List<TaxDeclaration> prepaidDeclarations = taxDeclarationMapper.selectList(prepaidWrapper);
+            for (TaxDeclaration decl : prepaidDeclarations) {
+                if (decl.getTaxAmount() != null) {
+                    prepaidTax = prepaidTax.add(decl.getTaxAmount());
+                }
+            }
+        }
+        // 本期应补(退)税额 = 累计应纳税额 - 以前季度已预缴(可为负,表示退税)
+        BigDecimal citAmount = cumulativeTax.subtract(prepaidTax);
 
         TaxCalculationResultVO vo = new TaxCalculationResultVO();
         vo.setTaxType("CIT");
@@ -323,7 +350,7 @@ public class TaxCalculateServiceImpl implements TaxCalculateService {
         vo.setTaxableAmount(taxableProfit);
         vo.setTaxRate(taxRate);
         vo.setTaxAmount(citAmount);
-        vo.setCalculationFormula("企业所得税(季度预缴) = 利润总额 × 税率(25%/小微20%)");
+        vo.setCalculationFormula("企业所得税(季度预缴) = 累计利润总额 × 税率 - 以前季度已预缴税额");
 
         List<TaxCalculationDetailVO> details = new ArrayList<>();
 
@@ -345,8 +372,26 @@ public class TaxCalculateServiceImpl implements TaxCalculateService {
         profitDetail.setItemName("利润总额");
         profitDetail.setAmount(totalProfit);
         profitDetail.setRate(taxRate);
-        profitDetail.setTaxAmount(citAmount);
+        profitDetail.setTaxAmount(cumulativeTax);
         details.add(profitDetail);
+
+        // 以前季度已预缴税额明细
+        if (prepaidTax.compareTo(BigDecimal.ZERO) > 0) {
+            TaxCalculationDetailVO prepaidDetail = new TaxCalculationDetailVO();
+            prepaidDetail.setItemName("以前季度已预缴税额");
+            prepaidDetail.setAmount(prepaidTax);
+            prepaidDetail.setRate(null);
+            prepaidDetail.setTaxAmount(prepaidTax.negate()); // 负数表示扣除
+            details.add(prepaidDetail);
+        }
+
+        // 本期应补(退)税额明细
+        TaxCalculationDetailVO currentDetail = new TaxCalculationDetailVO();
+        currentDetail.setItemName("本期应补(退)税额");
+        currentDetail.setAmount(null);
+        currentDetail.setRate(null);
+        currentDetail.setTaxAmount(citAmount);
+        details.add(currentDetail);
 
         vo.setDetails(details);
         return vo;

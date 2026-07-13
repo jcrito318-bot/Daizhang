@@ -110,6 +110,12 @@ public interface AssetService extends IService<FixedAsset> {
     void calculateDepreciation(DepreciationRequest request);
 
     /**
+     * 单资产折旧(独立事务,供calculateDepreciation内部通过代理调用)
+     * @return true=折旧成功, false=跳过(已折旧/已提足/数据不完整)
+     */
+    boolean depreciateSingleAsset(Long assetId, Integer year, Integer month, Long accountSetId);
+
+    /**
      * 生成折旧凭证
      */
     void generateDepreciationVoucher(Long recordId);

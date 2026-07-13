@@ -964,6 +964,14 @@ public class ReportServiceImpl implements ReportService {
         BigDecimal financingInflow = vo.getFinancingInflow() != null ? vo.getFinancingInflow() : BigDecimal.ZERO;
         BigDecimal financingOutflow = vo.getFinancingOutflow() != null ? vo.getFinancingOutflow() : BigDecimal.ZERO;
 
+        // 保存原始当月值(调整前),用于计算本年累计的调整delta
+        BigDecimal originalOperatingInflow = operatingInflow;
+        BigDecimal originalOperatingOutflow = operatingOutflow;
+        BigDecimal originalInvestingInflow = investingInflow;
+        BigDecimal originalInvestingOutflow = investingOutflow;
+        BigDecimal originalFinancingInflow = financingInflow;
+        BigDecimal originalFinancingOutflow = financingOutflow;
+
         List<CashFlowItemVO> items = vo.getItems() != null ? new ArrayList<>(vo.getItems()) : new ArrayList<>();
 
         for (CashFlowAdjustment adj : adjustments) {
@@ -1018,6 +1026,19 @@ public class ReportServiceImpl implements ReportService {
         vo.setFinancingNetFlow(financingNetFlow);
         vo.setNetIncrease(netIncrease);
         vo.setItems(items);
+
+        // 本年累计同步应用调整差额:本年累计 = 原始本年累计 + (调整后当月 - 原始当月)
+        // 否则当月显示调整后值而本年累计保持原始,导致"本年累计-上月累计≠当月"的矛盾
+        vo.setOperatingInflowYear(nvl(vo.getOperatingInflowYear()).add(operatingInflow.subtract(originalOperatingInflow)));
+        vo.setOperatingOutflowYear(nvl(vo.getOperatingOutflowYear()).add(operatingOutflow.subtract(originalOperatingOutflow)));
+        vo.setInvestingInflowYear(nvl(vo.getInvestingInflowYear()).add(investingInflow.subtract(originalInvestingInflow)));
+        vo.setInvestingOutflowYear(nvl(vo.getInvestingOutflowYear()).add(investingOutflow.subtract(originalInvestingOutflow)));
+        vo.setFinancingInflowYear(nvl(vo.getFinancingInflowYear()).add(financingInflow.subtract(originalFinancingInflow)));
+        vo.setFinancingOutflowYear(nvl(vo.getFinancingOutflowYear()).add(financingOutflow.subtract(originalFinancingOutflow)));
+        vo.setNetIncreaseYear(nvl(vo.getNetIncreaseYear()).add(netIncrease.subtract(
+                originalOperatingInflow.subtract(originalOperatingOutflow)
+                        .add(originalInvestingInflow.subtract(originalInvestingOutflow))
+                        .add(originalFinancingInflow.subtract(originalFinancingOutflow)))));
 
         return vo;
     }
