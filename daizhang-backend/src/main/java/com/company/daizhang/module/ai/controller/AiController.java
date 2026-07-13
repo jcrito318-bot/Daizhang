@@ -19,6 +19,7 @@ import com.company.daizhang.module.document.vo.DocumentVO;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -65,9 +66,11 @@ public class AiController {
 
             String result = glmAiService.recognizeInvoice(file, invoiceType);
             return Result.success(result);
+        } catch (BusinessException e) {
+            throw e;
         } catch (IOException e) {
             log.error("票据识别失败", e);
-            return Result.error(500, "票据识别失败：" + e.getMessage());
+            return Result.error(500, "票据识别失败，请检查文件格式或稍后重试");
         }
     }
 
@@ -76,7 +79,7 @@ public class AiController {
      */
     @PostMapping("/recognize/invoice/base64")
     @Operation(summary = "票据OCR识别（Base64）", description = "使用GLM大模型识别票据图片（Base64编码）")
-    public Result<String> recognizeInvoiceBase64(@RequestBody InvoiceRecognizeRequest request) {
+    public Result<String> recognizeInvoiceBase64(@Valid @RequestBody InvoiceRecognizeRequest request) {
         // OCR为通用功能不绑定特定账套，但要求当前用户至少拥有任意账套访问权，避免无账套用户滥用AI算力
         checkAiAccess();
         try {
@@ -89,9 +92,11 @@ public class AiController {
 
             String result = glmAiService.recognizeInvoice(imageBytes, request.getInvoiceType());
             return Result.success(result);
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("票据识别失败", e);
-            return Result.error(500, "票据识别失败：" + e.getMessage());
+            return Result.error(500, "票据识别失败，请检查图片格式或稍后重试");
         }
     }
 
@@ -119,9 +124,11 @@ public class AiController {
             byte[] imageBytes = glmAiService.downloadImageFromUrl(fileUrl);
             String result = glmAiService.recognizeInvoice(imageBytes, invoiceType);
             return Result.success(result);
+        } catch (BusinessException e) {
+            throw e;
         } catch (Exception e) {
             log.error("票据识别失败", e);
-            return Result.error(500, "票据识别失败：" + e.getMessage());
+            return Result.error(500, "票据识别失败，请检查URL或稍后重试");
         }
     }
 
@@ -149,7 +156,7 @@ public class AiController {
      */
     @PostMapping("/suggest/accounting")
     @Operation(summary = "智能记账建议", description = "使用GLM大模型提供记账建议")
-    public Result<String> suggestAccounting(@RequestBody AccountingSuggestRequest request) {
+    public Result<String> suggestAccounting(@Valid @RequestBody AccountingSuggestRequest request) {
         // AI为通用功能不绑定特定账套,但要求当前用户至少拥有任意账套访问权,避免无账套用户滥用AI算力
         checkAiAccess();
         try {

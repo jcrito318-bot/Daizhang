@@ -8,6 +8,7 @@ import com.company.daizhang.common.utils.ExcelImportUtil;
 import com.company.daizhang.common.vo.ImportResultVO;
 import com.company.daizhang.module.accountset.entity.AccountPeriod;
 import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.subject.entity.Subject;
 import com.company.daizhang.module.subject.mapper.SubjectMapper;
 import com.company.daizhang.module.voucher.entity.Voucher;
@@ -51,6 +52,7 @@ public class VoucherImportServiceImpl implements VoucherImportService {
     private final SubjectMapper subjectMapper;
     private final AccountPeriodMapper accountPeriodMapper;
     private final TransactionTemplate transactionTemplate;
+    private final AccountSetAccessService accountSetAccessService;
 
     private static final String COL_DATE = "凭证日期";
     private static final String COL_WORD = "凭证字";
@@ -63,6 +65,11 @@ public class VoucherImportServiceImpl implements VoucherImportService {
 
     @Override
     public ImportResultVO importVouchers(Long accountSetId, MultipartFile file) {
+        // IDOR治理:凭证导入为写操作,必须校验当前用户对该账套的所有者权限(OWNER),
+        // 与 VoucherServiceImpl.createVoucher 保持一致。仅靠 Controller 层 @RequireAccountSetAccess
+        // 注解做的是读权限(checkAccess),VIEWER/ACCOUNTANT 仍可越权批量写入凭证。
+        accountSetAccessService.checkOwner(accountSetId);
+
         List<Map<String, String>> rows;
         try {
             rows = ExcelImportUtil.parseExcel(file, 0);
@@ -271,32 +278,51 @@ public class VoucherImportServiceImpl implements VoucherImportService {
 
     /**
      * 生成凭证号：格式 year-month-sequence，如 2026-06-001
-     * 基于本期最大序号+1,排除TMP-%临时号(否则字符串排序下TMP号排最前,parse失败导致重号)
+     * 基于本期最大序号+1,排除TMP-%临时号。
+     * 注意:必须用 Java 层提取序号取数值最大值,不能用 orderByDesc(voucherNo) 字符串排序——
+     * 当序号超过 999 时,"2026-01-999" 字符串大于 "2026-01-1000"(因 '9'>'1'),会取到错误的"最大值",
+     * 导致下次生成的序号与已存在号重复,触发 DuplicateKeyException,导入持续失败。
      */
     private String generateVoucherNo(Long accountSetId, Integer year, Integer month) {
         LambdaQueryWrapper<Voucher> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Voucher::getAccountSetId, accountSetId)
                .eq(Voucher::getYear, year)
                .eq(Voucher::getMonth, month)
-               .notLike(Voucher::getVoucherNo, "TMP-%")
-               .orderByDesc(Voucher::getVoucherNo)
-               .last("LIMIT 1");
+               .notLike(Voucher::getVoucherNo, "TMP-%");
         List<Voucher> vouchers = voucherMapper.selectList(wrapper);
 
         int sequence = 1;
-        if (!vouchers.isEmpty()) {
-            String lastVoucherNo = vouchers.get(0).getVoucherNo();
-            if (StrUtil.isNotBlank(lastVoucherNo)) {
-                String[] parts = lastVoucherNo.split("-");
-                if (parts.length == 3) {
-                    try {
-                        sequence = Integer.parseInt(parts[2]) + 1;
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-            }
+        if (vouchers != null && !vouchers.isEmpty()) {
+            // Java层提取序号取数值最大值,与 VoucherServiceImpl.generateVoucherNo 保持一致,
+            // 避免数据库字符串排序在序号>999时错乱
+            int maxSeq = vouchers.stream()
+                    .map(Voucher::getVoucherNo)
+                    .filter(StrUtil::isNotBlank)
+                    .mapToInt(this::extractVoucherSequence)
+                    .max()
+                    .orElse(0);
+            sequence = maxSeq + 1;
         }
         return String.format("%d-%02d-%03d", year, month, sequence);
+    }
+
+    /**
+     * 从凭证号中提取末段数值序号(凭证号格式 year-month-sequence,含两个'-')。
+     * 解析失败返回0,保证取最大值时不抛异常。
+     */
+    private int extractVoucherSequence(String voucherNo) {
+        if (StrUtil.isBlank(voucherNo)) {
+            return 0;
+        }
+        int lastDash = voucherNo.lastIndexOf('-');
+        if (lastDash < 0 || lastDash == voucherNo.length() - 1) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(voucherNo.substring(lastDash + 1));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     @Override

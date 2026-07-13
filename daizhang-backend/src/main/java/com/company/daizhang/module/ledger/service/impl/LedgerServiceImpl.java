@@ -266,7 +266,8 @@ public class LedgerServiceImpl implements LedgerService {
     public List<GeneralLedgerVO> generalLedger(LedgerQueryRequest request) {
         Long accountSetId = request.getAccountSetId();
         Integer year = request.getYear();
-        Integer month = request.getMonth() != null ? request.getMonth() : 1;
+        // month 为空表示查询全年汇总,不再静默回退为 1 月(否则前端"年度总账"场景会误显示 1 月单月数据)
+        Integer month = request.getMonth();
 
         // 业务校验：账套ID不能为空
         if (accountSetId == null) {
@@ -286,8 +287,8 @@ public class LedgerServiceImpl implements LedgerService {
             throw new BusinessException(ErrorCode.LEDGER_YEAR_INVALID);
         }
 
-        // 业务校验：月份必须在1-12之间
-        if (month < 1 || month > 12) {
+        // 业务校验：月份必须在1-12之间(仅当指定月份时校验;为空表示全年汇总)
+        if (month != null && (month < 1 || month > 12)) {
             throw new BusinessException(ErrorCode.LEDGER_MONTH_INVALID);
         }
 
@@ -297,13 +298,15 @@ public class LedgerServiceImpl implements LedgerService {
             throw new BusinessException(ErrorCode.LEDGER_ACCOUNT_SET_NOT_FOUND);
         }
 
-        log.info("查询总账，账套ID: {}, 年度: {}, 月份: {}", accountSetId, year, month);
+        log.info("查询总账，账套ID: {}, 年度: {}, 月份: {}", accountSetId, year, month == null ? "全年" : month);
 
-        // 查询科目余额
+        // 查询科目余额:month 为空时不按月份过滤,取全年各月余额后聚合
         LambdaQueryWrapper<AccountBalance> balanceWrapper = new LambdaQueryWrapper<>();
         balanceWrapper.eq(AccountBalance::getAccountSetId, accountSetId)
-                .eq(AccountBalance::getYear, year)
-                .eq(AccountBalance::getMonth, month);
+                .eq(AccountBalance::getYear, year);
+        if (month != null) {
+            balanceWrapper.eq(AccountBalance::getMonth, month);
+        }
         List<AccountBalance> balances = accountBalanceMapper.selectList(balanceWrapper);
 
         // 查询科目信息
@@ -313,23 +316,44 @@ public class LedgerServiceImpl implements LedgerService {
         Map<Long, Subject> subjectMap = subjects.stream()
                 .collect(Collectors.toMap(Subject::getId, s -> s));
 
-        // 构建总账VO
+        // 构建总账VO:统一按 subjectId 分组聚合。
+        // - 单月查询:每个科目仅1条余额,聚合结果即该月期初/发生额/期末。
+        // - 全年查询(month=null):每个科目多条余额(按月),期初取1月期初(年初),
+        //   发生额取全年累加,期末取最大月份期末(年末)。
+        Map<Long, List<AccountBalance>> balancesBySubject = balances.stream()
+                .collect(Collectors.groupingBy(AccountBalance::getSubjectId));
+
         List<GeneralLedgerVO> result = new ArrayList<>();
-        for (AccountBalance balance : balances) {
-            Subject subject = subjectMap.get(balance.getSubjectId());
+        for (Map.Entry<Long, List<AccountBalance>> entry : balancesBySubject.entrySet()) {
+            Subject subject = subjectMap.get(entry.getKey());
             if (subject == null) {
                 continue;
             }
 
+            List<AccountBalance> subjectBalances = entry.getValue();
+            // 按月份排序,确保首条为最早月(期初)、末条为最晚月(期末)
+            subjectBalances.sort(Comparator.comparingInt(b -> b.getMonth() != null ? b.getMonth() : 0));
+            AccountBalance first = subjectBalances.get(0);
+            AccountBalance last = subjectBalances.get(subjectBalances.size() - 1);
+
             GeneralLedgerVO vo = new GeneralLedgerVO();
             vo.setSubjectCode(subject.getCode());
             vo.setSubjectName(subject.getName());
-            vo.setBeginDebit(balance.getBeginDebit() != null ? balance.getBeginDebit() : BigDecimal.ZERO);
-            vo.setBeginCredit(balance.getBeginCredit() != null ? balance.getBeginCredit() : BigDecimal.ZERO);
-            vo.setPeriodDebit(balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO);
-            vo.setPeriodCredit(balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO);
-            vo.setEndDebit(balance.getEndDebit() != null ? balance.getEndDebit() : BigDecimal.ZERO);
-            vo.setEndCredit(balance.getEndCredit() != null ? balance.getEndCredit() : BigDecimal.ZERO);
+            // 期初:取最早月份的期初余额(单月即该月期初;全年即1月期初=年初)
+            vo.setBeginDebit(first.getBeginDebit() != null ? first.getBeginDebit() : BigDecimal.ZERO);
+            vo.setBeginCredit(first.getBeginCredit() != null ? first.getBeginCredit() : BigDecimal.ZERO);
+            // 本期发生额:单月即该月发生额;全年为各月发生额累加
+            BigDecimal periodDebit = BigDecimal.ZERO;
+            BigDecimal periodCredit = BigDecimal.ZERO;
+            for (AccountBalance b : subjectBalances) {
+                periodDebit = periodDebit.add(b.getPeriodDebit() != null ? b.getPeriodDebit() : BigDecimal.ZERO);
+                periodCredit = periodCredit.add(b.getPeriodCredit() != null ? b.getPeriodCredit() : BigDecimal.ZERO);
+            }
+            vo.setPeriodDebit(periodDebit);
+            vo.setPeriodCredit(periodCredit);
+            // 期末:取最晚月份的期末余额(单月即该月期末;全年即12月期末=年末)
+            vo.setEndDebit(last.getEndDebit() != null ? last.getEndDebit() : BigDecimal.ZERO);
+            vo.setEndCredit(last.getEndCredit() != null ? last.getEndCredit() : BigDecimal.ZERO);
 
             result.add(vo);
         }

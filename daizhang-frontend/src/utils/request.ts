@@ -23,6 +23,11 @@ service.interceptors.request.use(
 
 service.interceptors.response.use(
   (response: AxiosResponse<Result<unknown>>) => {
+    // Blob/文件下载响应：response.data 是 Blob,没有 code 字段,
+    // 必须跳过业务 code 校验并直接返回 Blob,否则所有报表导出都会被误判为业务错误而失败
+    if (response.config.responseType === 'blob' || response.data instanceof Blob) {
+      return response.data as unknown as AxiosResponse
+    }
     const res = response.data
     if (res.code !== 200) {
       ElMessage.error(res.message || '请求失败')

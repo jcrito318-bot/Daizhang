@@ -8,11 +8,13 @@ import com.company.daizhang.module.inventory.entity.InventoryIn;
 import com.company.daizhang.module.inventory.entity.InventoryInDetail;
 import com.company.daizhang.module.inventory.entity.InventoryOut;
 import com.company.daizhang.module.inventory.entity.InventoryOutDetail;
+import com.company.daizhang.module.inventory.entity.InventoryStock;
 import com.company.daizhang.module.inventory.mapper.InventoryInDetailMapper;
 import com.company.daizhang.module.inventory.mapper.InventoryInMapper;
 import com.company.daizhang.module.inventory.mapper.InventoryItemMapper;
 import com.company.daizhang.module.inventory.mapper.InventoryOutDetailMapper;
 import com.company.daizhang.module.inventory.mapper.InventoryOutMapper;
+import com.company.daizhang.module.inventory.mapper.InventoryStockMapper;
 import com.company.daizhang.module.inventory.service.InventoryVoucherService;
 import com.company.daizhang.module.subject.entity.Subject;
 import com.company.daizhang.module.subject.mapper.SubjectMapper;
@@ -50,6 +52,7 @@ public class InventoryVoucherServiceImpl implements InventoryVoucherService {
     private final InventoryOutMapper outMapper;
     private final InventoryOutDetailMapper outDetailMapper;
     private final InventoryItemMapper itemMapper;
+    private final InventoryStockMapper stockMapper;
     private final SubjectMapper subjectMapper;
     private final AccountSetAccessService accountSetAccessService;
 
@@ -180,13 +183,30 @@ public class InventoryVoucherServiceImpl implements InventoryVoucherService {
         }
 
         // 成本按加权平均法计算：优先使用审核时已回写的明细 costAmount（auditOut 中按月末库存加权平均计算），
-        // 若明细 costAmount 为 0（未审核或历史数据），则按当前库存加权平均单价重算
+        // 若明细 costAmount 为 0（未审核或历史数据），则按出库日期所在月份的库存加权平均成本重算。
+        // 注意:不能用 detail.getUnitPrice() 兜底——那是售价,售价通常高于成本价,会导致
+        // 主营业务成本被高估、利润被低估,同时库存商品贷方金额不等于实际库存成本。
+        LocalDate voucherDate = out.getOutDate() != null ? out.getOutDate() : LocalDate.now();
+        int year = voucherDate.getYear();
+        int month = voucherDate.getMonthValue();
+
         BigDecimal totalCost = BigDecimal.ZERO;
         for (InventoryOutDetail detail : details) {
             BigDecimal costAmt = nvl(detail.getCostAmount());
             if (costAmt.compareTo(BigDecimal.ZERO) == 0) {
-                // 明细未回写成本，按商品 unitPrice 兜底（加权平均成本由审核流程保证，此处仅为防御性兜底）
-                costAmt = nvl(detail.getQuantity()).multiply(nvl(detail.getUnitPrice())).setScale(2, RoundingMode.HALF_UP);
+                // 明细未回写成本(未审核),按库存加权平均成本重算,而非售价
+                InventoryStock stock = getStock(out.getAccountSetId(), detail.getItemId(), year, month);
+                if (stock != null
+                        && nvl(stock.getEndQuantity()).compareTo(BigDecimal.ZERO) > 0
+                        && stock.getEndAmount() != null) {
+                    BigDecimal unitCost = stock.getEndAmount()
+                            .divide(nvl(stock.getEndQuantity()), 4, RoundingMode.HALF_UP);
+                    costAmt = nvl(detail.getQuantity()).multiply(unitCost).setScale(2, RoundingMode.HALF_UP);
+                } else {
+                    // 库存也无记录:拒绝生成,避免用售价兜底导致成本错误
+                    throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                            "出库明细无成本数据且库存无记录,请先审核出库单再生成凭证");
+                }
             }
             totalCost = totalCost.add(costAmt);
         }
@@ -195,10 +215,7 @@ public class InventoryVoucherServiceImpl implements InventoryVoucherService {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "出库成本金额必须大于零");
         }
 
-        // 出库日期缺省取当前日期
-        LocalDate voucherDate = out.getOutDate() != null ? out.getOutDate() : LocalDate.now();
-        int year = voucherDate.getYear();
-        int month = voucherDate.getMonthValue();
+        // 出库日期/年月已在上方成本计算前确定(voucherDate/year/month)
 
         // 解析科目ID：借方主营业务成本(6401)，贷方库存商品(1405)
         Long costSubjectId = getSubjectIdByCode(out.getAccountSetId(), CODE_MAIN_COST, "主营业务成本");
@@ -334,5 +351,18 @@ public class InventoryVoucherServiceImpl implements InventoryVoucherService {
      */
     private BigDecimal nvl(BigDecimal val) {
         return val != null ? val : BigDecimal.ZERO;
+    }
+
+    /**
+     * 查询指定账套/商品/年月的库存记录(加权平均成本来源)。
+     * 用于出库凭证成本兜底计算:当出库明细未回写 costAmount 时,从库存取 endAmount/endQuantity 计算单位成本。
+     */
+    private InventoryStock getStock(Long accountSetId, Long itemId, int year, int month) {
+        LambdaQueryWrapper<InventoryStock> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(InventoryStock::getAccountSetId, accountSetId)
+                .eq(InventoryStock::getItemId, itemId)
+                .eq(InventoryStock::getYear, year)
+                .eq(InventoryStock::getMonth, month);
+        return stockMapper.selectOne(wrapper);
     }
 }

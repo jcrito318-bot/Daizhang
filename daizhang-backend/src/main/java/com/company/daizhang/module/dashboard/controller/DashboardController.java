@@ -26,8 +26,8 @@ public class DashboardController {
 
     @Operation(summary = "获取运营看板总览（含统计、客户摘要、待办看板）")
     @GetMapping
-    public Result<DashboardVO> getDashboard() {
-        DashboardVO vo = dashboardService.getDashboard();
+    public Result<DashboardVO> getDashboard(@RequestParam(required = false) Long accountSetId) {
+        DashboardVO vo = dashboardService.getDashboard(accountSetId);
         return Result.success(vo);
     }
 

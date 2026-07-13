@@ -45,6 +45,15 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '新增凭证' }
       },
       {
+        // 编辑凭证:复用 VoucherCreate 组件(其内部通过 route.params.id 进入编辑模式)。
+        // 原 voucher/:id 仅绑定到 VoucherDetail(只读),导致未审核凭证无法修改——
+        // 后端 voucherApi.update 与前端编辑表单均已实现,仅缺路由入口。
+        path: 'voucher/:id/edit',
+        name: 'VoucherEdit',
+        component: () => import('@/views/voucher/VoucherCreate.vue'),
+        meta: { title: '编辑凭证' }
+      },
+      {
         path: 'voucher/:id',
         name: 'VoucherDetail',
         component: () => import('@/views/voucher/VoucherDetail.vue'),
@@ -84,25 +93,25 @@ const routes: RouteRecordRaw[] = [
         path: 'system/user',
         name: 'UserList',
         component: () => import('@/views/system/user/UserList.vue'),
-        meta: { title: '用户管理' }
+        meta: { title: '用户管理', roles: ['ROLE_ADMIN'] }
       },
       {
         path: 'system/role',
         name: 'RoleList',
         component: () => import('@/views/system/role/RoleList.vue'),
-        meta: { title: '角色管理' }
+        meta: { title: '角色管理', roles: ['ROLE_ADMIN'] }
       },
       {
         path: 'system/log',
         name: 'OperationLogList',
         component: () => import('@/views/system/log/OperationLogList.vue'),
-        meta: { title: '操作日志' }
+        meta: { title: '操作日志', roles: ['ROLE_ADMIN'] }
       },
       {
         path: 'system/setting',
         name: 'SystemSetting',
         component: () => import('@/views/system/setting/SystemSetting.vue'),
-        meta: { title: '系统设置' }
+        meta: { title: '系统设置', roles: ['ROLE_ADMIN'] }
       },
       {
         path: 'period',
@@ -216,15 +225,41 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach((to, _from, next) => {
+router.beforeEach(async (to, _from, next) => {
   const token = localStorage.getItem('token')
   if (to.meta.requiresAuth && !token) {
     next({ path: '/login', query: { redirect: to.fullPath } })
-  } else if (to.path === '/login' && token) {
-    next({ path: '/dashboard' })
-  } else {
-    next()
+    return
   }
+  if (to.path === '/login' && token) {
+    next({ path: '/dashboard' })
+    return
+  }
+  // RBAC:路由级角色校验。meta.roles 指定允许访问的角色列表,
+  // 用户须拥有其中至少一个角色才能进入,否则重定向到首页。
+  // 典型场景:普通记账员不可访问系统管理(用户/角色/日志/设置)页面。
+  const requiredRoles = to.meta.roles as string[] | undefined
+  if (requiredRoles && requiredRoles.length > 0) {
+    const { useUserStore } = await import('@/stores/user')
+    const userStore = useUserStore()
+    // userInfo 可能在页面刷新后为空,先尝试加载
+    if (!userStore.userInfo) {
+      try {
+        await userStore.getUserInfo()
+      } catch {
+        // 加载失败(如token过期),跳转登录
+        next({ path: '/login', query: { redirect: to.fullPath } })
+        return
+      }
+    }
+    const userRoles = userStore.userInfo?.roles ?? []
+    const hasRole = requiredRoles.some(r => userRoles.includes(r))
+    if (!hasRole) {
+      next({ path: '/dashboard' })
+      return
+    }
+  }
+  next()
 })
 
 export default router

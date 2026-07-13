@@ -44,6 +44,11 @@ public class DashboardSummary {
     private Integer unauditedVoucherCount;
 
     /**
+     * 本月凭证总数(按当前年月统计,与未审核凭证数区分,避免首页两块卡片显示相同数字)
+     */
+    private Integer monthVoucherCount;
+
+    /**
      * 未申报税种数
      */
     private Integer undeclaredTaxCount;

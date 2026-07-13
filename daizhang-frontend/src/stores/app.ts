@@ -56,6 +56,16 @@ export const useAppStore = defineStore('app', () => {
     sidebarCollapsed.value = !sidebarCollapsed.value
   }
 
+  /**
+   * 重置账套相关缓存:清空账套列表、当前账套、localStorage。
+   * 用于用户退出登录时,避免 A 用户退出后 B 用户在同一浏览器登录仍看到 A 的账套列表缓存。
+   */
+  function resetAccountSetState() {
+    accountSetList.value = []
+    accountSetListLoaded.value = false
+    setCurrentAccountSet(null)
+  }
+
   return {
     accountSetList,
     accountSetListLoaded,
@@ -63,6 +73,7 @@ export const useAppStore = defineStore('app', () => {
     sidebarCollapsed,
     loadAccountSetList,
     setCurrentAccountSet,
-    toggleSidebar
+    toggleSidebar,
+    resetAccountSetState
   }
 })

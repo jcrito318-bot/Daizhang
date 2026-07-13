@@ -45,6 +45,14 @@ public class ExcelImportUtil {
      * @param headerRowIndex 表头所在行索引（从0开始）
      */
     public static List<Map<String, String>> parseExcel(MultipartFile file, int headerRowIndex) throws IOException {
+        // 文件扩展名校验:仅允许.xlsx和.xls,拒绝其他格式(如.csv/.html等)
+        String filename = file.getOriginalFilename();
+        if (filename == null
+                || (!filename.toLowerCase().endsWith(".xlsx") && !filename.toLowerCase().endsWith(".xls"))) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "仅支持Excel文件(.xlsx/.xls)，当前文件：" + filename);
+        }
+
         List<Map<String, String>> result = new ArrayList<>();
 
         try (InputStream is = file.getInputStream();

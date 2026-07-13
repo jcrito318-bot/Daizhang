@@ -132,7 +132,7 @@
           <el-menu-item index="/tax/calculation">税务计算</el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu index="system">
+        <el-sub-menu v-if="isAdmin" index="system">
           <template #title>
             <el-icon><Setting /></el-icon>
             <span>系统管理</span>
@@ -191,7 +191,10 @@
       </el-header>
 
       <el-main class="main-content">
-        <router-view />
+        <!-- :key 绑定 currentAccountSetId:切换账套时强制重载当前页面组件,
+             重新执行 onMounted(多数列表页在 onMounted 中 loadData),
+             避免用户在凭证/报表页切换账套后仍看到旧账套数据 -->
+        <router-view :key="appStore.currentAccountSetId ?? 'none'" />
       </el-main>
     </el-container>
   </el-container>
@@ -210,6 +213,11 @@ const appStore = useAppStore()
 
 const activeMenu = computed(() => route.path)
 const currentRoute = computed(() => route)
+
+// RBAC:仅 ROLE_ADMIN 角色可见系统管理菜单(用户/角色/日志/设置)
+const isAdmin = computed(() => {
+  return userStore.userInfo?.roles?.includes('ROLE_ADMIN') ?? false
+})
 
 // 移动端响应式:小屏(<768px)下侧边栏改为抽屉模式
 const isMobile = ref(false)

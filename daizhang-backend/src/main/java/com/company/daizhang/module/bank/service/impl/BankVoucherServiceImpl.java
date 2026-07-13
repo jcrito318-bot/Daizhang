@@ -4,6 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
+import com.company.daizhang.common.utils.SecurityUtils;
 import com.company.daizhang.module.accountset.entity.AccountPeriod;
 import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
 import com.company.daizhang.module.bank.entity.BankTransaction;
@@ -24,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -264,6 +266,9 @@ public class BankVoucherServiceImpl implements BankVoucherService {
 
     /**
      * 构建凭证实体
+     * 银行流水凭证直接设为已过账(status=2):银行流水数据来自银行对账单,具有权威性,
+     * 自动过账后凭证可立即参与银行对账/autoMatch闭环( autoMatch 仅匹配 status=2 的凭证)。
+     * 若设为草稿(status=0),用户需手动审核+过账后才能对账,打破"导入流水→生成凭证→自动对账"闭环。
      */
     private Voucher buildVoucher(Long accountSetId, LocalDate voucherDate, int year, int month,
                                  BigDecimal totalDebit, BigDecimal totalCredit) {
@@ -277,8 +282,15 @@ public class BankVoucherServiceImpl implements BankVoucherService {
         voucher.setTotalDebit(totalDebit);
         voucher.setTotalCredit(totalCredit);
         voucher.setAttachmentCount(0);
-        voucher.setStatus(0);
+        // 直接过账:银行流水数据权威,自动审核+过账,闭环可立即用于对账
+        voucher.setStatus(2);
         voucher.setSource(1);
+        Long userId = SecurityUtils.getCurrentUserId();
+        LocalDateTime now = LocalDateTime.now();
+        voucher.setAuditBy(userId);
+        voucher.setAuditTime(now);
+        voucher.setPostBy(userId);
+        voucher.setPostTime(now);
         return voucher;
     }
 

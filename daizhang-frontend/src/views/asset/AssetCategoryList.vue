@@ -74,7 +74,9 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { assetApi } from '@/api/asset'
+import { useAppStore } from '@/stores/app'
 
+const appStore = useAppStore()
 const loading = ref(false)
 const tableData = ref<any[]>([])
 const dialogVisible = ref(false)
@@ -106,6 +108,7 @@ const loadData = async () => {
   loading.value = true
   try {
     const res = await assetApi.getCategoryPage({
+      accountSetId: appStore.currentAccountSetId ?? undefined,
       pageNum: pagination.pageNum,
       pageSize: pagination.pageSize
     })
@@ -156,6 +159,11 @@ const handleDelete = (row: any) => {
 
 const handleSubmit = async () => {
   await formRef.value?.validate()
+  const accountSetId = appStore.currentAccountSetId
+  if (!accountSetId) {
+    ElMessage.warning('请先选择账套')
+    return
+  }
   if (form.id) {
     await assetApi.updateCategory(form.id, {
       categoryName: form.categoryName,
@@ -166,7 +174,7 @@ const handleSubmit = async () => {
     })
   } else {
     await assetApi.createCategory({
-      accountSetId: 1,
+      accountSetId,
       categoryCode: form.categoryCode,
       categoryName: form.categoryName,
       depreciationMethod: form.depreciationMethod,

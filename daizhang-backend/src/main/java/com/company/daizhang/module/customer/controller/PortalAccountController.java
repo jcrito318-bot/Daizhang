@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -25,6 +26,7 @@ public class PortalAccountController {
 
     @Operation(summary = "查询客户门户列表")
     @GetMapping("/list")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<List<PortalAccountVO>> list(@RequestParam(required = false) Long customerId) {
         List<PortalAccountVO> list = portalAccountService.listPortals(customerId);
         return Result.success(list);
@@ -32,6 +34,7 @@ public class PortalAccountController {
 
     @Operation(summary = "创建门户账户")
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> create(@Valid @RequestBody PortalAccountRequest request) {
         portalAccountService.createPortal(request);
         return Result.success();
@@ -39,6 +42,7 @@ public class PortalAccountController {
 
     @Operation(summary = "更新门户账户")
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody PortalAccountRequest request) {
         portalAccountService.updatePortal(id, request);
         return Result.success();
@@ -46,6 +50,7 @@ public class PortalAccountController {
 
     @Operation(summary = "删除门户账户")
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         portalAccountService.deletePortal(id);
         return Result.success();
@@ -53,6 +58,7 @@ public class PortalAccountController {
 
     @Operation(summary = "重置门户密码")
     @PutMapping("/{id}/password")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> resetPassword(@PathVariable Long id, @RequestParam String newPassword) {
         portalAccountService.resetPassword(id, newPassword);
         return Result.success();
@@ -60,6 +66,7 @@ public class PortalAccountController {
 
     @Operation(summary = "更新门户状态")
     @PutMapping("/{id}/status")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> updateStatus(@PathVariable Long id, @RequestParam Integer status) {
         portalAccountService.updateStatus(id, status);
         return Result.success();

@@ -22,6 +22,9 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
@@ -51,6 +54,9 @@ public class AuthController {
 
     @Autowired
     private TokenBlacklist tokenBlacklist;
+
+    @Autowired
+    private UserDetailsService userDetailsService;
 
     @PostMapping("/login")
     @Operation(summary = "用户登录")
@@ -107,8 +113,30 @@ public class AuthController {
             return Result.error(401, "非refresh token");
         }
 
+        // 黑名单校验:登出时已将token加入黑名单,此处拒绝已登出的refresh token,
+        // 否则用户登出后仍可在refresh-expiration(7天)内持续换发可用accessToken,登出形同虚设
+        if (tokenBlacklist.contains(token)) {
+            return Result.error(401, "refresh token已失效，请重新登录");
+        }
+
         Long userId = claims.get("userId", Long.class);
         String username = claims.getSubject();
+
+        // 用户状态校验:重新从数据库加载用户,校验是否被禁用/删除。
+        // 否则管理员禁用某用户后,该用户仍可凭refresh token在最长7天内持续换发可用accessToken。
+        UserDetails userDetails;
+        try {
+            userDetails = userDetailsService.loadUserByUsername(username);
+        } catch (UsernameNotFoundException e) {
+            return Result.error(401, "用户不存在，请重新登录");
+        }
+        if (!userDetails.isEnabled()) {
+            return Result.error(401, "用户已被禁用，请联系管理员");
+        }
+        // 以数据库实际userId为准(避免token签发后用户被重建导致id漂移)
+        if (userDetails instanceof SecurityUserDetails sud) {
+            userId = sud.getUserId();
+        }
 
         // 生成新的accessToken;refresh token不重新签发,用满7天后需重新登录,避免无限刷新
         String newAccessToken = jwtUtils.generateToken(userId, username);
@@ -135,6 +163,14 @@ public class AuthController {
             String token = bearerToken.substring(7);
             long expMillis = jwtUtils.getExpirationMillis(token);
             tokenBlacklist.add(token, expMillis);
+        }
+        // 同步将 refresh token 加入黑名单(若客户端通过 X-Refresh-Token 头传入),
+        // 防止登出后 refresh token 仍可在 7 天有效期内换发新 accessToken
+        String refreshHeader = httpRequest.getHeader("X-Refresh-Token");
+        if (StringUtils.hasText(refreshHeader) && refreshHeader.startsWith("Bearer ")) {
+            String refreshToken = refreshHeader.substring(7);
+            long refreshExpMillis = jwtUtils.getExpirationMillis(refreshToken);
+            tokenBlacklist.add(refreshToken, refreshExpMillis);
         }
         SecurityContextHolder.clearContext();
         return Result.success("登出成功", null);

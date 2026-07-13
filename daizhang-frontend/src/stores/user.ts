@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { authApi } from '@/api/auth'
+import { useAppStore } from '@/stores/app'
 import type { UserVO, LoginRequest } from '@/types/common'
 
 export const useUserStore = defineStore('user', () => {
@@ -34,6 +35,9 @@ export const useUserStore = defineStore('user', () => {
       userInfo.value = null
       localStorage.removeItem('token')
       localStorage.removeItem('refreshToken')
+      // 重置账套相关缓存:避免 A 用户退出后 B 用户在同一浏览器登录仍看到 A 的账套列表。
+      // appStore 在此处延迟获取,避免 store 初始化阶段的循环依赖。
+      useAppStore().resetAccountSetState()
     }
   }
 

@@ -4,9 +4,12 @@
 -- 使用 MERGE INTO 语法：存在则更新，不存在则插入
 -- ============================================
 
--- 默认管理员用户 (密码: admin123)
-MERGE INTO `sys_user` (`id`, `username`, `password`, `real_name`, `phone`, `email`, `status`, `deleted`, `version`, `create_by`, `create_time`, `update_by`, `update_time`) KEY (`id`) VALUES
-(1, 'admin', '$2a$10$4zBBUTSD7XrO8SgGwKj56ecSYyfGLEYjW067Ft9/SQM.Auu3ctGDa', '系统管理员', '13800138000', 'admin@daizhang.com', 1, 0, 0, 1, NOW(), 1, NOW());
+-- 默认管理员用户：仅在首次初始化(表中无 id=1 记录)时插入，
+-- 不再使用 MERGE INTO 每次启动回写，避免覆盖运维已修改的密码。
+-- 安全提示：默认口令为弱口令，部署后请立即登录并修改密码。
+INSERT INTO `sys_user` (`id`, `username`, `password`, `real_name`, `phone`, `email`, `status`, `deleted`, `version`, `create_by`, `create_time`, `update_by`, `update_time`)
+SELECT 1, 'admin', '$2a$10$4zBBUTSD7XrO8SgGwKj56ecSYyfGLEYjW067Ft9/SQM.Auu3ctGDa', '系统管理员', '13800138000', 'admin@daizhang.com', 1, 0, 0, 1, NOW(), 1, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM `sys_user` WHERE `id` = 1);
 
 -- 默认角色
 MERGE INTO `sys_role` (`id`, `role_name`, `role_code`, `description`, `status`, `deleted`, `version`, `create_by`, `create_time`, `update_by`, `update_time`) KEY (`id`) VALUES

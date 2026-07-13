@@ -306,7 +306,20 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         // IDOR治理:校验当前用户对该资产所属账套的所有者权限
         accountSetAccessService.checkOwner(asset.getAccountSetId());
 
-        asset.setStatus(request.getTargetStatus());
+        // 状态机校验:已报废(2)的资产不可恢复为在用(0)或闲置(1),
+        // 避免已处置/报废资产被重新启用后净值/折旧数据矛盾(净值已清零、月折旧已置0)
+        Integer currentStatus = asset.getStatus();
+        Integer targetStatus = request.getTargetStatus();
+        if (currentStatus != null && currentStatus == 2 && targetStatus != null && targetStatus != 2) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "已报废资产不可恢复为在用或闲置，如需恢复请重新登记新资产");
+        }
+        // 目标状态与当前状态相同,无需变更
+        if (currentStatus != null && currentStatus.equals(targetStatus)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "资产状态未变更");
+        }
+
+        asset.setStatus(targetStatus);
         if (StrUtil.isNotBlank(request.getRemark())) {
             asset.setRemark(request.getRemark());
         }

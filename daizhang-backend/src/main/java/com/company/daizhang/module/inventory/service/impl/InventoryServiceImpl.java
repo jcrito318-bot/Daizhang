@@ -616,6 +616,17 @@ public class InventoryServiceImpl implements InventoryService {
     private void updateStockOnOut(Long accountSetId, Long itemId, int year, int month,
                                   BigDecimal qty, BigDecimal cost) {
         InventoryStock stock = getOrCreateStock(accountSetId, itemId, year, month);
+        // 重校验库存充足性:auditOut 的库存检查(line 529-534)与本处更新之间存在 TOCTOU 时间窗口,
+        // 并发审核出库时另一事务可能已扣减库存,本处重新读取的是最新库存(version 已变),
+        // 必须重新校验 available>=qty,否则会直接累加出库产生负库存。
+        // 配合 saveOrUpdateStock 的乐观锁(version),可完全闭合并发窗口:
+        // - 顺序并发(一先一后):此处重校验拦截;
+        // - 同时并发(均读到旧 version):saveOrUpdateStock 的 rows==0 拦截。
+        BigDecimal availableQty = nvl(stock.getEndQuantity());
+        if (availableQty.compareTo(qty) < 0) {
+            throw new BusinessException(ErrorCode.CONCURRENT_UPDATE_FAILED,
+                    "库存不足(并发冲突)，可用库存：" + availableQty + "，本次出库：" + qty);
+        }
         stock.setOutQuantity(nvl(stock.getOutQuantity()).add(qty));
         stock.setOutAmount(nvl(stock.getOutAmount()).add(cost));
         stock.setEndQuantity(nvl(stock.getBeginQuantity()).add(nvl(stock.getInQuantity()))

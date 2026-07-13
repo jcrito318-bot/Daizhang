@@ -70,7 +70,9 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { assetApi } from '@/api/asset'
+import { useAppStore } from '@/stores/app'
 
+const appStore = useAppStore()
 const loading = ref(false)
 const tableData = ref<any[]>([])
 
@@ -93,6 +95,7 @@ const loadData = async () => {
   loading.value = true
   try {
     const res = await assetApi.getDepreciationRecordPage({
+      accountSetId: appStore.currentAccountSetId ?? undefined,
       pageNum: pagination.pageNum,
       pageSize: pagination.pageSize,
       year: searchForm.year ? Number(searchForm.year) : undefined,
@@ -131,12 +134,17 @@ const handleCalculateDepreciation = () => {
     ElMessage.warning('请选择年度和月份')
     return
   }
+  const accountSetId = appStore.currentAccountSetId
+  if (!accountSetId) {
+    ElMessage.warning('请先选择账套')
+    return
+  }
   ElMessageBox.confirm(`确定要对${searchForm.year}年${searchForm.month}月进行计提折旧吗？`, '提示', {
     type: 'warning'
   }).then(async () => {
     try {
       await assetApi.calculateDepreciation({
-        accountSetId: 1,
+        accountSetId,
         year: Number(searchForm.year),
         month: searchForm.month!
       })

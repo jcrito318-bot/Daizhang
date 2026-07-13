@@ -27,10 +27,11 @@ spring:
       test-on-borrow: false
       test-on-return: false
 
-  # H2 控制台（开发调试用，生产可关闭）
+  # H2 控制台（开发调试用，生产环境应关闭）
+  # 默认禁用:开发时通过环境变量 H2_CONSOLE_ENABLED=true 开启
   h2:
     console:
-      enabled: true
+      enabled: ${H2_CONSOLE_ENABLED:false}
       path: /h2-console
       settings:
         # 仅允许本机访问，防止远程未授权访问数据库控制台

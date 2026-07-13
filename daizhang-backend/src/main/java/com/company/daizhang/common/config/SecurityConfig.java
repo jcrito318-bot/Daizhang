@@ -74,8 +74,8 @@ public class SecurityConfig {
                                 "/swagger-resources/**",
                                 "/v3/api-docs/**"
                         ).permitAll()
-                        // 移除 /druid/** 和 /h2-console/** 的 permitAll:
-                        // H2控制台/Druid监控台含敏感信息且可执行SQL,未认证暴露会导致数据库被未授权访问
+                        // H2控制台/Druid监控台含敏感信息且可执行SQL,仅ADMIN角色可访问
+                        .requestMatchers("/h2-console/**", "/druid/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
@@ -85,7 +85,8 @@ public class SecurityConfig {
 
     @Bean
     public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
+        // strength=12:财务系统对密码安全要求较高,提升BCrypt轮数增加暴力破解成本
+        return new BCryptPasswordEncoder(12);
     }
 
     @Bean

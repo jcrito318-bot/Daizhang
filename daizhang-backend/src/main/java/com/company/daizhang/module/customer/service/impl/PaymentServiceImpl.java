@@ -204,7 +204,10 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
         accountSetAccessService.checkOwner(customer.getAccountSetId());
 
         // 若变更了合同,校验新合同存在且归属于同一客户,防止收款记录关联到错误合同
-        if (request.getContractId() != null
+        Long effectiveContractId = request.getContractId() != null
+                ? request.getContractId() : payment.getContractId();
+        if (effectiveContractId != null
+                && request.getContractId() != null
                 && !request.getContractId().equals(payment.getContractId())) {
             ServiceContract newContract = contractMapper.selectById(request.getContractId());
             if (newContract == null) {
@@ -213,6 +216,28 @@ public class PaymentServiceImpl extends ServiceImpl<PaymentRecordMapper, Payment
             if (newContract.getCustomerId() == null
                     || !newContract.getCustomerId().equals(payment.getCustomerId())) {
                 throw new BusinessException(403, "合同不属于该客户，不能关联");
+            }
+        }
+
+        // 金额上限重新校验:updatePayment 使用 ignoreNullValue 拷贝,若 request.amount 非空则覆盖旧值。
+        // 不校验会导致"先创建小额收款绕过 createPayment 校验,再 updatePayment 改大额"的绕过路径。
+        // 校验公式:(该合同下所有收款记录总额 - 当前记录旧金额 + 当前记录新金额) ≤ 合同总额
+        if (effectiveContractId != null && request.getAmount() != null) {
+            ServiceContract contract = contractMapper.selectById(effectiveContractId);
+            if (contract != null) {
+                BigDecimal contractAmount = contract.getAmount() != null ? contract.getAmount() : BigDecimal.ZERO;
+                LambdaQueryWrapper<PaymentRecord> paidWrapper = new LambdaQueryWrapper<>();
+                paidWrapper.eq(PaymentRecord::getContractId, effectiveContractId);
+                BigDecimal otherPaid = BigDecimal.ZERO;
+                for (PaymentRecord p : this.list(paidWrapper)) {
+                    if (p.getAmount() != null && !p.getId().equals(id)) {
+                        otherPaid = otherPaid.add(p.getAmount());
+                    }
+                }
+                BigDecimal newAmount = request.getAmount();
+                if (otherPaid.add(newAmount).compareTo(contractAmount) > 0) {
+                    throw new BusinessException("修改后收款金额超过合同总额，无法更新");
+                }
             }
         }
 

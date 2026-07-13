@@ -73,42 +73,34 @@ public class TaxCalculateServiceImpl implements TaxCalculateService {
         LocalDate endDate = YearMonth.of(year, month).atEndOfMonth();
 
         // 查询销项发票税额合计（状态正常 0）
-        LambdaQueryWrapper<OutputInvoice> outputWrapper = new LambdaQueryWrapper<>();
-        outputWrapper.eq(OutputInvoice::getAccountSetId, accountSetId)
-                .eq(OutputInvoice::getInvoiceStatus, 0)
-                .ge(OutputInvoice::getInvoiceDate, startDate)
-                .le(OutputInvoice::getInvoiceDate, endDate);
-        List<OutputInvoice> outputInvoices = outputInvoiceMapper.selectList(outputWrapper);
-        BigDecimal outputTax = outputInvoices.stream()
-                .map(OutputInvoice::getTaxAmount)
-                .filter(amount -> amount != null)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        List<OutputInvoice> outputInvoices = listOutputInvoices(accountSetId, startDate, endDate);
+        BigDecimal outputTax = sumOutputTax(outputInvoices);
         BigDecimal outputAmount = outputInvoices.stream()
                 .map(OutputInvoice::getAmount)
                 .filter(amount -> amount != null)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         // 查询进项已认证发票税额合计（认证状态 1）
-        LambdaQueryWrapper<InputInvoice> inputWrapper = new LambdaQueryWrapper<>();
-        inputWrapper.eq(InputInvoice::getAccountSetId, accountSetId)
-                .eq(InputInvoice::getAuthStatus, 1)
-                .ge(InputInvoice::getInvoiceDate, startDate)
-                .le(InputInvoice::getInvoiceDate, endDate);
-        List<InputInvoice> inputInvoices = inputInvoiceMapper.selectList(inputWrapper);
-        BigDecimal inputTax = inputInvoices.stream()
-                .map(InputInvoice::getTaxAmount)
-                .filter(amount -> amount != null)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        List<InputInvoice> inputInvoices = listInputInvoices(accountSetId, startDate, endDate);
+        BigDecimal inputTax = sumInputTax(inputInvoices);
         BigDecimal inputAmount = inputInvoices.stream()
                 .map(InputInvoice::getAmount)
                 .filter(amount -> amount != null)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        BigDecimal vatAmount = outputTax.subtract(inputTax);
-        // 留抵时vatAmount为负值，按0处理，避免污染DB并触发误报
-        if (vatAmount.compareTo(BigDecimal.ZERO) < 0) {
-            vatAmount = BigDecimal.ZERO;
-        }
+        // 期初留抵税额:从本年1月累计计算截至上月末的留抵。
+        // 留抵税额可结转下期继续抵扣,不能直接丢弃(原实现留抵时vatAmount按0处理,留抵永久丢失,
+        // 企业无法享受留抵抵扣权益,后续月份多缴增值税)。
+        BigDecimal beginningCredit = calculateCreditCarryforward(accountSetId, year, month);
+
+        // 本期可抵扣进项 = 本期认证进项 + 期初留抵
+        BigDecimal deductibleInput = inputTax.add(beginningCredit);
+        // 应纳增值税 = 销项 - 可抵扣进项;为负表示本期留抵
+        BigDecimal vatRaw = outputTax.subtract(deductibleInput);
+        // 期末留抵(本期留抵结转下期)
+        BigDecimal endingCredit = vatRaw.compareTo(BigDecimal.ZERO) < 0 ? vatRaw.negate() : BigDecimal.ZERO;
+        // 应纳增值税(留抵时为0)
+        BigDecimal vatAmount = vatRaw.compareTo(BigDecimal.ZERO) < 0 ? BigDecimal.ZERO : vatRaw;
 
         TaxCalculationResultVO vo = new TaxCalculationResultVO();
         vo.setTaxType("VAT");
@@ -116,7 +108,7 @@ public class TaxCalculateServiceImpl implements TaxCalculateService {
         vo.setTaxableAmount(outputTax);
         vo.setTaxRate(VAT_RATE_GENERAL);
         vo.setTaxAmount(vatAmount);
-        vo.setCalculationFormula("应纳增值税 = 销项税额 - 进项税额");
+        vo.setCalculationFormula("应纳增值税 = 销项税额 - (进项税额 + 期初留抵)；期末留抵结转下期");
 
         List<TaxCalculationDetailVO> details = new ArrayList<>();
 
@@ -134,8 +126,78 @@ public class TaxCalculateServiceImpl implements TaxCalculateService {
         inputDetail.setTaxAmount(inputTax);
         details.add(inputDetail);
 
+        TaxCalculationDetailVO creditDetail = new TaxCalculationDetailVO();
+        creditDetail.setItemName("期初留抵税额");
+        creditDetail.setAmount(beginningCredit);
+        creditDetail.setRate(null);
+        creditDetail.setTaxAmount(beginningCredit);
+        details.add(creditDetail);
+
+        TaxCalculationDetailVO endingCreditDetail = new TaxCalculationDetailVO();
+        endingCreditDetail.setItemName("期末留抵税额(结转下期)");
+        endingCreditDetail.setAmount(endingCredit);
+        endingCreditDetail.setRate(null);
+        endingCreditDetail.setTaxAmount(endingCredit);
+        details.add(endingCreditDetail);
+
         vo.setDetails(details);
         return vo;
+    }
+
+    /**
+     * 查询销项发票(状态正常0,日期范围内)
+     */
+    private List<OutputInvoice> listOutputInvoices(Long accountSetId, LocalDate startDate, LocalDate endDate) {
+        LambdaQueryWrapper<OutputInvoice> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(OutputInvoice::getAccountSetId, accountSetId)
+                .eq(OutputInvoice::getInvoiceStatus, 0)
+                .ge(OutputInvoice::getInvoiceDate, startDate)
+                .le(OutputInvoice::getInvoiceDate, endDate);
+        return outputInvoiceMapper.selectList(wrapper);
+    }
+
+    /**
+     * 查询进项已认证发票(认证状态1,日期范围内)
+     */
+    private List<InputInvoice> listInputInvoices(Long accountSetId, LocalDate startDate, LocalDate endDate) {
+        LambdaQueryWrapper<InputInvoice> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(InputInvoice::getAccountSetId, accountSetId)
+                .eq(InputInvoice::getAuthStatus, 1)
+                .ge(InputInvoice::getInvoiceDate, startDate)
+                .le(InputInvoice::getInvoiceDate, endDate);
+        return inputInvoiceMapper.selectList(wrapper);
+    }
+
+    private BigDecimal sumOutputTax(List<OutputInvoice> invoices) {
+        return invoices.stream()
+                .map(OutputInvoice::getTaxAmount)
+                .filter(amount -> amount != null)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private BigDecimal sumInputTax(List<InputInvoice> invoices) {
+        return invoices.stream()
+                .map(InputInvoice::getTaxAmount)
+                .filter(amount -> amount != null)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    /**
+     * 计算截至指定月份上月末的期初留抵税额。
+     * 从本年1月累计:credit(end of m) = max(0, credit(end of m-1) + inputTax_m - outputTax_m)。
+     * 留抵可结转下期抵扣,本方法保证历史留抵不丢失。
+     */
+    private BigDecimal calculateCreditCarryforward(Long accountSetId, Integer year, Integer month) {
+        BigDecimal credit = BigDecimal.ZERO;
+        for (int m = 1; m < month; m++) {
+            LocalDate s = LocalDate.of(year, m, 1);
+            LocalDate e = YearMonth.of(year, m).atEndOfMonth();
+            BigDecimal outTax = sumOutputTax(listOutputInvoices(accountSetId, s, e));
+            BigDecimal inTax = sumInputTax(listInputInvoices(accountSetId, s, e));
+            BigDecimal net = credit.add(inTax).subtract(outTax);
+            credit = net.compareTo(BigDecimal.ZERO) > 0 ? net : BigDecimal.ZERO;
+        }
+        return credit;
     }
 
     @Override

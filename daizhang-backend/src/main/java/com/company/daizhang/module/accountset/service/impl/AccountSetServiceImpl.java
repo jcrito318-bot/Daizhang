@@ -12,10 +12,16 @@ import com.company.daizhang.common.utils.SecurityUtils;
 import com.company.daizhang.module.accountset.dto.AccountSetCreateRequest;
 import com.company.daizhang.module.accountset.dto.AccountSetQueryRequest;
 import com.company.daizhang.module.accountset.dto.AccountSetUpdateRequest;
+import com.company.daizhang.module.accountset.entity.AccountBalance;
 import com.company.daizhang.module.accountset.entity.AccountPeriod;
 import com.company.daizhang.module.accountset.entity.AccountSet;
+import com.company.daizhang.module.accountset.entity.SubjectBalance;
+import com.company.daizhang.module.accountset.entity.UserAccountSet;
+import com.company.daizhang.module.accountset.mapper.AccountBalanceMapper;
 import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
 import com.company.daizhang.module.accountset.mapper.AccountSetMapper;
+import com.company.daizhang.module.accountset.mapper.SubjectBalanceMapper;
+import com.company.daizhang.module.accountset.mapper.UserAccountSetMapper;
 import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.accountset.service.AccountSetService;
 import com.company.daizhang.module.accountset.vo.AccountSetVO;
@@ -50,6 +56,9 @@ public class AccountSetServiceImpl extends ServiceImpl<AccountSetMapper, Account
     private final SubjectService subjectService;
     private final VoucherMapper voucherMapper;
     private final VoucherWordMapper voucherWordMapper;
+    private final AccountBalanceMapper accountBalanceMapper;
+    private final SubjectBalanceMapper subjectBalanceMapper;
+    private final UserAccountSetMapper userAccountSetMapper;
     private final AccountSetAccessService accountSetAccessService;
     
     @Override
@@ -251,6 +260,25 @@ public class AccountSetServiceImpl extends ServiceImpl<AccountSetMapper, Account
         LambdaQueryWrapper<Subject> subjectWrapper = new LambdaQueryWrapper<>();
         subjectWrapper.eq(Subject::getAccountSetId, id);
         subjectMapper.delete(subjectWrapper);
+
+        // 删除凭证字模板(initAccountSet 中按账套复制的模板,不清理会成为孤儿数据)
+        LambdaQueryWrapper<VoucherWord> wordWrapper = new LambdaQueryWrapper<>();
+        wordWrapper.eq(VoucherWord::getAccountSetId, id);
+        voucherWordMapper.delete(wordWrapper);
+
+        // 删除科目余额表/账户余额表(结账时生成的期间余额数据,不清理会成为孤儿数据)
+        LambdaQueryWrapper<SubjectBalance> sbWrapper = new LambdaQueryWrapper<>();
+        sbWrapper.eq(SubjectBalance::getAccountSetId, id);
+        subjectBalanceMapper.delete(sbWrapper);
+
+        LambdaQueryWrapper<AccountBalance> abWrapper = new LambdaQueryWrapper<>();
+        abWrapper.eq(AccountBalance::getAccountSetId, id);
+        accountBalanceMapper.delete(abWrapper);
+
+        // 删除用户-账套关联(IDOR授权基础数据,不清理会导致已删除账套仍出现在用户可访问列表中)
+        LambdaQueryWrapper<UserAccountSet> uasWrapper = new LambdaQueryWrapper<>();
+        uasWrapper.eq(UserAccountSet::getAccountSetId, id);
+        userAccountSetMapper.delete(uasWrapper);
         
         log.info("删除账套成功，账套ID: {}, 账套编码: {}", id, accountSet.getCode());
     }

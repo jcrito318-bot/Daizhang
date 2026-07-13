@@ -189,11 +189,13 @@ public class PeriodServiceImpl implements PeriodService {
         }
 
         // 3. 检查本期凭证是否全部过账
+        // 仅统计"未审核(0)+已审核(1)"的凭证,作废凭证(3)不应阻塞结账,
+        // 否则用户作废一张凭证后该期间永远无法结账(原 .ne(POSTED) 会把作废凭证计入未过账数)
         LambdaQueryWrapper<Voucher> unpostWrapper = new LambdaQueryWrapper<>();
         unpostWrapper.eq(Voucher::getAccountSetId, accountSetId)
                     .eq(Voucher::getYear, year)
                     .eq(Voucher::getMonth, month)
-                    .ne(Voucher::getStatus, VoucherStatus.POSTED.getCode());
+                    .in(Voucher::getStatus, VoucherStatus.UNAUDITED.getCode(), VoucherStatus.AUDITED.getCode());
         long unpostedCount = voucherMapper.selectCount(unpostWrapper);
         if (unpostedCount > 0) {
             result.setSuccess(false);

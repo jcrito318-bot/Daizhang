@@ -97,18 +97,22 @@ public class AccountPeriodServiceImpl implements AccountPeriodService {
         }
 
         // 校验本期凭证是否全部过账
+        // 仅统计"未审核(0)+已审核(1)"的凭证,作废凭证(3)不应阻塞结账,
+        // 否则用户作废一张凭证后该期间永远无法结账(原 .ne(POSTED) 会把作废凭证计入未过账数)
         LambdaQueryWrapper<Voucher> unpostWrapper = new LambdaQueryWrapper<>();
         unpostWrapper.eq(Voucher::getAccountSetId, accountSetId)
                     .eq(Voucher::getYear, year)
                     .eq(Voucher::getMonth, month)
-                    .ne(Voucher::getStatus, VoucherStatus.POSTED.getCode());
+                    .in(Voucher::getStatus, VoucherStatus.UNAUDITED.getCode(), VoucherStatus.AUDITED.getCode());
         long unpostedCount = voucherMapper.selectCount(unpostWrapper);
         if (unpostedCount > 0) {
             throw new BusinessException(400, "存在" + unpostedCount + "张未过账的凭证，无法结账");
         }
 
-        // 试算平衡校验:结账前必须确保本期借贷发生额平衡,否则会固化错误余额
-        // 原实现仅校验凭证审核+过账,未校验试算平衡,可关闭余额不平的期间,违反复式记账原则
+        // 试算平衡校验:结账前必须确保借贷平衡,否则会固化错误余额。
+        // 必须校验"期初+本期"合计平衡(期末累计借贷平衡),而非仅本期发生额平衡——
+        // 否则当期初余额录入错误(借贷不平)时,只要本期发生额借贷相等即可通过结账,
+        // 错误的期初数据被固化,资产负债表"资产=负债+所有者权益"将永远不平。
         LambdaQueryWrapper<AccountBalance> balanceWrapper = new LambdaQueryWrapper<>();
         balanceWrapper.eq(AccountBalance::getAccountSetId, accountSetId)
                      .eq(AccountBalance::getYear, year)
@@ -117,8 +121,12 @@ public class AccountPeriodServiceImpl implements AccountPeriodService {
         BigDecimal totalDebit = BigDecimal.ZERO;
         BigDecimal totalCredit = BigDecimal.ZERO;
         for (AccountBalance b : balances) {
-            totalDebit = totalDebit.add(b.getPeriodDebit() != null ? b.getPeriodDebit() : BigDecimal.ZERO);
-            totalCredit = totalCredit.add(b.getPeriodCredit() != null ? b.getPeriodCredit() : BigDecimal.ZERO);
+            // 期初借方 + 本期借方借方发生额
+            totalDebit = totalDebit.add(b.getBeginDebit() != null ? b.getBeginDebit() : BigDecimal.ZERO)
+                    .add(b.getPeriodDebit() != null ? b.getPeriodDebit() : BigDecimal.ZERO);
+            // 期初贷方 + 本期贷方发生额
+            totalCredit = totalCredit.add(b.getBeginCredit() != null ? b.getBeginCredit() : BigDecimal.ZERO)
+                    .add(b.getPeriodCredit() != null ? b.getPeriodCredit() : BigDecimal.ZERO);
         }
         if (totalDebit.compareTo(totalCredit) != 0) {
             throw new BusinessException(400, "试算不平衡，借方合计" + totalDebit + "≠贷方合计" + totalCredit + "，无法结账");

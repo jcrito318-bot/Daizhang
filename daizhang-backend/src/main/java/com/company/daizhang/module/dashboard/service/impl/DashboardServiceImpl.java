@@ -46,11 +46,20 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Override
     @Transactional(readOnly = true)
-    public DashboardVO getDashboard() {
+    public DashboardVO getDashboard(Long accountSetId) {
         DashboardVO vo = new DashboardVO();
 
         // 数据级隔离:仅查询当前用户可访问账套及其关联数据(超级管理员返回null表示不限制)
         Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        // 可选账套过滤:若指定了 accountSetId,则在可访问范围内进一步限定到该账套,
+        // 避免前端传入的 accountSetId 被静默丢弃。无权访问该账套时返回空结果集。
+        if (accountSetId != null && accountSetId > 0) {
+            if (accessibleIds == null || accessibleIds.contains(accountSetId)) {
+                accessibleIds = Collections.singleton(accountSetId);
+            } else {
+                accessibleIds = Collections.emptySet();
+            }
+        }
 
         // 1. 查询账套（限量500防止全量加载OOM）
         LambdaQueryWrapper<AccountSet> asWrapper = new LambdaQueryWrapper<>();
@@ -138,6 +147,15 @@ public class DashboardServiceImpl implements DashboardService {
                 .eq(Voucher::getStatus, 0);
         applyAccessFilter(unauditedCountWrapper, Voucher::getAccountSetId, accessibleIds);
         long unauditedVoucherCount = voucherMapper.selectCount(unauditedCountWrapper);
+        // 本月凭证总数(按当前年月统计,与未审核凭证数区分,避免首页"本月凭证"与"待审核"两块卡片显示相同数字)
+        LocalDateTime now = LocalDateTime.now();
+        int currentYear = now.getYear();
+        int currentMonth = now.getMonthValue();
+        LambdaQueryWrapper<Voucher> monthVoucherWrapper = new LambdaQueryWrapper<Voucher>()
+                .eq(Voucher::getYear, currentYear)
+                .eq(Voucher::getMonth, currentMonth);
+        applyAccessFilter(monthVoucherWrapper, Voucher::getAccountSetId, accessibleIds);
+        long monthVoucherCount = voucherMapper.selectCount(monthVoucherWrapper);
         // 未申报税务数(status=0,不限制)
         LambdaQueryWrapper<TaxDeclaration> undeclaredCountWrapper = new LambdaQueryWrapper<TaxDeclaration>()
                 .eq(TaxDeclaration::getStatus, 0);
@@ -145,7 +163,8 @@ public class DashboardServiceImpl implements DashboardService {
         long undeclaredTaxCount = taxDeclarationMapper.selectCount(undeclaredCountWrapper);
 
         vo.setSummary(buildSummary(totalAccountSets, activeAccountSets, generalTaxpayerCount, smallTaxpayerCount,
-                pendingTaskCount, completedTaskCount, unauditedVoucherCount, undeclaredTaxCount, overdueTodoCount));
+                pendingTaskCount, completedTaskCount, unauditedVoucherCount, undeclaredTaxCount, overdueTodoCount,
+                monthVoucherCount));
 
         // 6. 构建客户列表摘要
         vo.setCustomers(buildCustomerSummaries(accountSets, taskByAccountSet, voucherByAccountSet, taxByAccountSet));
@@ -265,7 +284,7 @@ public class DashboardServiceImpl implements DashboardService {
                                           long generalTaxpayerCount, long smallTaxpayerCount,
                                           long pendingTaskCount, long completedTaskCount,
                                           long unauditedVoucherCount, long undeclaredTaxCount,
-                                          long overdueTodoCount) {
+                                          long overdueTodoCount, long monthVoucherCount) {
         DashboardSummary s = new DashboardSummary();
         // 统计数均由独立的selectCount查询得出(不加LIMIT),避免超过500条时计数失真
         s.setTotalAccountSets((int) totalAccountSets);
@@ -275,6 +294,7 @@ public class DashboardServiceImpl implements DashboardService {
         s.setPendingTaskCount((int) pendingTaskCount);
         s.setCompletedTaskCount((int) completedTaskCount);
         s.setUnauditedVoucherCount((int) unauditedVoucherCount);
+        s.setMonthVoucherCount((int) monthVoucherCount);
         s.setUndeclaredTaxCount((int) undeclaredTaxCount);
         s.setOverdueTodoCount((int) overdueTodoCount);
         return s;

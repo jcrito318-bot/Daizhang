@@ -29,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 用户管理控制器
@@ -46,13 +47,15 @@ public class SysUserController {
     
     @Operation(summary = "分页查询用户")
     @GetMapping("/page")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<PageResult<UserVO>> page(UserQueryRequest request) {
         PageResult<UserVO> page = userService.pageUsers(request);
         return Result.success(page);
     }
-    
+
     @Operation(summary = "根据ID查询用户")
     @GetMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<UserVO> getById(@PathVariable Long id) {
         UserVO user = userService.getUserById(id);
         return Result.success(user);
@@ -85,21 +88,33 @@ public class SysUserController {
     @Operation(summary = "重置密码")
     @PutMapping("/{id}/password")
     @PreAuthorize("hasRole('ADMIN')")
-    public Result<Void> resetPassword(@PathVariable Long id, @RequestParam String newPassword) {
+    public Result<Void> resetPassword(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        // 密码走请求体而非 query 参数,避免明文密码出现在 URL/浏览器历史/网关 access log 中
+        String newPassword = body == null ? null : body.get("newPassword");
+        if (StrUtil.isBlank(newPassword)) {
+            return Result.error(400, "新密码不能为空");
+        }
         userService.resetPassword(id, newPassword);
         return Result.success();
     }
-    
+
     @Operation(summary = "更新状态")
     @PutMapping("/{id}/status")
     @PreAuthorize("hasRole('ADMIN')")
-    public Result<Void> updateStatus(@PathVariable Long id, @RequestParam Integer status) {
+    public Result<Void> updateStatus(@PathVariable Long id, @RequestBody Map<String, Object> body) {
+        // 改为请求体传输,与 resetPassword 保持一致,避免参数暴露在 URL
+        Object statusObj = body == null ? null : body.get("status");
+        if (statusObj == null) {
+            return Result.error(400, "状态不能为空");
+        }
+        Integer status = ((Number) statusObj).intValue();
         userService.updateStatus(id, status);
         return Result.success();
     }
 
     @Operation(summary = "导出用户列表Excel")
     @GetMapping("/export")
+    @PreAuthorize("hasRole('ADMIN')")
     public void export(UserQueryRequest request, HttpServletResponse response) throws IOException {
         LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<>();
         wrapper.like(StrUtil.isNotBlank(request.getUsername()), SysUser::getUsername, request.getUsername())

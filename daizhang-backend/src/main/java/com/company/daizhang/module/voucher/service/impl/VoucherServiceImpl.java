@@ -390,7 +390,7 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         checkPeriodNotClosed(checkPeriodExists(voucher.getAccountSetId(), voucher.getYear(), voucher.getMonth()));
 
         // 已作废的凭证不能审核
-        if (voucher.getStatus() != null && voucher.getStatus() == 3) {
+        if (voucher.getStatus() != null && voucher.getStatus().equals(VoucherStatus.VOIDED.getCode())) {
             throw new BusinessException(ErrorCode.VOUCHER_ALREADY_CANCELED, "已作废的凭证不能审核");
         }
 
@@ -445,12 +445,18 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         voucher.setAuditBy(null);
         voucher.setAuditTime(null);
         // 使用updateById保留@Version乐观锁(OptimisticLockerInnerInterceptor仅拦截updateById(entity),
-        // 不拦截update(wrapper))。限制:MyBatis-Plus默认NOT_NULL策略不会将null字段写入UPDATE SET子句,
-        // auditBy/auditTime的清空依赖实体字段策略;此处优先保证并发安全,与auditVoucher保持一致。
+        // 不拦截update(wrapper))。
         boolean updated = this.updateById(voucher);
         if (!updated) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "凭证更新失败(并发冲突)，请重试");
         }
+        // 显式清空审核人/审核时间:MyBatis-Plus 默认 NOT_NULL 策略不会把 null 写入 UPDATE SET 子句,
+        // 上面 updateById 无法清空 auditBy/auditTime,必须用 LambdaUpdateWrapper.set(...,null) 显式置空,
+        // 否则反审核后审核人/审核时间仍残留,审计轨迹失真(查凭证看到"未审核但有审核人")。
+        this.update(new LambdaUpdateWrapper<Voucher>()
+                .eq(Voucher::getId, id)
+                .set(Voucher::getAuditBy, null)
+                .set(Voucher::getAuditTime, null));
 
         log.info("反审核凭证成功，凭证ID: {}, 凭证号: {}", id, voucher.getVoucherNo());
     }
@@ -482,6 +488,15 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             } catch (BusinessException e) {
                 failedIds.add(id);
                 errors.add("凭证" + voucher.getVoucherNo() + " 无访问权限:" + e.getMessage());
+                continue;
+            }
+            // 期间校验:已结账期间内的凭证不可审核,与单条 auditVoucher 保持一致,
+            // 避免破坏结账冻结(批量审核改状态却不更新余额,导致结账快照与凭证状态不一致)
+            try {
+                checkPeriodNotClosed(checkPeriodExists(voucher.getAccountSetId(), voucher.getYear(), voucher.getMonth()));
+            } catch (BusinessException e) {
+                failedIds.add(id);
+                errors.add("凭证" + voucher.getVoucherNo() + " 期间已结账或不存在:" + e.getMessage());
                 continue;
             }
             if (voucher.getStatus() != null && voucher.getStatus() != 0) {
@@ -544,6 +559,15 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             } catch (BusinessException e) {
                 failedIds.add(id);
                 errors.add("凭证" + voucher.getVoucherNo() + " 无访问权限:" + e.getMessage());
+                continue;
+            }
+            // 期间校验:已结账期间内的凭证不可反审核,与单条 unauditVoucher 保持一致,
+            // 避免破坏结账冻结
+            try {
+                checkPeriodNotClosed(checkPeriodExists(voucher.getAccountSetId(), voucher.getYear(), voucher.getMonth()));
+            } catch (BusinessException e) {
+                failedIds.add(id);
+                errors.add("凭证" + voucher.getVoucherNo() + " 期间已结账或不存在:" + e.getMessage());
                 continue;
             }
             // 只有已审核且未过账的凭证才能反审核
@@ -652,12 +676,18 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         voucher.setPostBy(null);
         voucher.setPostTime(null);
         // 使用updateById保留@Version乐观锁(OptimisticLockerInnerInterceptor仅拦截updateById(entity),
-        // 不拦截update(wrapper))。限制:MyBatis-Plus默认NOT_NULL策略不会将null字段写入UPDATE SET子句,
-        // postBy/postTime的清空依赖实体字段策略;此处优先保证并发安全,与postVoucher保持一致。
+        // 不拦截update(wrapper))。
         boolean updated = this.updateById(voucher);
         if (!updated) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "凭证更新失败(并发冲突)，请重试");
         }
+        // 显式清空过账人/过账时间:NOT_NULL 策略下 updateById 无法清空 null 字段,
+        // 必须用 LambdaUpdateWrapper.set(...,null) 显式置空,否则反过账后 postBy/postTime 残留,
+        // 财务对账时无法回溯凭证的真实首次过账时间。
+        this.update(new LambdaUpdateWrapper<Voucher>()
+                .eq(Voucher::getId, id)
+                .set(Voucher::getPostBy, null)
+                .set(Voucher::getPostTime, null));
 
         log.info("反过账凭证成功，凭证ID: {}, 凭证号: {}", id, voucher.getVoucherNo());
     }
@@ -881,14 +911,14 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         checkPeriodNotClosed(checkPeriodExists(voucher.getAccountSetId(), voucher.getYear(), voucher.getMonth()));
 
         // 已作废不能重复作废
-        if (voucher.getStatus() != null && voucher.getStatus() == 3) {
+        if (voucher.getStatus() != null && voucher.getStatus().equals(VoucherStatus.VOIDED.getCode())) {
             throw new BusinessException(ErrorCode.VOUCHER_ALREADY_CANCELED);
         }
         // 已过账凭证不能直接作废，需先反过账
         if (voucher.getStatus() != null && voucher.getStatus() == 2) {
             throw new BusinessException("已过账凭证不能直接作废，请先反过账");
         }
-        voucher.setStatus(3);
+        voucher.setStatus(VoucherStatus.VOIDED.getCode());
         boolean updated = this.updateById(voucher);
         if (!updated) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "凭证更新失败(并发冲突)，请重试");
