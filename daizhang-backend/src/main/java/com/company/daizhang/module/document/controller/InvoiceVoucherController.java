@@ -39,7 +39,7 @@ public class InvoiceVoucherController {
 
     @Operation(summary = "批量进项发票生成凭证")
     @PostMapping("/input/batch")
-    @RequireAccountSetAccess
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER)
     public Result<List<Long>> batchGenerateInputVouchers(@RequestParam Long accountSetId,
                                                           @RequestParam(required = false) String startDate,
                                                           @RequestParam(required = false) String endDate) {
@@ -49,7 +49,7 @@ public class InvoiceVoucherController {
 
     @Operation(summary = "批量销项发票生成凭证")
     @PostMapping("/output/batch")
-    @RequireAccountSetAccess
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER)
     public Result<List<Long>> batchGenerateOutputVouchers(@RequestParam Long accountSetId,
                                                           @RequestParam(required = false) String startDate,
                                                           @RequestParam(required = false) String endDate) {

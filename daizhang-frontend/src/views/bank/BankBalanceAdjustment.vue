@@ -235,8 +235,14 @@ async function loadReconciliationList() {
   }
 }
 
-function handleViewDetail(row: BankReconciliationVO) {
-  currentReconciliation.value = row
+async function handleViewDetail(row: BankReconciliationVO) {
+  try {
+    const res = await bankApi.getReconciliation(row.id)
+    currentReconciliation.value = res.data
+  } catch {
+    // 获取详情失败时回退到列表行数据
+    currentReconciliation.value = row
+  }
   detailDialogVisible.value = true
 }
 

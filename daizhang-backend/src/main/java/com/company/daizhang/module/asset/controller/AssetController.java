@@ -30,6 +30,7 @@ public class AssetController {
 
     @Operation(summary = "分页查询资产分类")
     @GetMapping("/category/page")
+    @RequireAccountSetAccess
     public Result<PageResult<AssetCategoryVO>> pageCategories(AssetCategoryQueryRequest request) {
         PageResult<AssetCategoryVO> page = assetService.pageCategories(request);
         return Result.success(page);
@@ -75,6 +76,7 @@ public class AssetController {
 
     @Operation(summary = "分页查询固定资产")
     @GetMapping("/page")
+    @RequireAccountSetAccess
     public Result<PageResult<FixedAssetVO>> pageAssets(FixedAssetQueryRequest request) {
         PageResult<FixedAssetVO> page = assetService.pageAssets(request);
         return Result.success(page);
@@ -129,6 +131,7 @@ public class AssetController {
 
     @Operation(summary = "分页查询折旧记录")
     @GetMapping("/depreciation/page")
+    @RequireAccountSetAccess
     public Result<PageResult<DepreciationRecordVO>> pageDepreciationRecords(DepreciationRecordQueryRequest request) {
         PageResult<DepreciationRecordVO> page = assetService.pageDepreciationRecords(request);
         return Result.success(page);
@@ -143,6 +146,7 @@ public class AssetController {
 
     @Operation(summary = "计提折旧")
     @PostMapping("/depreciation/calculate")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER)
     public Result<Void> calculateDepreciation(@Valid @RequestBody DepreciationRequest request) {
         assetService.calculateDepreciation(request);
         return Result.success();
@@ -157,6 +161,7 @@ public class AssetController {
 
     @Operation(summary = "批量生成折旧凭证")
     @PostMapping("/depreciation/batch-voucher")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER)
     public Result<Void> batchGenerateDepreciationVoucher(@Valid @RequestBody DepreciationRequest request) {
         assetService.batchGenerateDepreciationVoucher(request);
         return Result.success();

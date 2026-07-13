@@ -1098,6 +1098,9 @@ public class ReportServiceImpl implements ReportService {
 
         BigDecimal operatingRevenue = BigDecimal.ZERO;
         BigDecimal operatingCost = BigDecimal.ZERO;
+        BigDecimal periodExpense = BigDecimal.ZERO;
+        BigDecimal nonOperatingExpense = BigDecimal.ZERO;
+        BigDecimal incomeTaxExpense = BigDecimal.ZERO;
         BigDecimal totalProfit = BigDecimal.ZERO;
         BigDecimal totalAssets = BigDecimal.ZERO;
         BigDecimal totalLiabilities = BigDecimal.ZERO;
@@ -1113,18 +1116,35 @@ public class ReportServiceImpl implements ReportService {
                 continue;
             }
 
-            // 收入类（损益-贷方）
+            // 收入类（损益-贷方）:按净额计算(贷方-借方),与利润表口径一致
             if (code.startsWith("5001") || code.startsWith("5051") || code.startsWith("5301")
                     || code.startsWith("5111")) {
-                BigDecimal amt = balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO;
-                operatingRevenue = operatingRevenue.add(amt);
+                BigDecimal credit = balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO;
+                BigDecimal debit = balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO;
+                operatingRevenue = operatingRevenue.add(credit.subtract(debit));
             }
-            // 成本费用类（损益-借方）
-            if (code.startsWith("5401") || code.startsWith("5402") || code.startsWith("5403")
-                    || code.startsWith("5601") || code.startsWith("5602") || code.startsWith("5603")
-                    || code.startsWith("5711") || code.startsWith("5801")) {
-                BigDecimal amt = balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO;
-                operatingCost = operatingCost.add(amt);
+            // 营业成本(5401+5402)+税金及附加(5403):按净额计算(借方-贷方)
+            if (code.startsWith("5401") || code.startsWith("5402") || code.startsWith("5403")) {
+                BigDecimal debit = balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO;
+                BigDecimal credit = balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO;
+                operatingCost = operatingCost.add(debit.subtract(credit));
+            }
+            // 期间费用(5601+5602+5603):按净额计算
+            if (code.startsWith("5601") || code.startsWith("5602") || code.startsWith("5603")) {
+                BigDecimal debit = balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO;
+                BigDecimal credit = balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO;
+                periodExpense = periodExpense.add(debit.subtract(credit));
+            }
+            // 营业外支出(5711)+所得税费用(5801):按净额计算,单独累计
+            if (code.startsWith("5711")) {
+                BigDecimal debit = balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO;
+                BigDecimal credit = balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO;
+                nonOperatingExpense = nonOperatingExpense.add(debit.subtract(credit));
+            }
+            if (code.startsWith("5801")) {
+                BigDecimal debit = balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO;
+                BigDecimal credit = balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO;
+                incomeTaxExpense = incomeTaxExpense.add(debit.subtract(credit));
             }
             // 资产类(按净额:借-贷,处理备抵科目如累计折旧等贷方余额科目)
             if ("资产".equals(subject.getCategory())) {
@@ -1146,12 +1166,17 @@ public class ReportServiceImpl implements ReportService {
             }
         }
 
-        // 利润总额 = 收入 - 成本费用
-        totalProfit = operatingRevenue.subtract(operatingCost);
+        // 利润总额 = 收入 - 营业成本 - 期间费用 - 营业外支出(不含所得税)
+        // 净利润 = 利润总额 - 所得税费用
+        totalProfit = operatingRevenue.subtract(operatingCost).subtract(periodExpense).subtract(nonOperatingExpense);
+        BigDecimal netProfit = totalProfit.subtract(incomeTaxExpense);
 
         indicators.put("营业收入", operatingRevenue);
         indicators.put("营业成本", operatingCost);
+        indicators.put("期间费用", periodExpense);
         indicators.put("利润总额", totalProfit);
+        indicators.put("所得税费用", incomeTaxExpense);
+        indicators.put("净利润", netProfit);
         indicators.put("资产总额", totalAssets);
         indicators.put("负债总额", totalLiabilities);
         indicators.put("所有者权益", totalEquity);

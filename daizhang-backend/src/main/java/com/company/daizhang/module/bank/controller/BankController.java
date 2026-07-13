@@ -48,6 +48,7 @@ public class BankController {
 
     @Operation(summary = "分页查询银行流水")
     @GetMapping("/transaction/page")
+    @RequireAccountSetAccess
     public Result<PageResult<BankTransactionVO>> pageTransactions(BankTransactionQueryRequest request) {
         PageResult<BankTransactionVO> page = bankService.pageBankTransactions(request);
         return Result.success(page);
@@ -75,6 +76,7 @@ public class BankController {
 
     @Operation(summary = "自动匹配")
     @PostMapping("/match/auto")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER)
     public Result<Integer> autoMatch(@Valid @RequestBody AutoMatchRequest request) {
         Integer count = bankService.autoMatch(request);
         return Result.success("自动匹配完成，共匹配" + count + "条", count);
@@ -82,6 +84,7 @@ public class BankController {
 
     @Operation(summary = "手动匹配")
     @PostMapping("/match/manual")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER)
     public Result<Void> manualMatch(@Valid @RequestBody ManualMatchRequest request) {
         bankService.manualMatch(request);
         return Result.success();
@@ -96,6 +99,7 @@ public class BankController {
 
     @Operation(summary = "生成对账单")
     @PostMapping("/reconciliation/generate")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER)
     public Result<BankReconciliationVO> generateReconciliation(@Valid @RequestBody ReconciliationGenerateRequest request) {
         BankReconciliationVO vo = bankService.generateReconciliation(request);
         return Result.success(vo);
@@ -110,6 +114,7 @@ public class BankController {
 
     @Operation(summary = "分页查询对账单")
     @GetMapping("/reconciliation/page")
+    @RequireAccountSetAccess
     public Result<PageResult<BankReconciliationVO>> pageReconciliations(BankTransactionQueryRequest request) {
         PageResult<BankReconciliationVO> page = bankService.pageReconciliations(request);
         return Result.success(page);
@@ -125,6 +130,7 @@ public class BankController {
 
     @Operation(summary = "导出余额调节表")
     @GetMapping("/reconciliation/{id}/export")
+    @RequireAccountSetAccess
     public void exportReconciliation(@PathVariable Long id, HttpServletResponse response) {
         byte[] data = bankService.exportReconciliation(id);
         try {

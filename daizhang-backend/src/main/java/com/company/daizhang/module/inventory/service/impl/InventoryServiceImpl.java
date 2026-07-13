@@ -196,8 +196,10 @@ public class InventoryServiceImpl implements InventoryService {
         BigDecimal totalAmt = BigDecimal.ZERO;
         if (request.getDetails() != null) {
             for (InventoryInCreateRequest.InDetailDTO d : request.getDetails()) {
-                BigDecimal amt = d.getQuantity().multiply(d.getUnitPrice());
-                totalQty = totalQty.add(d.getQuantity());
+                BigDecimal quantity = d.getQuantity() != null ? d.getQuantity() : BigDecimal.ZERO;
+                BigDecimal unitPrice = d.getUnitPrice() != null ? d.getUnitPrice() : BigDecimal.ZERO;
+                BigDecimal amt = quantity.multiply(unitPrice);
+                totalQty = totalQty.add(quantity);
                 totalAmt = totalAmt.add(amt);
             }
         }
@@ -232,7 +234,9 @@ public class InventoryServiceImpl implements InventoryService {
                 detail.setUnit(item.getUnit());
                 detail.setQuantity(d.getQuantity());
                 detail.setUnitPrice(d.getUnitPrice());
-                detail.setAmount(d.getQuantity().multiply(d.getUnitPrice()).setScale(2, RoundingMode.HALF_UP));
+                BigDecimal qty = d.getQuantity() != null ? d.getQuantity() : BigDecimal.ZERO;
+                BigDecimal price = d.getUnitPrice() != null ? d.getUnitPrice() : BigDecimal.ZERO;
+                detail.setAmount(qty.multiply(price).setScale(2, RoundingMode.HALF_UP));
                 detail.setRemark(d.getRemark());
                 inDetailMapper.insert(detail);
             }
@@ -268,7 +272,9 @@ public class InventoryServiceImpl implements InventoryService {
                 if (item == null) {
                     throw new BusinessException(ErrorCode.PARAM_ERROR, "商品不存在: " + d.getItemId());
                 }
-                BigDecimal amt = d.getQuantity().multiply(d.getUnitPrice());
+                BigDecimal quantity = d.getQuantity() != null ? d.getQuantity() : BigDecimal.ZERO;
+                BigDecimal unitPrice = d.getUnitPrice() != null ? d.getUnitPrice() : BigDecimal.ZERO;
+                BigDecimal amt = quantity.multiply(unitPrice);
                 totalQty = totalQty.add(d.getQuantity());
                 totalAmt = totalAmt.add(amt);
                 InventoryInDetail detail = new InventoryInDetail();
@@ -385,7 +391,9 @@ public class InventoryServiceImpl implements InventoryService {
         BigDecimal totalAmt = BigDecimal.ZERO;
         if (request.getDetails() != null) {
             for (InventoryOutCreateRequest.OutDetailDTO d : request.getDetails()) {
-                BigDecimal amt = d.getQuantity().multiply(d.getUnitPrice());
+                BigDecimal quantity = d.getQuantity() != null ? d.getQuantity() : BigDecimal.ZERO;
+                BigDecimal unitPrice = d.getUnitPrice() != null ? d.getUnitPrice() : BigDecimal.ZERO;
+                BigDecimal amt = quantity.multiply(unitPrice);
                 totalQty = totalQty.add(d.getQuantity());
                 totalAmt = totalAmt.add(amt);
             }
@@ -422,7 +430,9 @@ public class InventoryServiceImpl implements InventoryService {
                 detail.setUnit(item.getUnit());
                 detail.setQuantity(d.getQuantity());
                 detail.setUnitPrice(d.getUnitPrice());
-                detail.setAmount(d.getQuantity().multiply(d.getUnitPrice()).setScale(2, RoundingMode.HALF_UP));
+                BigDecimal qty = d.getQuantity() != null ? d.getQuantity() : BigDecimal.ZERO;
+                BigDecimal price = d.getUnitPrice() != null ? d.getUnitPrice() : BigDecimal.ZERO;
+                detail.setAmount(qty.multiply(price).setScale(2, RoundingMode.HALF_UP));
                 detail.setUnitCost(BigDecimal.ZERO);
                 detail.setCostAmount(BigDecimal.ZERO);
                 detail.setRemark(d.getRemark());
@@ -458,7 +468,9 @@ public class InventoryServiceImpl implements InventoryService {
             for (InventoryOutCreateRequest.OutDetailDTO d : request.getDetails()) {
                 InventoryItem item = itemMapper.selectById(d.getItemId());
                 if (item == null) continue;
-                BigDecimal amt = d.getQuantity().multiply(d.getUnitPrice());
+                BigDecimal quantity = d.getQuantity() != null ? d.getQuantity() : BigDecimal.ZERO;
+                BigDecimal unitPrice = d.getUnitPrice() != null ? d.getUnitPrice() : BigDecimal.ZERO;
+                BigDecimal amt = quantity.multiply(unitPrice);
                 totalQty = totalQty.add(d.getQuantity());
                 totalAmt = totalAmt.add(amt);
                 InventoryOutDetail detail = new InventoryOutDetail();

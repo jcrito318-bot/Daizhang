@@ -50,7 +50,8 @@ public class TaxCalculateServiceImpl implements TaxCalculateService {
     private static final BigDecimal SURCHARGE_EDU = new BigDecimal("0.03");
     private static final BigDecimal SURCHARGE_LOCAL_EDU = new BigDecimal("0.02");
     private static final BigDecimal CIT_RATE_NORMAL = new BigDecimal("0.25");
-    private static final BigDecimal CIT_RATE_SMALL = new BigDecimal("0.20");
+    // 小微企业优惠税率:应纳税所得额×25%×20%=5%(2023-2027年政策)
+    private static final BigDecimal CIT_RATE_SMALL = new BigDecimal("0.05");
     /**
      * 小微企业优惠判定阈值（年度累计利润，现行政策300万）
      */
@@ -189,6 +190,12 @@ public class TaxCalculateServiceImpl implements TaxCalculateService {
      */
     private BigDecimal calculateCreditCarryforward(Long accountSetId, Integer year, Integer month) {
         BigDecimal credit = BigDecimal.ZERO;
+        // 跨年留抵结转:递归查询上年末留抵税额作为本年期初留抵
+        // 留抵税额可跨年结转(不设期限),不能仅从本年1月起算,否则上年末留抵永久丢失
+        // month=13表示计算该年12月末的留抵(全年累计),用于递归查上年
+        if (year > 2000) {
+            credit = calculateCreditCarryforward(accountSetId, year - 1, 13);
+        }
         for (int m = 1; m < month; m++) {
             LocalDate s = LocalDate.of(year, m, 1);
             LocalDate e = YearMonth.of(year, m).atEndOfMonth();

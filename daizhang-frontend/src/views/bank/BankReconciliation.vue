@@ -30,6 +30,7 @@
               <el-button
                 type="primary"
                 size="small"
+                :loading="manualMatchLoading"
                 :disabled="selectedTransactions.length === 0 || !selectedVoucher"
                 @click="handleManualMatch"
               >
@@ -174,6 +175,7 @@ const filterForm = reactive({
 const transactionsLoading = ref(false)
 const vouchersLoading = ref(false)
 const autoMatchLoading = ref(false)
+const manualMatchLoading = ref(false)
 
 const unmatchedTransactions = ref<BankTransactionVO[]>([])
 const unmatchedVouchers = ref<VoucherVO[]>([])
@@ -234,7 +236,7 @@ async function loadUnmatchedVouchers() {
     const res = await voucherApi.getPage(params)
     // 过滤出未与银行流水匹配的凭证（没有关联 voucherNo 的简单方式：根据状态过滤）
     // 这里简化处理，取所有已过账的凭证作为候选
-    unmatchedVouchers.value = res.data.list.filter(v => v.status >= 1)
+    unmatchedVouchers.value = res.data.list.filter(v => v.status === 2)
   } catch {
     // handled by interceptor
   } finally {
@@ -292,6 +294,7 @@ async function handleManualMatch() {
     return
   }
 
+  manualMatchLoading.value = true
   try {
     await bankApi.manualMatch({
       accountSetId: appStore.currentAccountSetId || 0,
@@ -301,20 +304,27 @@ async function handleManualMatch() {
     ElMessage.success('手动匹配成功')
 
     // 记录匹配结果用于展示
-    const newResults: MatchResult[] = selectedTransactions.value.map(t => ({
-      transactionNo: t.transactionNo,
-      transactionDate: t.transactionDate,
-      amount: t.amount,
-      voucherNo: selectedVoucher.value!.voucherNo,
-      voucherAmount: selectedVoucher.value!.totalDebit,
-      diff: Math.abs(t.amount - selectedVoucher.value!.totalDebit),
-      matchType: '手动'
-    }))
+    const newResults: MatchResult[] = selectedTransactions.value.map(t => {
+      const voucherAmount = t.transactionType === 1
+        ? selectedVoucher.value!.totalDebit
+        : selectedVoucher.value!.totalCredit
+      return {
+        transactionNo: t.transactionNo,
+        transactionDate: t.transactionDate,
+        amount: t.amount,
+        voucherNo: selectedVoucher.value!.voucherNo,
+        voucherAmount,
+        diff: Math.abs(t.amount - voucherAmount),
+        matchType: '手动'
+      }
+    })
     matchResults.value = [...newResults, ...matchResults.value]
 
     await handleLoad()
   } catch {
     // handled by interceptor
+  } finally {
+    manualMatchLoading.value = false
   }
 }
 </script>

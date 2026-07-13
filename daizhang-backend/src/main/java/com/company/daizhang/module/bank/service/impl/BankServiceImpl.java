@@ -286,7 +286,10 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
             throw new BusinessException("凭证不属于当前账套");
         }
 
-        // 更新银行流水匹配状态
+        // 更新银行流水匹配状态(限制单次最多100条,防超长IN子句DoS)
+        if (request.getTransactionIds() != null && request.getTransactionIds().size() > 100) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "单次最多勾对100条流水");
+        }
         List<BankTransaction> transactions = this.listByIds(request.getTransactionIds());
         for (BankTransaction transaction : transactions) {
             if (!transaction.getAccountSetId().equals(request.getAccountSetId())) {

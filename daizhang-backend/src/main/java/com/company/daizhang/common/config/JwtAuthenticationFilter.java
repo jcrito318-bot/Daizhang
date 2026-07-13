@@ -51,6 +51,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     // 拒绝refresh token用作access token: refresh token有效期7天,若可直接访问API则access token短有效期机制失效
                     if ("refresh".equals(claims.get("type"))) {
                         log.warn("refresh token 被用作 access token,已拒绝");
+                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                         return;
                     }
                     String username = jwtUtils.getUsername(token);

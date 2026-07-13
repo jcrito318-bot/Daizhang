@@ -254,13 +254,13 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         Integer month = request.getMonth() != null ? request.getMonth() : voucher.getMonth();
         LocalDate voucherDate = request.getVoucherDate() != null ? request.getVoucherDate() : voucher.getVoucherDate();
         
-        // 业务校验：年度必须合理
-        if (year < 1900 || year > 2099) {
+        // 业务校验：年度必须合理(显式判空防止Integer自动拆箱NPE)
+        if (year == null || year < 1900 || year > 2099) {
             throw new BusinessException(ErrorCode.VOUCHER_YEAR_INVALID);
         }
-        
+
         // 业务校验：月份必须在1-12之间
-        if (month < 1 || month > 12) {
+        if (month == null || month < 1 || month > 12) {
             throw new BusinessException(ErrorCode.VOUCHER_MONTH_INVALID);
         }
         

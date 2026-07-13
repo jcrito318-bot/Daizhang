@@ -13,6 +13,7 @@
             <el-option label="未审核" :value="0" />
             <el-option label="已审核" :value="1" />
             <el-option label="已过账" :value="2" />
+            <el-option label="已作废" :value="3" />
           </el-select>
         </el-form-item>
         <el-form-item label="凭证号">
@@ -111,12 +112,12 @@ const queryForm = reactive<VoucherQueryRequest>({
 })
 
 function statusText(status: number): string {
-  const map: Record<number, string> = { 0: '未审核', 1: '已审核', 2: '已过账' }
+  const map: Record<number, string> = { 0: '未审核', 1: '已审核', 2: '已过账', 3: '已作废' }
   return map[status] || '未知'
 }
 
 function statusTagType(status: number): string {
-  const map: Record<number, string> = { 0: 'warning', 1: 'success', 2: 'info' }
+  const map: Record<number, string> = { 0: 'warning', 1: 'success', 2: 'info', 3: 'danger' }
   return map[status] || 'info'
 }
 

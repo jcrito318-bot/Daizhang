@@ -606,36 +606,50 @@ public class TaxServiceImpl implements TaxService {
         Map<Long, AccountBalance> balanceMap = queryBalanceMap(accountSet.getId(), year, month);
         List<Subject> subjects = querySubjects(accountSet.getId());
 
-        BigDecimal operatingRevenue = sumBySubjectPrefix(subjects, balanceMap, "5001", true, false);
+        // 收入:5001主营业务收入+5051其他业务收入+5111投资收益+5301营业外收入
+        BigDecimal mainRevenue = sumBySubjectPrefix(subjects, balanceMap, "5001", true, false);
+        BigDecimal otherRevenue = sumBySubjectPrefix(subjects, balanceMap, "5051", true, false);
+        BigDecimal investIncome = sumBySubjectPrefix(subjects, balanceMap, "5111", true, false);
+        BigDecimal nonOperatingIncome = sumBySubjectPrefix(subjects, balanceMap, "5301", true, false);
+        BigDecimal operatingRevenue = mainRevenue.add(otherRevenue).add(investIncome).add(nonOperatingIncome);
+
+        // 成本费用:5401+5402+5403+5601+5602+5603+5701+5802+5711(与利润表口径一致)
         BigDecimal operatingCost = sumBySubjectPrefix(subjects, balanceMap, "5401", false, true);
-        // 利润总额应扣除期间费用与税金及附加,与利润表口径一致
-        // 否则利润总额虚高,应纳税额偏高,与同文件generateBusinessIncomeTaxForm口径不一致
-        // 5403税金及附加 5601销售费用 5602管理费用 5603财务费用
+        BigDecimal otherCost = sumBySubjectPrefix(subjects, balanceMap, "5402", false, true);
         BigDecimal taxSurcharge = sumBySubjectPrefix(subjects, balanceMap, "5403", false, true);
         BigDecimal sellingExpense = sumBySubjectPrefix(subjects, balanceMap, "5601", false, true);
         BigDecimal adminExpense = sumBySubjectPrefix(subjects, balanceMap, "5602", false, true);
         BigDecimal financialExpense = sumBySubjectPrefix(subjects, balanceMap, "5603", false, true);
-        BigDecimal totalExpense = operatingCost.add(taxSurcharge).add(sellingExpense)
-                .add(adminExpense).add(financialExpense);
+        BigDecimal impairmentLoss = sumBySubjectPrefix(subjects, balanceMap, "5701", false, true)
+                .add(sumBySubjectPrefix(subjects, balanceMap, "5802", false, true));
+        BigDecimal nonOperatingExpense = sumBySubjectPrefix(subjects, balanceMap, "5711", false, true);
+        BigDecimal totalExpense = operatingCost.add(otherCost).add(taxSurcharge).add(sellingExpense)
+                .add(adminExpense).add(financialExpense).add(impairmentLoss).add(nonOperatingExpense);
         BigDecimal totalProfit = operatingRevenue.subtract(totalExpense);
 
-        // 应纳税额 = 利润总额 × 25%（假设为25%税率）
-        BigDecimal taxRate = new BigDecimal("0.25");
+        // 小微企业优惠:年度利润≤300万按5%(25%×20%),否则25%(与TaxCalculateServiceImpl一致)
+        BigDecimal SMALL_THRESHOLD = new BigDecimal("3000000");
+        BigDecimal taxRate = totalProfit.compareTo(SMALL_THRESHOLD) <= 0
+                ? new BigDecimal("0.05") : new BigDecimal("0.25");
         BigDecimal taxAmount = totalProfit.multiply(taxRate).setScale(2, RoundingMode.HALF_UP);
         if (taxAmount.compareTo(BigDecimal.ZERO) < 0) {
             taxAmount = BigDecimal.ZERO;
         }
 
         List<TaxDeclarationFormItemVO> items = new ArrayList<>();
-        items.add(buildItem(1, "营业收入", "主营业务收入+其他业务收入", operatingRevenue));
-        items.add(buildItem(2, "营业成本", "主营业务成本+其他业务成本", operatingCost));
+        items.add(buildItem(1, "营业收入", "5001+5051+5111+5301", operatingRevenue));
+        items.add(buildItem(2, "营业成本", "5401+5402", operatingCost.add(otherCost)));
         items.add(buildItem(3, "税金及附加", "5403", taxSurcharge));
         items.add(buildItem(4, "销售费用", "5601", sellingExpense));
         items.add(buildItem(5, "管理费用", "5602", adminExpense));
         items.add(buildItem(6, "财务费用", "5603", financialExpense));
-        items.add(buildItem(7, "利润总额", "营业收入-营业成本-税金及附加-期间费用", totalProfit));
-        items.add(buildItem(8, "适用税率", "企业所得税税率25%", taxRate.multiply(new BigDecimal("100"))));
-        items.add(buildItem(9, "应纳所得税额", "利润总额×25%", taxAmount));
+        items.add(buildItem(7, "减值损失", "5701+5802", impairmentLoss));
+        items.add(buildItem(8, "营业外支出", "5711", nonOperatingExpense));
+        items.add(buildItem(9, "利润总额", "收入-成本费用", totalProfit));
+        String rateDesc = taxRate.compareTo(new BigDecimal("0.05")) == 0
+                ? "小微企业5%(25%×20%)" : "标准税率25%";
+        items.add(buildItem(10, "适用税率", rateDesc, taxRate.multiply(new BigDecimal("100"))));
+        items.add(buildItem(11, "应纳所得税额", "利润总额×" + rateDesc, taxAmount));
 
         vo.setTaxableIncome(totalProfit);
         vo.setTaxRate(taxRate);
