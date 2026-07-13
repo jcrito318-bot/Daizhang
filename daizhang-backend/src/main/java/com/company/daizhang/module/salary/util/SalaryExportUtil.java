@@ -1,5 +1,6 @@
 package com.company.daizhang.module.salary.util;
 
+import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.module.salary.entity.Employee;
 import com.company.daizhang.module.salary.entity.SalarySheet;
 import jakarta.servlet.http.HttpServletResponse;
@@ -103,7 +104,7 @@ public class SalaryExportUtil {
             outputExcel(response, workbook, "银行代发工资_" + year + "年" + month + "月.xlsx");
         } catch (IOException e) {
             log.error("导出银行代发文件失败", e);
-            throw new RuntimeException("导出失败", e);
+            throw new BusinessException("导出失败");
         }
     }
 
@@ -187,7 +188,7 @@ public class SalaryExportUtil {
             outputExcel(response, workbook, "工资条_" + year + "年" + month + "月.xlsx");
         } catch (IOException e) {
             log.error("导出工资条失败", e);
-            throw new RuntimeException("导出失败", e);
+            throw new BusinessException("导出失败");
         }
     }
 

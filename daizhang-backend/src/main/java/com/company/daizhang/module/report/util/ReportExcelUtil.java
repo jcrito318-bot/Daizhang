@@ -1,5 +1,6 @@
 package com.company.daizhang.module.report.util;
 
+import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.module.report.vo.BalanceSheetItem;
 import com.company.daizhang.module.report.vo.BalanceSheetVO;
 import com.company.daizhang.module.report.vo.CashFlowItemVO;
@@ -83,7 +84,7 @@ public class ReportExcelUtil {
             outputExcel(response, workbook, "资产负债表_" + year + "年" + month + "月.xlsx");
         } catch (IOException e) {
             log.error("导出资产负债表失败", e);
-            throw new RuntimeException("导出失败", e);
+            throw new BusinessException("导出失败");
         }
     }
 
@@ -139,7 +140,7 @@ public class ReportExcelUtil {
             outputExcel(response, workbook, "利润表_" + year + "年" + month + "月.xlsx");
         } catch (IOException e) {
             log.error("导出利润表失败", e);
-            throw new RuntimeException("导出失败", e);
+            throw new BusinessException("导出失败");
         }
     }
 
@@ -204,7 +205,7 @@ public class ReportExcelUtil {
             outputExcel(response, workbook, "科目余额表_" + year + "年" + month + "月.xlsx");
         } catch (IOException e) {
             log.error("导出科目余额表失败", e);
-            throw new RuntimeException("导出失败", e);
+            throw new BusinessException("导出失败");
         }
     }
 
@@ -275,7 +276,7 @@ public class ReportExcelUtil {
             outputExcel(response, workbook, "所有者权益变动表_" + year + "年" + month + "月.xlsx");
         } catch (IOException e) {
             log.error("导出所有者权益变动表失败", e);
-            throw new RuntimeException("导出失败", e);
+            throw new BusinessException("导出失败");
         }
     }
 
@@ -341,7 +342,7 @@ public class ReportExcelUtil {
             outputExcel(response, workbook, "部门费用分析表_" + year + "年" + month + "月.xlsx");
         } catch (IOException e) {
             log.error("导出部门费用分析表失败", e);
-            throw new RuntimeException("导出失败", e);
+            throw new BusinessException("导出失败");
         }
     }
 
@@ -452,7 +453,7 @@ public class ReportExcelUtil {
             outputExcel(response, workbook, "现金流量表_" + year + "年" + month + "月.xlsx");
         } catch (IOException e) {
             log.error("导出现金流量表失败", e);
-            throw new RuntimeException("导出失败", e);
+            throw new BusinessException("导出失败");
         }
     }
 

@@ -53,6 +53,14 @@ public class ExcelImportUtil {
                     "仅支持Excel文件(.xlsx/.xls)，当前文件：" + filename);
         }
 
+        // 文件大小校验:WorkbookFactory全量加载到内存,超大文件可能触发OOM
+        // 限制20MB,覆盖正常Excel模板(万行级约2-5MB),拒绝恶意大文件
+        long maxFileSize = 20 * 1024 * 1024L;
+        if (file.getSize() > maxFileSize) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "文件过大(" + (file.getSize() / 1024 / 1024) + "MB)，单次最多20MB，请分批导入或精简文件");
+        }
+
         List<Map<String, String>> result = new ArrayList<>();
 
         try (InputStream is = file.getInputStream();

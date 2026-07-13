@@ -1166,7 +1166,7 @@ public class LedgerServiceImpl implements LedgerService {
             return out.toByteArray();
         } catch (IOException e) {
             log.error("导出明细账失败", e);
-            throw new RuntimeException("导出明细账失败", e);
+            throw new BusinessException("导出明细账失败");
         }
     }
 
@@ -1248,7 +1248,7 @@ public class LedgerServiceImpl implements LedgerService {
             return out.toByteArray();
         } catch (IOException e) {
             log.error("导出总账失败", e);
-            throw new RuntimeException("导出总账失败", e);
+            throw new BusinessException("导出总账失败");
         }
     }
 
@@ -1340,7 +1340,7 @@ public class LedgerServiceImpl implements LedgerService {
             return out.toByteArray();
         } catch (IOException e) {
             log.error("导出科目余额表失败", e);
-            throw new RuntimeException("导出科目余额表失败", e);
+            throw new BusinessException("导出科目余额表失败");
         }
     }
 
@@ -2021,7 +2021,7 @@ public class LedgerServiceImpl implements LedgerService {
             writeExcelToResponse(response, out.toByteArray(), title + "_" + year + "年" + (month != null ? month + "月" : "") + ".xlsx");
         } catch (IOException e) {
             log.error("导出{}失败", title, e);
-            throw new RuntimeException("导出" + title + "失败", e);
+            throw new BusinessException("导出" + title + "失败");
         }
     }
 
@@ -2038,7 +2038,7 @@ public class LedgerServiceImpl implements LedgerService {
             os.flush();
         } catch (IOException e) {
             log.error("写入Excel响应失败", e);
-            throw new RuntimeException("导出失败", e);
+            throw new BusinessException("导出失败");
         }
     }
 

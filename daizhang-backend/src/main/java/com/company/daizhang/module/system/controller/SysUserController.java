@@ -2,6 +2,7 @@ package com.company.daizhang.module.system.controller;
 
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.system.dto.UserCreateRequest;
@@ -121,7 +122,8 @@ public class SysUserController {
                .like(StrUtil.isNotBlank(request.getRealName()), SysUser::getRealName, request.getRealName())
                .like(StrUtil.isNotBlank(request.getPhone()), SysUser::getPhone, request.getPhone())
                .eq(request.getStatus() != null, SysUser::getStatus, request.getStatus())
-               .orderByDesc(SysUser::getCreateTime);
+               .orderByDesc(SysUser::getCreateTime)
+               .last("LIMIT 10000");
         List<SysUser> users = userService.list(wrapper);
 
         byte[] data;
@@ -164,7 +166,7 @@ public class SysUserController {
             data = out.toByteArray();
         } catch (IOException e) {
             log.error("导出用户列表失败", e);
-            throw new RuntimeException("导出用户列表失败", e);
+            throw new BusinessException("导出用户列表失败");
         }
 
         writeExcelResponse(response, data, "用户列表.xlsx");

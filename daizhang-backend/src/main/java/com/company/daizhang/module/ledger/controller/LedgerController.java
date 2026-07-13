@@ -1,6 +1,7 @@
 package com.company.daizhang.module.ledger.controller;
 
 import com.company.daizhang.common.annotation.RequireAccountSetAccess;
+import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.ledger.dto.LedgerQueryRequest;
@@ -233,7 +234,7 @@ public class LedgerController {
             out.flush();
         } catch (IOException e) {
             log.error("写入Excel响应失败", e);
-            throw new RuntimeException("导出失败", e);
+            throw new BusinessException("导出失败");
         }
     }
 }

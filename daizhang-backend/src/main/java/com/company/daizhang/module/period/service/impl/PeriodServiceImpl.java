@@ -820,10 +820,30 @@ public class PeriodServiceImpl implements PeriodService {
                         // 盈利:借3103贷3104,利润分配年末贷方余额相应增加
                         retainedDecBalance.setEndCredit(
                                 (retainedDecBalance.getEndCredit() != null ? retainedDecBalance.getEndCredit() : BigDecimal.ZERO).add(profitNet));
+                        // 同步本期/本年发生额:贷方记3104的贷方发生额
+                        retainedDecBalance.setPeriodCredit(
+                                (retainedDecBalance.getPeriodCredit() != null ? retainedDecBalance.getPeriodCredit() : BigDecimal.ZERO).add(profitNet));
+                        retainedDecBalance.setYearCredit(
+                                (retainedDecBalance.getYearCredit() != null ? retainedDecBalance.getYearCredit() : BigDecimal.ZERO).add(profitNet));
+                        // 3103本年利润:借方记结转出金额
+                        profitDecBalance.setPeriodDebit(
+                                (profitDecBalance.getPeriodDebit() != null ? profitDecBalance.getPeriodDebit() : BigDecimal.ZERO).add(profitNet));
+                        profitDecBalance.setYearDebit(
+                                (profitDecBalance.getYearDebit() != null ? profitDecBalance.getYearDebit() : BigDecimal.ZERO).add(profitNet));
                     } else {
                         // 亏损:借3104贷3103,利润分配年末借方余额相应增加(代表减少)
                         retainedDecBalance.setEndDebit(
                                 (retainedDecBalance.getEndDebit() != null ? retainedDecBalance.getEndDebit() : BigDecimal.ZERO).add(absAmount));
+                        // 同步本期/本年发生额:借方记3104的借方发生额
+                        retainedDecBalance.setPeriodDebit(
+                                (retainedDecBalance.getPeriodDebit() != null ? retainedDecBalance.getPeriodDebit() : BigDecimal.ZERO).add(absAmount));
+                        retainedDecBalance.setYearDebit(
+                                (retainedDecBalance.getYearDebit() != null ? retainedDecBalance.getYearDebit() : BigDecimal.ZERO).add(absAmount));
+                        // 3103本年利润:贷方记结转出金额
+                        profitDecBalance.setPeriodCredit(
+                                (profitDecBalance.getPeriodCredit() != null ? profitDecBalance.getPeriodCredit() : BigDecimal.ZERO).add(absAmount));
+                        profitDecBalance.setYearCredit(
+                                (profitDecBalance.getYearCredit() != null ? profitDecBalance.getYearCredit() : BigDecimal.ZERO).add(absAmount));
                     }
                     accountBalanceMapper.updateById(retainedDecBalance);
                     // 3103本年利润年末余额清零

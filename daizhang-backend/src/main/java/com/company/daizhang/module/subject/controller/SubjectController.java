@@ -4,6 +4,7 @@ import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.company.daizhang.common.annotation.RequireAccountSetAccess;
+import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.common.vo.ImportResultVO;
@@ -208,7 +209,7 @@ public class SubjectController {
             data = out.toByteArray();
         } catch (IOException e) {
             log.error("导出科目列表失败", e);
-            throw new RuntimeException("导出科目列表失败", e);
+            throw new BusinessException("导出科目列表失败");
         }
 
         writeExcelResponse(response, data, "科目列表_" + accountSetId + ".xlsx");

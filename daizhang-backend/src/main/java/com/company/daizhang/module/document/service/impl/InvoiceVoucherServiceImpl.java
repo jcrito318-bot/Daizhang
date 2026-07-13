@@ -105,6 +105,13 @@ public class InvoiceVoucherServiceImpl implements InvoiceVoucherService {
             totalAmount = amount.add(taxAmount);
         }
 
+        // 借贷平衡校验: 不含税金额 + 税额必须等于价税合计,否则凭证借方(库存+进项税)≠贷方(应付账款)
+        // 发票数据录入错误时及时拦截,避免生成借贷不平的凭证
+        if (amount.add(taxAmount).compareTo(totalAmount) != 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "发票金额不一致: 不含税" + amount + " + 税额" + taxAmount + " ≠ 价税合计" + totalAmount);
+        }
+
         String sellerName = StrUtil.isBlank(invoice.getSellerName()) ? "进项发票" : invoice.getSellerName();
         String summary = "采购入库-" + sellerName;
 
@@ -172,6 +179,13 @@ public class InvoiceVoucherServiceImpl implements InvoiceVoucherService {
         BigDecimal totalAmount = nullToZero(invoice.getTotalAmount());
         if (totalAmount.compareTo(BigDecimal.ZERO) == 0) {
             totalAmount = amount.add(taxAmount);
+        }
+
+        // 借贷平衡校验: 不含税金额 + 税额必须等于价税合计,否则凭证借方(应收)≠贷方(收入+销项税)
+        // 发票数据录入错误时及时拦截,避免生成借贷不平的凭证
+        if (amount.add(taxAmount).compareTo(totalAmount) != 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "发票金额不一致: 不含税" + amount + " + 税额" + taxAmount + " ≠ 价税合计" + totalAmount);
         }
 
         // 红冲/负数发票：金额为负时借贷方向反转，金额取绝对值，避免应交税费贷方余额为负（多交税款应挂借方）
