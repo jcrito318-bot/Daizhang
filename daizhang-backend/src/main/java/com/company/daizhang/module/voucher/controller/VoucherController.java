@@ -198,6 +198,7 @@ public class VoucherController {
     @Operation(summary = "批量凭证打印预览HTML")
     @GetMapping("/print-html-batch")
     public void printHtmlBatch(@RequestParam List<Long> ids, HttpServletResponse response) throws IOException {
+        validateBatchSize(ids);
         String html = voucherPrintService.generatePrintHtmlBatch(ids);
         response.setContentType("text/html;charset=UTF-8");
         try (OutputStream os = response.getOutputStream()) {
@@ -216,6 +217,7 @@ public class VoucherController {
     @Operation(summary = "批量导出凭证为PDF")
     @GetMapping("/export-pdf-batch")
     public void exportPdfBatch(@RequestParam List<Long> ids, HttpServletResponse response) throws IOException {
+        validateBatchSize(ids);
         byte[] data = voucherPrintService.exportPdfBatch(ids);
         writePdfResponse(response, data, "凭证.pdf");
     }
@@ -223,6 +225,7 @@ public class VoucherController {
     @Operation(summary = "导出凭证为Excel（标准会计凭证格式）")
     @GetMapping("/export-excel")
     public void exportExcel(@RequestParam List<Long> ids, HttpServletResponse response) throws IOException {
+        validateBatchSize(ids);
         byte[] data = voucherPrintService.exportExcel(ids);
         writeExcelResponse(response, data, "会计凭证.xlsx");
     }

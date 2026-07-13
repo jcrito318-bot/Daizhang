@@ -69,6 +69,8 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Integer importBankTransactions(BankTransactionImportRequest request) {
+        // IDOR治理:校验当前用户对该账套的访问权(Controller层@RequireAccountSetAccess已做一次,此处兜底)
+        accountSetAccessService.checkAccess(request.getAccountSetId());
         // 校验银行账号归属:bankAccount 必须属于该账套,否则可向他账套的银行账号导入流水
         Long bankAccountCount = bankAccountMapper.selectCount(new LambdaQueryWrapper<BankAccount>()
                 .eq(BankAccount::getAccountSetId, request.getAccountSetId())

@@ -313,24 +313,54 @@ function readFile(file: File): Promise<any> {
 
 function parseExcelData(data: any[]): BankTransactionItem[] {
   const transactions: BankTransactionItem[] = []
-  
-  for (const row of data) {
+  const invalidRows: string[] = []
+
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i]
+    const rowNum = i + 2
+
+    // 交易类型:必须明确为"收入"或"支出",空值或错别字不默认为支出
+    const typeStr = (row['交易类型'] || '').toString().trim()
+    let transactionType: number | undefined
+    if (typeStr === '收入') {
+      transactionType = 1
+    } else if (typeStr === '支出') {
+      transactionType = 2
+    }
+
+    // 金额:parseFloat可能返回NaN,必须校验
+    const amountStr = row['交易金额'] || row['金额'] || '0'
+    const amount = parseFloat(amountStr)
+
+    if (!transactionType) {
+      invalidRows.push(`第${rowNum}行: 交易类型必须为"收入"或"支出",实际为"${typeStr}"`)
+      continue
+    }
+    if (isNaN(amount)) {
+      invalidRows.push(`第${rowNum}行: 交易金额不是有效数字"${amountStr}"`)
+      continue
+    }
+
     const item: BankTransactionItem = {
       transactionDate: row['交易日期'] || row['日期'] || '',
-      transactionType: row['交易类型'] === '收入' ? 1 : 2,
-      amount: parseFloat(row['交易金额'] || row['金额'] || '0'),
+      transactionType,
+      amount,
       balance: row['余额'] ? parseFloat(row['余额']) : undefined,
       counterparty: row['对方单位'] || row['对方'] || '',
       summary: row['摘要'] || '',
       transactionNo: row['交易流水号'] || row['流水号'] || '',
       remark: row['备注'] || ''
     }
-    
+
     if (item.transactionDate && item.amount) {
       transactions.push(item)
     }
   }
-  
+
+  if (invalidRows.length > 0) {
+    ElMessage.warning(`${invalidRows.length}行数据无效已跳过:\n${invalidRows.slice(0, 5).join('\n')}${invalidRows.length > 5 ? '\n...' : ''}`)
+  }
+
   return transactions
 }
 

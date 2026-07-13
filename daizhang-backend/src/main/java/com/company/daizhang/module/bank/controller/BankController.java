@@ -40,6 +40,7 @@ public class BankController {
 
     @Operation(summary = "导入银行流水")
     @PostMapping("/transaction/import")
+    @RequireAccountSetAccess
     public Result<Integer> importTransactions(@Valid @RequestBody BankTransactionImportRequest request) {
         Integer count = bankService.importBankTransactions(request);
         return Result.success("成功导入" + count + "条银行流水", count);

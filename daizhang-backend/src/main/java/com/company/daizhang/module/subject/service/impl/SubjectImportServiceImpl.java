@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.ByteArrayOutputStream;
@@ -48,6 +49,7 @@ public class SubjectImportServiceImpl implements SubjectImportService {
     private static final String COL_AUXILIARY = "是否辅助核算";
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public ImportResultVO importSubjects(Long accountSetId, MultipartFile file) {
         List<Map<String, String>> rows;
         try {

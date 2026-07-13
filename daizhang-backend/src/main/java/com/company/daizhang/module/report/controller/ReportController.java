@@ -83,18 +83,21 @@ public class ReportController {
 
     @Operation(summary = "导出资产负债表Excel")
     @GetMapping("/balance-sheet/export")
+    @RequireAccountSetAccess
     public void exportBalanceSheet(ReportQueryRequest request, HttpServletResponse response) {
         reportService.exportBalanceSheet(request, response);
     }
 
     @Operation(summary = "导出利润表Excel")
     @GetMapping("/income-statement/export")
+    @RequireAccountSetAccess
     public void exportIncomeStatement(ReportQueryRequest request, HttpServletResponse response) {
         reportService.exportIncomeStatement(request, response);
     }
 
     @Operation(summary = "导出科目余额表Excel")
     @GetMapping("/subject-balance-table/export")
+    @RequireAccountSetAccess
     public void exportSubjectBalanceTable(ReportQueryRequest request, HttpServletResponse response) {
         reportService.exportSubjectBalanceTable(request, response);
     }
@@ -215,24 +218,28 @@ public class ReportController {
 
     @Operation(summary = "导出所有者权益变动表Excel")
     @GetMapping("/equity-change-statement/export")
+    @RequireAccountSetAccess
     public void exportEquityChangeStatement(ReportQueryRequest request, HttpServletResponse response) {
         reportService.exportEquityChangeStatement(request, response);
     }
 
     @Operation(summary = "导出所有者权益变动表PDF")
     @GetMapping("/equity-change-statement/pdf")
+    @RequireAccountSetAccess
     public void exportEquityChangeStatementPdf(ReportQueryRequest request, HttpServletResponse response) {
         reportService.exportEquityChangeStatementPdf(request, response);
     }
 
     @Operation(summary = "导出部门费用分析表Excel")
     @GetMapping("/department-expense/export")
+    @RequireAccountSetAccess
     public void exportDepartmentExpense(ReportQueryRequest request, HttpServletResponse response) {
         reportService.exportDepartmentExpense(request, response);
     }
 
     @Operation(summary = "导出部门费用分析表PDF")
     @GetMapping("/department-expense/pdf")
+    @RequireAccountSetAccess
     public void exportDepartmentExpensePdf(ReportQueryRequest request, HttpServletResponse response) {
         reportService.exportDepartmentExpensePdf(request, response);
     }
