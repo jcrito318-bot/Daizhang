@@ -283,14 +283,20 @@ public class TaxCalculateServiceImpl implements TaxCalculateService {
 
             for (Subject subject : revenueSubjects) {
                 AccountBalance balance = balanceMap.get(subject.getId());
-                if (balance != null && balance.getPeriodCredit() != null) {
-                    totalRevenue = totalRevenue.add(balance.getPeriodCredit());
+                if (balance != null) {
+                    // 收入类按净额:贷方-借方(销售退回等借方冲减),与利润表口径一致
+                    BigDecimal credit = balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO;
+                    BigDecimal debit = balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO;
+                    totalRevenue = totalRevenue.add(credit.subtract(debit));
                 }
             }
             for (Subject subject : expenseSubjects) {
                 AccountBalance balance = balanceMap.get(subject.getId());
-                if (balance != null && balance.getPeriodDebit() != null) {
-                    totalExpense = totalExpense.add(balance.getPeriodDebit());
+                if (balance != null) {
+                    // 费用类按净额:借方-贷方(红字冲销/转回等贷方),与利润表口径一致
+                    BigDecimal debit = balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO;
+                    BigDecimal credit = balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO;
+                    totalExpense = totalExpense.add(debit.subtract(credit));
                 }
             }
         }

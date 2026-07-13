@@ -66,7 +66,7 @@ public class InventoryVoucherServiceImpl implements InventoryVoucherService {
     // 科目编码常量
     private static final String CODE_INVENTORY = "1405";         // 库存商品
     private static final String CODE_ACCOUNTS_PAYABLE = "2202";  // 应付账款
-    private static final String CODE_MAIN_COST = "6401";         // 主营业务成本
+    private static final String CODE_MAIN_COST = "5401";         // 主营业务成本(与标准科目模板一致)
 
     @Override
     @Transactional(rollbackFor = Exception.class, propagation = Propagation.REQUIRES_NEW)

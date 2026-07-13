@@ -148,13 +148,14 @@ public class DashboardServiceImpl implements DashboardService {
                 .eq(Voucher::getStatus, 0);
         applyAccessFilter(unauditedCountWrapper, Voucher::getAccountSetId, accessibleIds);
         long unauditedVoucherCount = voucherMapper.selectCount(unauditedCountWrapper);
-        // 本月凭证总数(按当前年月统计,与未审核凭证数区分,避免首页"本月凭证"与"待审核"两块卡片显示相同数字)
+        // 本月凭证总数(按当前年月统计,排除作废凭证status=3,避免首页"本月凭证"虚高)
         LocalDateTime now = LocalDateTime.now();
         int currentYear = now.getYear();
         int currentMonth = now.getMonthValue();
         LambdaQueryWrapper<Voucher> monthVoucherWrapper = new LambdaQueryWrapper<Voucher>()
                 .eq(Voucher::getYear, currentYear)
-                .eq(Voucher::getMonth, currentMonth);
+                .eq(Voucher::getMonth, currentMonth)
+                .ne(Voucher::getStatus, 3);
         applyAccessFilter(monthVoucherWrapper, Voucher::getAccountSetId, accessibleIds);
         long monthVoucherCount = voucherMapper.selectCount(monthVoucherWrapper);
         // 未申报税务数(status=0,不限制)

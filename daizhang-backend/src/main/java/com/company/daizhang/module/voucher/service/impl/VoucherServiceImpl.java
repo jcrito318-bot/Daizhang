@@ -995,19 +995,39 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                     carriedYearDebit = lastBalance.getYearDebit() != null ? lastBalance.getYearDebit() : BigDecimal.ZERO;
                     carriedYearCredit = lastBalance.getYearCredit() != null ? lastBalance.getYearCredit() : BigDecimal.ZERO;
                 }
-            } else if (month == 1) {
-                // 1月且无上年12月期末余额:从用户录入的期初余额(SubjectBalance)取值。
-                // 否则用户在期初余额界面录入的数据不会进入 AccountBalance,
-                // 导致月度余额表/资产负债表/试算平衡(走 AccountBalance 的路径)期初恒为0,
-                // 首次过账即试算不平衡。
-                SubjectBalance subjectBegin = subjectBalanceMapper.selectOne(new LambdaQueryWrapper<SubjectBalance>()
-                        .eq(SubjectBalance::getAccountSetId, accountSetId)
-                        .eq(SubjectBalance::getSubjectId, subjectId)
-                        .eq(SubjectBalance::getYear, year)
-                        .eq(SubjectBalance::getPeriod, 1));
-                if (subjectBegin != null) {
-                    carriedBeginDebit = subjectBegin.getBeginDebit() != null ? subjectBegin.getBeginDebit() : BigDecimal.ZERO;
-                    carriedBeginCredit = subjectBegin.getBeginCredit() != null ? subjectBegin.getBeginCredit() : BigDecimal.ZERO;
+            } else {
+                // 上月无余额记录(断档):向前回溯查找最近一期有余额的月份,
+                // 避免非1月首笔过账时期初余额丢失(原逻辑仅 month==1 回退 SubjectBalance,
+                // 导致2月及以后首笔过账时期初恒为0,试算不平衡、报表期初列错误)。
+                LambdaQueryWrapper<AccountBalance> lookbackWrapper = new LambdaQueryWrapper<>();
+                lookbackWrapper.eq(AccountBalance::getAccountSetId, accountSetId)
+                               .eq(AccountBalance::getSubjectId, subjectId)
+                               .le(AccountBalance::getYear, lastYear)
+                               .and(w -> w.eq(AccountBalance::getYear, lastYear)
+                                          .le(AccountBalance::getMonth, lastMonth)
+                                          .or().lt(AccountBalance::getYear, lastYear))
+                               .orderByDesc(AccountBalance::getYear)
+                               .orderByDesc(AccountBalance::getMonth)
+                               .last("LIMIT 1");
+                AccountBalance priorBalance = accountBalanceMapper.selectOne(lookbackWrapper);
+                if (priorBalance != null) {
+                    carriedBeginDebit = priorBalance.getEndDebit() != null ? priorBalance.getEndDebit() : BigDecimal.ZERO;
+                    carriedBeginCredit = priorBalance.getEndCredit() != null ? priorBalance.getEndCredit() : BigDecimal.ZERO;
+                    if (priorBalance.getYear() != null && priorBalance.getYear().equals(year)) {
+                        carriedYearDebit = priorBalance.getYearDebit() != null ? priorBalance.getYearDebit() : BigDecimal.ZERO;
+                        carriedYearCredit = priorBalance.getYearCredit() != null ? priorBalance.getYearCredit() : BigDecimal.ZERO;
+                    }
+                } else {
+                    // 无任何历史余额记录:从用户录入的期初余额(SubjectBalance)取值
+                    SubjectBalance subjectBegin = subjectBalanceMapper.selectOne(new LambdaQueryWrapper<SubjectBalance>()
+                            .eq(SubjectBalance::getAccountSetId, accountSetId)
+                            .eq(SubjectBalance::getSubjectId, subjectId)
+                            .eq(SubjectBalance::getYear, year)
+                            .eq(SubjectBalance::getPeriod, 1));
+                    if (subjectBegin != null) {
+                        carriedBeginDebit = subjectBegin.getBeginDebit() != null ? subjectBegin.getBeginDebit() : BigDecimal.ZERO;
+                        carriedBeginCredit = subjectBegin.getBeginCredit() != null ? subjectBegin.getBeginCredit() : BigDecimal.ZERO;
+                    }
                 }
             }
             balance.setBeginDebit(carriedBeginDebit);

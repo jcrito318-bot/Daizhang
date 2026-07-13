@@ -720,16 +720,24 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         // 计算个人所得税（使用累计预扣预缴法,符合《个人所得税法》2019年起规定）
         BigDecimal incomeTax = calculateIncomeTaxByCumulative(
                 salarySheet.getEmployeeId(), salarySheet.getYear(), salarySheet.getMonth(), taxableIncome);
-        salarySheet.setIncomeTax(incomeTax);
 
         // 实发工资 = 应发工资 - 社保 - 公积金 - 个人所得税
         BigDecimal netSalary = grossSalary.subtract(socialSecurity).subtract(housingFund).subtract(incomeTax);
-        // 实发工资为负(如个税预扣额较大时)业务上不合理,凭证生成会产生负数贷方金额,故归零并告警
+        // 实发工资为负(如个税预扣额较大时):调减个税使实发为0,而非简单归零netSalary。
+        // 原逻辑仅归零netSalary但不调减incomeTax,导致凭证贷方合计>借方合计(差额=被归零的负值),
+        // 借贷不平衡,凭证生成失败,阻断全部员工薪资发放。
+        // 正确做法:将个税调减至使netSalary=0,保持凭证借贷平衡。
         if (netSalary.compareTo(BigDecimal.ZERO) < 0) {
-            log.warn("实发工资为负,归零处理: employeeId={}, gross={}, socialSecurity={}, housingFund={}, incomeTax={}, net={}",
-                    salarySheet.getEmployeeId(), grossSalary, socialSecurity, housingFund, incomeTax, netSalary);
+            BigDecimal excess = netSalary.negate();
+            log.warn("实发工资为负,调减个税{}以平衡: employeeId={}, gross={}, socialSecurity={}, housingFund={}, incomeTax={}->{}",
+                    excess, salarySheet.getEmployeeId(), grossSalary, socialSecurity, housingFund, incomeTax, incomeTax.subtract(excess));
+            incomeTax = incomeTax.subtract(excess);
+            if (incomeTax.compareTo(BigDecimal.ZERO) < 0) {
+                incomeTax = BigDecimal.ZERO;
+            }
             netSalary = BigDecimal.ZERO;
         }
+        salarySheet.setIncomeTax(incomeTax);
         salarySheet.setNetSalary(netSalary);
     }
 
