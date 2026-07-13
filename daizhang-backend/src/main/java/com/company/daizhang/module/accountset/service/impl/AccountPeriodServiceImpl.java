@@ -133,12 +133,17 @@ public class AccountPeriodServiceImpl implements AccountPeriodService {
         }
 
         // 使用LambdaUpdateWrapper确保null字段能正确更新
+        // 乐观锁:WHERE条件包含status=0,防止并发结账覆盖
         LambdaUpdateWrapper<AccountPeriod> updateWrapper = new LambdaUpdateWrapper<>();
         updateWrapper.eq(AccountPeriod::getId, period.getId())
+                .eq(AccountPeriod::getStatus, 0)
                 .set(AccountPeriod::getStatus, 1)
                 .set(AccountPeriod::getCloseBy, SecurityUtils.getCurrentUserId())
                 .set(AccountPeriod::getCloseTime, LocalDateTime.now());
-        accountPeriodMapper.update(null, updateWrapper);
+        int updated = accountPeriodMapper.update(null, updateWrapper);
+        if (updated == 0) {
+            throw new BusinessException(409, "期间状态已变更(并发冲突)，请刷新后重试");
+        }
     }
 
     @Override
@@ -165,12 +170,17 @@ public class AccountPeriodServiceImpl implements AccountPeriodService {
         }
 
         // 使用LambdaUpdateWrapper显式置空closeBy/closeTime,避免NOT_NULL策略导致null字段不更新
+        // 乐观锁:WHERE条件包含status=1,防止并发反结账覆盖
         LambdaUpdateWrapper<AccountPeriod> updateWrapper = new LambdaUpdateWrapper<>();
         updateWrapper.eq(AccountPeriod::getId, period.getId())
+                .eq(AccountPeriod::getStatus, 1)
                 .set(AccountPeriod::getStatus, 0)
                 .set(AccountPeriod::getCloseBy, null)
                 .set(AccountPeriod::getCloseTime, null);
-        accountPeriodMapper.update(null, updateWrapper);
+        int updated = accountPeriodMapper.update(null, updateWrapper);
+        if (updated == 0) {
+            throw new BusinessException(409, "期间状态已变更(并发冲突)，请刷新后重试");
+        }
     }
     
     @Override

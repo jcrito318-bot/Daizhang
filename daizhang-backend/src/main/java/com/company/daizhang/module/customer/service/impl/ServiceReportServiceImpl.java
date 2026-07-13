@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.customer.dto.ServiceReportRequest;
 import com.company.daizhang.module.customer.entity.ServiceReport;
 import com.company.daizhang.module.customer.mapper.ServiceReportMapper;
@@ -42,6 +43,7 @@ public class ServiceReportServiceImpl extends ServiceImpl<ServiceReportMapper, S
     private final VoucherDetailMapper voucherDetailMapper;
     private final SubjectMapper subjectMapper;
     private final TaxDeclarationMapper taxDeclarationMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Override
     public PageResult<ServiceReportVO> pageReports(Long accountSetId, Long customerId, Integer reportYear,
@@ -70,6 +72,7 @@ public class ServiceReportServiceImpl extends ServiceImpl<ServiceReportMapper, S
         if (report == null) {
             throw new BusinessException(404, "服务报告不存在");
         }
+        accountSetAccessService.checkAccess(report.getAccountSetId());
         return convertToVO(report);
     }
 
@@ -107,6 +110,7 @@ public class ServiceReportServiceImpl extends ServiceImpl<ServiceReportMapper, S
         if (report == null) {
             throw new BusinessException(404, "服务报告不存在");
         }
+        accountSetAccessService.checkOwner(report.getAccountSetId());
         // 已发布的报告不能修改
         if (report.getStatus() != null && report.getStatus() == 1) {
             throw new BusinessException(400, "已发布的报告不能修改");
@@ -126,6 +130,7 @@ public class ServiceReportServiceImpl extends ServiceImpl<ServiceReportMapper, S
         if (report == null) {
             throw new BusinessException(404, "服务报告不存在");
         }
+        accountSetAccessService.checkOwner(report.getAccountSetId());
         this.removeById(id);
         log.info("删除服务报告成功，报告ID: {}", id);
     }
@@ -137,6 +142,7 @@ public class ServiceReportServiceImpl extends ServiceImpl<ServiceReportMapper, S
         if (report == null) {
             throw new BusinessException(404, "服务报告不存在");
         }
+        accountSetAccessService.checkOwner(report.getAccountSetId());
         // 已发布的报告不能重复发布
         if (report.getStatus() != null && report.getStatus() == 1) {
             throw new BusinessException(400, "报告已发布，不能重复发布");
@@ -149,6 +155,7 @@ public class ServiceReportServiceImpl extends ServiceImpl<ServiceReportMapper, S
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ServiceReportVO generateReport(Long accountSetId, Long customerId, Integer year, Integer month) {
+        accountSetAccessService.checkOwner(accountSetId);
         // 1. 查询该账套该期间的凭证数据（已审核或已过账）
         LambdaQueryWrapper<Voucher> voucherWrapper = new LambdaQueryWrapper<>();
         voucherWrapper.eq(Voucher::getAccountSetId, accountSetId)

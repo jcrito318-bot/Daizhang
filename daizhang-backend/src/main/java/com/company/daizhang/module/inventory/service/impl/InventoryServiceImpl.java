@@ -83,6 +83,7 @@ public class InventoryServiceImpl implements InventoryService {
         item.setCreateBy(SecurityUtils.getCurrentUserId());
         item.setCreateTime(LocalDateTime.now());
         item.setUpdateTime(LocalDateTime.now());
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         itemMapper.insert(item);
         return item.getId();
     }

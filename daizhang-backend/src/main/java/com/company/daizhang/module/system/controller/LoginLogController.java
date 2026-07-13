@@ -7,6 +7,7 @@ import com.company.daizhang.module.system.vo.LoginLogVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 /**
@@ -35,6 +36,7 @@ public class LoginLogController {
 
     @Operation(summary = "清理指定日期前的登录日志")
     @DeleteMapping("/clean")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> clean(@RequestParam String beforeDate) {
         loginLogService.deleteLogs(beforeDate);
         return Result.success();

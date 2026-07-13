@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -39,6 +40,7 @@ public class IndustryTemplateController {
 
     @Operation(summary = "创建行业模板")
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> create(@Valid @RequestBody IndustryTemplateRequest request) {
         industryTemplateService.createTemplate(request);
         return Result.success();
@@ -46,6 +48,7 @@ public class IndustryTemplateController {
 
     @Operation(summary = "更新行业模板")
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody IndustryTemplateRequest request) {
         industryTemplateService.updateTemplate(id, request);
         return Result.success();
@@ -53,6 +56,7 @@ public class IndustryTemplateController {
 
     @Operation(summary = "删除行业模板")
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         industryTemplateService.deleteTemplate(id);
         return Result.success();

@@ -125,6 +125,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         if (employee.getStatus() == null) {
             employee.setStatus(1); // 默认在职
         }
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         employeeMapper.insert(employee);
     }
 
@@ -222,6 +223,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
 
         SalaryItem salaryItem = new SalaryItem();
         BeanUtil.copyProperties(request, salaryItem);
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         salaryItemMapper.insert(salaryItem);
     }
 
@@ -328,6 +330,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         // 计算应纳税所得额和个税
         calculateTaxableIncomeAndTax(salarySheet);
 
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         salarySheetMapper.insert(salarySheet);
     }
 
@@ -413,6 +416,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void calculateSalary(SalaryCalculateRequest request) {
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         // 查询该账套该月份的所有在职员工
         LambdaQueryWrapper<Employee> empWrapper = new LambdaQueryWrapper<>();
         empWrapper.eq(Employee::getAccountSetId, request.getAccountSetId())
@@ -463,6 +467,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void generateSalaryVoucher(SalaryVoucherGenerateRequest request) {
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         // 查询该月份的已确认薪资记录
         LambdaQueryWrapper<SalarySheet> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SalarySheet::getAccountSetId, request.getAccountSetId())

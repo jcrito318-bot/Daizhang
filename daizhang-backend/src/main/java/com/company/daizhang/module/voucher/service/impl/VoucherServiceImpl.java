@@ -522,7 +522,12 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             voucher.setStatus(1);
             voucher.setAuditBy(currentUserId);
             voucher.setAuditTime(now);
-            this.updateById(voucher);
+            boolean updated = this.updateById(voucher);
+            if (!updated) {
+                failedIds.add(id);
+                log.warn("批量操作凭证{}因并发冲突跳过", id);
+                continue;
+            }
             success++;
         }
 

@@ -110,6 +110,7 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
         }
 
         document.setStatus(0);
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         this.save(document);
     }
 

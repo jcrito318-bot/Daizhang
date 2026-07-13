@@ -222,16 +222,19 @@ public class ReportServiceImpl implements ReportService {
             }
         }
 
-        // 二、营业成本
+        // 二、营业成本(净额 = 借方发生额 - 贷方发生额,贷方为红字冲销/退回)
         BigDecimal operatingCost = BigDecimal.ZERO;
         BigDecimal operatingCostYear = BigDecimal.ZERO;
         for (Subject subject : expenseSubjects) {
             if (subject.getCode().startsWith("5401") || subject.getCode().startsWith("5402")) {
                 AccountBalance balance = balanceMap.get(subject.getId());
-                BigDecimal currentAmount = balance != null && balance.getPeriodDebit() != null 
-                        ? balance.getPeriodDebit() : BigDecimal.ZERO;
-                BigDecimal yearAmount = balance != null && balance.getYearDebit() != null 
-                        ? balance.getYearDebit() : BigDecimal.ZERO;
+                // 费用类科目按净额计算:periodDebit - periodCredit,与收入类(periodCredit - periodDebit)对称
+                BigDecimal currentAmount = balance != null
+                        ? nvl(balance.getPeriodDebit()).subtract(nvl(balance.getPeriodCredit()))
+                        : BigDecimal.ZERO;
+                BigDecimal yearAmount = balance != null
+                        ? nvl(balance.getYearDebit()).subtract(nvl(balance.getYearCredit()))
+                        : BigDecimal.ZERO;
 
                 IncomeStatementItem item = new IncomeStatementItem();
                 item.setRowNo(rowNo++);
@@ -246,16 +249,18 @@ public class ReportServiceImpl implements ReportService {
             }
         }
 
-        // 三、营业税金及附加
+        // 三、营业税金及附加(净额)
         BigDecimal businessTax = BigDecimal.ZERO;
         BigDecimal businessTaxYear = BigDecimal.ZERO;
         for (Subject subject : expenseSubjects) {
             if (subject.getCode().startsWith("5403")) {
                 AccountBalance balance = balanceMap.get(subject.getId());
-                BigDecimal currentAmount = balance != null && balance.getPeriodDebit() != null 
-                        ? balance.getPeriodDebit() : BigDecimal.ZERO;
-                BigDecimal yearAmount = balance != null && balance.getYearDebit() != null 
-                        ? balance.getYearDebit() : BigDecimal.ZERO;
+                BigDecimal currentAmount = balance != null
+                        ? nvl(balance.getPeriodDebit()).subtract(nvl(balance.getPeriodCredit()))
+                        : BigDecimal.ZERO;
+                BigDecimal yearAmount = balance != null
+                        ? nvl(balance.getYearDebit()).subtract(nvl(balance.getYearCredit()))
+                        : BigDecimal.ZERO;
 
                 IncomeStatementItem item = new IncomeStatementItem();
                 item.setRowNo(rowNo++);
@@ -270,16 +275,18 @@ public class ReportServiceImpl implements ReportService {
             }
         }
 
-        // 四、销售费用
+        // 四、销售费用(净额)
         BigDecimal sellingExpense = BigDecimal.ZERO;
         BigDecimal sellingExpenseYear = BigDecimal.ZERO;
         for (Subject subject : expenseSubjects) {
             if (subject.getCode().startsWith("5601")) {
                 AccountBalance balance = balanceMap.get(subject.getId());
-                BigDecimal currentAmount = balance != null && balance.getPeriodDebit() != null 
-                        ? balance.getPeriodDebit() : BigDecimal.ZERO;
-                BigDecimal yearAmount = balance != null && balance.getYearDebit() != null 
-                        ? balance.getYearDebit() : BigDecimal.ZERO;
+                BigDecimal currentAmount = balance != null
+                        ? nvl(balance.getPeriodDebit()).subtract(nvl(balance.getPeriodCredit()))
+                        : BigDecimal.ZERO;
+                BigDecimal yearAmount = balance != null
+                        ? nvl(balance.getYearDebit()).subtract(nvl(balance.getYearCredit()))
+                        : BigDecimal.ZERO;
 
                 IncomeStatementItem item = new IncomeStatementItem();
                 item.setRowNo(rowNo++);
@@ -294,16 +301,18 @@ public class ReportServiceImpl implements ReportService {
             }
         }
 
-        // 五、管理费用
+        // 五、管理费用(净额)
         BigDecimal adminExpense = BigDecimal.ZERO;
         BigDecimal adminExpenseYear = BigDecimal.ZERO;
         for (Subject subject : expenseSubjects) {
             if (subject.getCode().startsWith("5602")) {
                 AccountBalance balance = balanceMap.get(subject.getId());
-                BigDecimal currentAmount = balance != null && balance.getPeriodDebit() != null 
-                        ? balance.getPeriodDebit() : BigDecimal.ZERO;
-                BigDecimal yearAmount = balance != null && balance.getYearDebit() != null 
-                        ? balance.getYearDebit() : BigDecimal.ZERO;
+                BigDecimal currentAmount = balance != null
+                        ? nvl(balance.getPeriodDebit()).subtract(nvl(balance.getPeriodCredit()))
+                        : BigDecimal.ZERO;
+                BigDecimal yearAmount = balance != null
+                        ? nvl(balance.getYearDebit()).subtract(nvl(balance.getYearCredit()))
+                        : BigDecimal.ZERO;
 
                 IncomeStatementItem item = new IncomeStatementItem();
                 item.setRowNo(rowNo++);
@@ -318,16 +327,18 @@ public class ReportServiceImpl implements ReportService {
             }
         }
 
-        // 六、财务费用
+        // 六、财务费用(净额)
         BigDecimal financeExpense = BigDecimal.ZERO;
         BigDecimal financeExpenseYear = BigDecimal.ZERO;
         for (Subject subject : expenseSubjects) {
             if (subject.getCode().startsWith("5603")) {
                 AccountBalance balance = balanceMap.get(subject.getId());
-                BigDecimal currentAmount = balance != null && balance.getPeriodDebit() != null 
-                        ? balance.getPeriodDebit() : BigDecimal.ZERO;
-                BigDecimal yearAmount = balance != null && balance.getYearDebit() != null 
-                        ? balance.getYearDebit() : BigDecimal.ZERO;
+                BigDecimal currentAmount = balance != null
+                        ? nvl(balance.getPeriodDebit()).subtract(nvl(balance.getPeriodCredit()))
+                        : BigDecimal.ZERO;
+                BigDecimal yearAmount = balance != null
+                        ? nvl(balance.getYearDebit()).subtract(nvl(balance.getYearCredit()))
+                        : BigDecimal.ZERO;
 
                 IncomeStatementItem item = new IncomeStatementItem();
                 item.setRowNo(rowNo++);
@@ -1583,6 +1594,13 @@ public class ReportServiceImpl implements ReportService {
         sb.append("</tbody></table>");
         sb.append("<div class=\"footer\">打印日期：").append(printDate).append("</div>");
         return sb.toString();
+    }
+
+    /**
+     * BigDecimal null安全处理,null返回ZERO
+     */
+    private BigDecimal nvl(BigDecimal value) {
+        return value != null ? value : BigDecimal.ZERO;
     }
 
     /**

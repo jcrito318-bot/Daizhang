@@ -929,8 +929,15 @@ public class PeriodServiceImpl implements PeriodService {
         for (Subject subject : subjects) {
             if (subject.getCode() != null && subject.getCode().startsWith("5001")) {
                 AccountBalance balance = balanceMap.get(subject.getId());
-                if (balance != null && balance.getPeriodCredit() != null) {
-                    totalSalesRevenue = totalSalesRevenue.add(balance.getPeriodCredit());
+                if (balance != null) {
+                    // 销售收入净额 = 贷方发生额 - 借方发生额(销售退回/红字冲销)
+                    // 忽略借方(退回)会导致收入虚高,进而成本虚增、库存虚减
+                    BigDecimal credit = balance.getPeriodCredit() != null ? balance.getPeriodCredit() : BigDecimal.ZERO;
+                    BigDecimal debit = balance.getPeriodDebit() != null ? balance.getPeriodDebit() : BigDecimal.ZERO;
+                    BigDecimal netRevenue = credit.subtract(debit);
+                    if (netRevenue.compareTo(BigDecimal.ZERO) > 0) {
+                        totalSalesRevenue = totalSalesRevenue.add(netRevenue);
+                    }
                 }
             }
         }

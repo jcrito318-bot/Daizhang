@@ -1,6 +1,7 @@
 package com.company.daizhang.common.config;
 
 import com.company.daizhang.common.utils.JwtUtils;
+import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -46,6 +47,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 log.warn("token 已登出(在黑名单中),访问被拒绝");
             } else {
                 try {
+                    Claims claims = jwtUtils.validateToken(token);
+                    // 拒绝refresh token用作access token: refresh token有效期7天,若可直接访问API则access token短有效期机制失效
+                    if ("refresh".equals(claims.get("type"))) {
+                        log.warn("refresh token 被用作 access token,已拒绝");
+                        return;
+                    }
                     String username = jwtUtils.getUsername(token);
                     UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 

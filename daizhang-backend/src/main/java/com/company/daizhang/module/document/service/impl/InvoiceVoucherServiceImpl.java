@@ -213,7 +213,6 @@ public class InvoiceVoucherServiceImpl implements InvoiceVoucherService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public List<Long> batchGenerateInputVouchers(Long accountSetId, String startDate, String endDate) {
         LambdaQueryWrapper<InputInvoice> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(InputInvoice::getAccountSetId, accountSetId)
@@ -241,7 +240,6 @@ public class InvoiceVoucherServiceImpl implements InvoiceVoucherService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public List<Long> batchGenerateOutputVouchers(Long accountSetId, String startDate, String endDate) {
         LambdaQueryWrapper<OutputInvoice> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(OutputInvoice::getAccountSetId, accountSetId)

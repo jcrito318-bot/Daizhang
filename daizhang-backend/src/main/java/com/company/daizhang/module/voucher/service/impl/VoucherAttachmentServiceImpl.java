@@ -3,8 +3,12 @@ package com.company.daizhang.module.voucher.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.company.daizhang.common.exception.BusinessException;
+import com.company.daizhang.common.exception.ErrorCode;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
+import com.company.daizhang.module.voucher.entity.Voucher;
 import com.company.daizhang.module.voucher.entity.VoucherAttachment;
 import com.company.daizhang.module.voucher.mapper.VoucherAttachmentMapper;
+import com.company.daizhang.module.voucher.mapper.VoucherMapper;
 import com.company.daizhang.module.voucher.service.VoucherAttachmentService;
 import com.company.daizhang.module.voucher.vo.VoucherAttachmentVO;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +34,8 @@ import java.util.stream.Collectors;
 public class VoucherAttachmentServiceImpl implements VoucherAttachmentService {
 
     private final VoucherAttachmentMapper voucherAttachmentMapper;
+    private final VoucherMapper voucherMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Value("${file.upload-path:./data/uploads/}")
     private String uploadPath;
@@ -49,6 +55,11 @@ public class VoucherAttachmentServiceImpl implements VoucherAttachmentService {
 
     @Override
     public List<VoucherAttachmentVO> listByVoucherId(Long voucherId) {
+        Voucher voucher = voucherMapper.selectById(voucherId);
+        if (voucher == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+        }
+        accountSetAccessService.checkAccess(voucher.getAccountSetId());
         LambdaQueryWrapper<VoucherAttachment> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(VoucherAttachment::getVoucherId, voucherId)
                .orderByDesc(VoucherAttachment::getCreateTime);
@@ -61,6 +72,11 @@ public class VoucherAttachmentServiceImpl implements VoucherAttachmentService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public VoucherAttachmentVO uploadAttachment(Long voucherId, MultipartFile file) {
+        Voucher voucher = voucherMapper.selectById(voucherId);
+        if (voucher == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+        }
+        accountSetAccessService.checkOwner(voucher.getAccountSetId());
         if (file == null || file.isEmpty()) {
             throw new BusinessException("上传文件不能为空");
         }
@@ -119,6 +135,11 @@ public class VoucherAttachmentServiceImpl implements VoucherAttachmentService {
         if (attachment == null) {
             throw new BusinessException("附件不存在");
         }
+        Voucher voucher = voucherMapper.selectById(attachment.getVoucherId());
+        if (voucher == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+        }
+        accountSetAccessService.checkOwner(voucher.getAccountSetId());
 
         // 删除物理文件
         File file = new File(attachment.getFilePath());

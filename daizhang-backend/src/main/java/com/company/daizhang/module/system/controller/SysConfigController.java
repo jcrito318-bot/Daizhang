@@ -25,6 +25,7 @@ public class SysConfigController {
 
     @Operation(summary = "分页查询系统设置")
     @GetMapping("/page")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<PageResult<SysConfigVO>> page(
             @RequestParam(required = false) String configKey,
             @RequestParam(required = false) String configName,
@@ -36,6 +37,7 @@ public class SysConfigController {
 
     @Operation(summary = "根据key获取配置值")
     @GetMapping("/value")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<String> getValue(@RequestParam String key) {
         String value = sysConfigService.getConfigValue(key);
         return Result.success(value);

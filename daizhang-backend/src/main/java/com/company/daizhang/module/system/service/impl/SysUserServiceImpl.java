@@ -31,7 +31,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -53,17 +52,6 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     // 邮箱正则
     private static final Pattern EMAIL_PATTERN = Pattern.compile("^[\\w-]+(\\.[\\w-]+)*@[\\w-]+(\\.[\\w-]+)+$");
 
-    /**
-     * 已禁用用户的时间戳记录(userId -> 禁用时间戳毫秒)。
-     * <p>
-     * 用于缓解 JWT 无状态下"禁用用户后已签发 token 在过期前仍有效"的问题:
-     * 禁用用户时记录时间戳,启用时移除。生产环境建议由 JwtAuthenticationFilter
-     * 在校验 token 时一并检查用户是否在本记录中(或查询 sys_user.status),
-     * 并配合短 token 有效期或 Redis 黑名单(按 userId 维度)以彻底失效 token。
-     * 当前 TokenBlacklist 仅按 token 字符串存储,无法按 userId 批量失效。
-     */
-    private static final ConcurrentHashMap<Long, Long> DISABLED_USER_TIME = new ConcurrentHashMap<>();
-    
     @Override
     public PageResult<UserVO> pageUsers(UserQueryRequest request) {
         Page<SysUser> page = new Page<>(request.getPageNum(), request.getPageSize());
@@ -283,7 +271,7 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         
         // 不能删除管理员:按角色编码判断(大小写不敏感),同时保护id=1的种子管理员账户
         // 原代码 CommonConstant.SUPER_ADMIN="ADMIN" 与种子用户名"admin"大小写不一致导致校验失效
-        if (id != null && id == 1L) {
+        if (id != null && id.longValue() == 1L) {
             throw new BusinessException(ErrorCode.USER_CANNOT_DELETE_ADMIN);
         }
         if (user.getUsername() != null
@@ -361,19 +349,6 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         user.setStatus(status);
         this.updateById(user);
 
-        // 禁用用户(status=0)时记录禁用时间戳,并告警提示已签发的 JWT 仍有效。
-        // JWT 无状态,当前 TokenBlacklist 仅按 token 字符串存储(用于登出),无法按 userId 批量失效,
-        // 因此已签发 token 在过期前仍可访问。生产环境建议由 JwtAuthenticationFilter 校验用户禁用状态,
-        // 或使用按 userId 维度的 Redis 黑名单与短 token 有效期彻底失效。
-        if (status == 0) {
-            DISABLED_USER_TIME.put(id, System.currentTimeMillis());
-            log.warn("用户已被禁用,用户ID: {}. 注意: 由于 JWT 无状态,该用户已签发的 token 在过期前仍有效; "
-                    + "建议在 JwtAuthenticationFilter 中校验用户禁用状态或使用 Redis 黑名单", id);
-        } else {
-            // 重新启用时移除禁用记录
-            DISABLED_USER_TIME.remove(id);
-        }
-
         log.info("更新用户状态成功，用户ID: {}, 状态: {}", id, status);
     }
     
@@ -408,7 +383,7 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
 
         // 设置权限（管理员拥有所有权限）
         List<String> permissions = new ArrayList<>();
-        if (userRoles.stream().anyMatch(ur -> ur.getRoleId() == 1L)) {
+        if (userRoles.stream().anyMatch(ur -> ur.getRoleId() != null && ur.getRoleId().longValue() == 1L)) {
             permissions.add("*");
         }
         vo.setPermissions(permissions);

@@ -32,6 +32,7 @@ public class DataBackupController {
 
     @Operation(summary = "列出所有备份文件")
     @GetMapping("/list")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<List<Map<String, Object>>> list() {
         List<Map<String, Object>> list = dataBackupService.listBackups();
         return Result.success(list);

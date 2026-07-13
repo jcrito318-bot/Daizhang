@@ -104,12 +104,12 @@ function formatAmount(val: number | string | null | undefined): string {
 }
 
 function getStatusType(status: number): string {
-  const types: Record<number, string> = { 0: 'info', 1: 'success', 2: 'warning' }
+  const types: Record<number, string> = { 0: 'warning', 1: 'success', 2: 'info' }
   return types[status] || 'info'
 }
 
 function getStatusText(status: number): string {
-  const texts: Record<number, string> = { 0: '草稿', 1: '已审核', 2: '已记账' }
+  const texts: Record<number, string> = { 0: '未审核', 1: '已审核', 2: '已过账' }
   return texts[status] || '未知'
 }
 

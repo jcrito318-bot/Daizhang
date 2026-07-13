@@ -2,9 +2,12 @@ package com.company.daizhang.module.bank.controller;
 
 import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.exception.BusinessException;
+import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.bank.dto.*;
+import com.company.daizhang.module.bank.entity.BankTransaction;
 import com.company.daizhang.module.bank.service.BankService;
 import com.company.daizhang.module.bank.vo.BankReconciliationVO;
 import com.company.daizhang.module.bank.vo.BankTransactionVO;
@@ -14,6 +17,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
@@ -32,6 +36,7 @@ import java.util.Map;
 public class BankController {
 
     private final BankService bankService;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Operation(summary = "导入银行流水")
     @PostMapping("/transaction/import")
@@ -56,7 +61,13 @@ public class BankController {
 
     @Operation(summary = "删除银行流水")
     @DeleteMapping("/transaction/{id}")
+    @Transactional(rollbackFor = Exception.class)
     public Result<Void> deleteTransaction(@PathVariable Long id) {
+        BankTransaction transaction = bankService.getById(id);
+        if (transaction == null) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+        }
+        accountSetAccessService.checkOwner(transaction.getAccountSetId());
         bankService.removeById(id);
         return Result.success();
     }

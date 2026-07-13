@@ -108,6 +108,7 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
 
         AssetCategory category = new AssetCategory();
         BeanUtil.copyProperties(request, category);
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         assetCategoryMapper.insert(category);
     }
 
@@ -239,6 +240,7 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         );
         asset.setMonthlyDepreciation(monthlyDepreciation);
 
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         this.save(asset);
     }
 

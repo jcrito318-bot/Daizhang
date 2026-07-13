@@ -166,7 +166,7 @@ const flatSubjects = computed(() => {
 const form = reactive<VoucherCreateRequest & { attachmentCount?: number }>({
   accountSetId: appStore.currentAccountSetId || 0,
   voucherWordId: undefined,
-  voucherDate: new Date().toISOString().slice(0, 10),
+  voucherDate: new Date().toLocaleDateString('sv-SE'),
   year: new Date().getFullYear(),
   month: new Date().getMonth() + 1,
   attachmentCount: 0,
@@ -269,7 +269,15 @@ async function handleSubmit() {
     const date = new Date(form.voucherDate)
     form.year = date.getFullYear()
     form.month = date.getMonth() + 1
-    form.accountSetId = appStore.currentAccountSetId || 0
+    // 编辑模式下保留已加载的accountSetId,新增模式取当前账套
+    if (!isEdit.value) {
+      const accountSetId = appStore.currentAccountSetId
+      if (!accountSetId) {
+        ElMessage.warning('请先选择账套')
+        return
+      }
+      form.accountSetId = accountSetId
+    }
 
     submitLoading.value = true
     try {
@@ -306,7 +314,7 @@ async function loadVoucherDetail(id: number) {
     form.year = voucher.year
     form.month = voucher.month
     form.attachmentCount = voucher.attachmentCount
-    form.details = voucher.details.map(d => ({
+    form.details = (voucher.details || []).map(d => ({
       lineNo: d.lineNo,
       summary: d.summary,
       subjectId: d.subjectId,

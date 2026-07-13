@@ -88,6 +88,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         InputInvoice invoice = new InputInvoice();
         BeanUtil.copyProperties(request, invoice);
         invoice.setAuthStatus(0);
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         inputInvoiceMapper.insert(invoice);
     }
 
@@ -195,6 +196,7 @@ public class InvoiceServiceImpl implements InvoiceService {
         OutputInvoice invoice = new OutputInvoice();
         BeanUtil.copyProperties(request, invoice);
         invoice.setInvoiceStatus(0);
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         outputInvoiceMapper.insert(invoice);
     }
 
