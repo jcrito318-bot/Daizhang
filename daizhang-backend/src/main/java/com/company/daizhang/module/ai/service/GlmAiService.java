@@ -15,6 +15,7 @@ import java.net.InetAddress;
 import java.net.URL;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -33,6 +34,10 @@ public class GlmAiService {
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
+            // 关闭重定向跟随:防止 SSRF 校验通过的 URL 通过 302 跳转到内网/云元数据服务
+            // (如 https://attacker.com/img.jpg -> http://169.254.169.254/latest/meta-data/)
+            .followRedirects(false)
+            .followSslRedirects(false)
             .build();
 
     /**
@@ -62,7 +67,8 @@ public class GlmAiService {
      */
     public String recognizeInvoice(byte[] imageBytes, Integer invoiceType) throws IOException {
         if (!aiConfig.getEnabled()) {
-            throw new RuntimeException("AI功能未启用");
+            // 用业务异常替代 RuntimeException,便于 GlobalExceptionHandler 统一处理且不暴露堆栈
+            throw new BusinessException(ErrorCode.AI_NOT_ENABLED, "AI功能未启用");
         }
 
         // 将图片转换为Base64
@@ -74,8 +80,12 @@ public class GlmAiService {
         // 调用GLM API
         String response = callGlmApi(request, aiConfig.getOcrModel());
 
+        // 统一清理 GLM 返回结果中的 markdown 代码块包裹(如 ```json ... ```)
+        // 这样所有 OCR 入口(/invoice、/base64、/url、/invoice-and-save)都得到纯净 JSON,前端无需重复处理
+        String cleaned = cleanJsonResult(response);
+
         log.info("票据识别完成，票据类型：{}", invoiceType == null ? "自动识别" : getInvoiceTypeName(invoiceType));
-        return response;
+        return cleaned;
     }
 
     /**
@@ -133,10 +143,58 @@ public class GlmAiService {
     public byte[] downloadImageFromUrl(String imageUrl) throws IOException {
         // SSRF防护:校验协议白名单 + 禁止访问内网/保留地址段
         // 原实现直接用用户输入URL发起请求,可探测内网/读取云元数据(169.254.169.254)
-        validateImageUrl(imageUrl);
+        URL parsedUrl;
+        try {
+            parsedUrl = new URL(imageUrl);
+        } catch (java.net.MalformedURLException e) {
+            throw new IOException("URL格式不合法");
+        }
+        String protocol = parsedUrl.getProtocol();
+        if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) {
+            throw new IOException("仅支持http/https协议");
+        }
+        String host = parsedUrl.getHost();
+        if (host == null || host.isEmpty()) {
+            throw new IOException("URL缺少主机名");
+        }
+
+        // 解析所有IP并逐一校验,防止多IP中混入内网地址;校验通过后直接用 IP 直连防 DNS rebinding
+        InetAddress[] addrs = InetAddress.getAllByName(host);
+        InetAddress chosenIp = null;
+        for (InetAddress addr : addrs) {
+            if (addr.isAnyLocalAddress()
+                    || addr.isLoopbackAddress()
+                    || addr.isSiteLocalAddress()
+                    || addr.isLinkLocalAddress()
+                    || addr.isMulticastAddress()) {
+                throw new IOException("禁止访问内网/保留地址");
+            }
+            // 显式拦截云元数据服务地址(169.254.169.254等链路本地,部分JVM实现未归入isLinkLocalAddress)
+            // 同时拦截IPv6链路本地 fe80::/10 与 ULA fc00::/7
+            String ip = addr.getHostAddress();
+            if (ip.startsWith("169.254.") || ip.startsWith("0.") || ip.startsWith("fe80")
+                    || ip.startsWith("FC") || ip.startsWith("FD") || ip.startsWith("fc") || ip.startsWith("fd")) {
+                throw new IOException("禁止访问保留地址段");
+            }
+            if (chosenIp == null) {
+                chosenIp = addr;
+            }
+        }
+        if (chosenIp == null) {
+            throw new IOException("无法解析图片URL主机");
+        }
+
+        // 使用解析后的 IP 直连,Host 头保持原域名以兼容虚拟主机
+        int port = parsedUrl.getPort();
+        String path = parsedUrl.getPath() + (parsedUrl.getQuery() != null ? "?" + parsedUrl.getQuery() : "");
+        String ipStr = chosenIp.getHostAddress();
+        // IPv6 地址需用方括号包裹
+        String hostPart = (ipStr.contains(":") ? "[" + ipStr + "]" : ipStr) + (port > 0 ? ":" + port : "");
+        String directUrl = parsedUrl.getProtocol() + "://" + hostPart + path;
 
         Request request = new Request.Builder()
-                .url(imageUrl)
+                .url(directUrl)
+                .header("Host", host)
                 .build();
 
         try (Response response = httpClient.newCall(request).execute()) {
@@ -147,51 +205,32 @@ public class GlmAiService {
             if (body == null) {
                 throw new IOException("下载图片失败，响应体为空");
             }
-            // 限制响应体大小(20MB),防止用SSRF做盲打放大攻击
+            // 限制响应体大小(20MB),防止用SSRF做盲打放大攻击或 OOM
             long contentLength = body.contentLength();
             if (contentLength > 20L * 1024 * 1024) {
                 throw new IOException("图片体积超过限制(20MB)");
             }
-            return body.bytes();
+            // 读取时按字节上限截断,防止 chunked transfer 不返回 Content-Length 时 OOM
+            return readWithLimit(body.byteStream(), 20L * 1024 * 1024);
         }
     }
 
     /**
-     * 校验图片URL,防止SSRF
-     * - 仅允许http/https协议
-     * - 拒绝内网/保留/环回/链路本地地址
+     * 限制最大读取字节数,防止恶意服务器无限制返回数据导致 OOM
      */
-    private void validateImageUrl(String imageUrl) throws IOException {
-        URL url;
-        try {
-            url = new URL(imageUrl);
-        } catch (java.net.MalformedURLException e) {
-            throw new IOException("URL格式不合法: " + e.getMessage());
-        }
-        String protocol = url.getProtocol();
-        if (!"http".equalsIgnoreCase(protocol) && !"https".equalsIgnoreCase(protocol)) {
-            throw new IOException("仅支持http/https协议,拒绝: " + protocol);
-        }
-        String host = url.getHost();
-        if (host == null || host.isEmpty()) {
-            throw new IOException("URL缺少主机名");
-        }
-        // 解析所有IP并逐一校验,防止多IP中混入内网地址
-        InetAddress[] addrs = InetAddress.getAllByName(host);
-        for (InetAddress addr : addrs) {
-            if (addr.isAnyLocalAddress()
-                    || addr.isLoopbackAddress()
-                    || addr.isSiteLocalAddress()
-                    || addr.isLinkLocalAddress()
-                    || addr.isMulticastAddress()) {
-                throw new IOException("禁止访问内网/保留地址: " + addr.getHostAddress());
+    private byte[] readWithLimit(java.io.InputStream is, long maxBytes) throws IOException {
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        long total = 0;
+        int n;
+        while ((n = is.read(buffer)) != -1) {
+            total += n;
+            if (total > maxBytes) {
+                throw new IOException("图片体积超过限制(" + (maxBytes / 1024 / 1024) + "MB)");
             }
-            // 显式拦截云元数据服务地址(169.254.169.254等链路本地,部分JVM实现未归入isLinkLocalAddress)
-            String ip = addr.getHostAddress();
-            if (ip.startsWith("169.254.") || ip.startsWith("0.")) {
-                throw new IOException("禁止访问保留地址段: " + ip);
-            }
+            baos.write(buffer, 0, n);
         }
+        return baos.toByteArray();
     }
 
     /**
@@ -202,7 +241,7 @@ public class GlmAiService {
      */
     public String suggestAccounting(String description, Double amount) {
         if (!aiConfig.getEnabled()) {
-            throw new RuntimeException("AI功能未启用");
+            throw new BusinessException(ErrorCode.AI_NOT_ENABLED, "AI功能未启用");
         }
 
         // 入参校验：金额必须为正数。amount 为 Double 包装类，
@@ -228,7 +267,7 @@ public class GlmAiService {
      */
     public String chat(String question) {
         if (!aiConfig.getEnabled()) {
-            throw new RuntimeException("AI功能未启用");
+            throw new BusinessException(ErrorCode.AI_NOT_ENABLED, "AI功能未启用");
         }
         if (question == null || question.trim().isEmpty()) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "问题不能为空");
@@ -396,13 +435,19 @@ public class GlmAiService {
                 log.info("GLM API响应成功");
 
                 // 解析响应，提取content
+                // 注意：Jackson 默认将 JSON 数组反序列化为 ArrayList，不能强转为 Object[]，否则必抛 ClassCastException
                 Map<String, Object> responseMap = objectMapper.readValue(responseBody, Map.class);
-                Object[] choices = (Object[]) responseMap.get("choices");
-                if (choices != null && choices.length > 0) {
-                    Map<String, Object> firstChoice = (Map<String, Object>) choices[0];
-                    Map<String, Object> message = (Map<String, Object>) firstChoice.get("message");
-                    if (message != null) {
-                        return (String) message.get("content");
+                Object choicesObj = responseMap.get("choices");
+                if (choicesObj instanceof List<?> choicesList && !choicesList.isEmpty()) {
+                    Object firstChoiceObj = choicesList.get(0);
+                    if (firstChoiceObj instanceof Map<?, ?> firstChoice) {
+                        Object messageObj = firstChoice.get("message");
+                        if (messageObj instanceof Map<?, ?> message) {
+                            Object content = message.get("content");
+                            if (content != null) {
+                                return content.toString();
+                            }
+                        }
                     }
                 }
 
