@@ -1,5 +1,7 @@
 package com.company.daizhang.module.customer.dto;
 
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
@@ -45,6 +47,9 @@ public class ContractCreateRequest {
     /**
      * 合同金额
      */
+    @NotNull(message = "合同金额不能为空")
+    @DecimalMin(value = "0", message = "合同金额不能为负数")
+    @Digits(integer = 15, fraction = 2, message = "合同金额精度超出范围")
     private BigDecimal amount;
 
     /**

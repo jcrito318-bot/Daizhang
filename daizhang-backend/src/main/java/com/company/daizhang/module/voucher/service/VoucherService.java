@@ -140,4 +140,15 @@ public interface VoucherService extends IService<Voucher> {
      * @param id 草稿凭证ID
      */
     void submitDraft(Long id);
+
+    /**
+     * 删除指定期间内系统生成的结转凭证(source=1),并反向回滚其对科目余额的影响。
+     * 仅在反结账场景由系统内部调用,不暴露给用户直接调用。
+     *
+     * @param accountSetId 账套ID
+     * @param year         年
+     * @param month        月
+     * @return 删除的凭证数量
+     */
+    int deleteCarryForwardVouchers(Long accountSetId, int year, int month);
 }

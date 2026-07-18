@@ -11,6 +11,7 @@ import com.company.daizhang.module.inventory.entity.InventoryOut;
 import com.company.daizhang.module.inventory.entity.InventoryStock;
 import com.company.daizhang.module.inventory.service.InventoryService;
 import io.swagger.v3.oas.annotations.Operation;
+import jakarta.validation.Valid;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -41,14 +42,14 @@ public class InventoryController {
     @PostMapping("/item")
     @OperationLog("新增商品")
     @RequireAccountSetAccess(RequireAccountSetAccess.AccessLevel.OWNER)
-    public Result<Long> createItem(@RequestBody InventoryItemCreateRequest request) {
+    public Result<Long> createItem(@Valid @RequestBody InventoryItemCreateRequest request) {
         return Result.success(inventoryService.createItem(request));
     }
 
     @Operation(summary = "修改商品")
     @PutMapping("/item")
     @OperationLog("修改商品")
-    public Result<Void> updateItem(@RequestBody InventoryItemUpdateRequest request) {
+    public Result<Void> updateItem(@Valid @RequestBody InventoryItemUpdateRequest request) {
         inventoryService.updateItem(request);
         return Result.success();
     }
@@ -89,14 +90,14 @@ public class InventoryController {
     @PostMapping("/in")
     @OperationLog("新增入库单")
     @RequireAccountSetAccess(RequireAccountSetAccess.AccessLevel.OWNER)
-    public Result<Long> createIn(@RequestBody InventoryInCreateRequest request) {
+    public Result<Long> createIn(@Valid @RequestBody InventoryInCreateRequest request) {
         return Result.success(inventoryService.createIn(request));
     }
 
     @Operation(summary = "修改入库单")
     @PutMapping("/in")
     @OperationLog("修改入库单")
-    public Result<Void> updateIn(@RequestBody InventoryInUpdateRequest request) {
+    public Result<Void> updateIn(@Valid @RequestBody InventoryInUpdateRequest request) {
         inventoryService.updateIn(request);
         return Result.success();
     }
@@ -133,14 +134,14 @@ public class InventoryController {
     @PostMapping("/out")
     @OperationLog("新增出库单")
     @RequireAccountSetAccess(RequireAccountSetAccess.AccessLevel.OWNER)
-    public Result<Long> createOut(@RequestBody InventoryOutCreateRequest request) {
+    public Result<Long> createOut(@Valid @RequestBody InventoryOutCreateRequest request) {
         return Result.success(inventoryService.createOut(request));
     }
 
     @Operation(summary = "修改出库单")
     @PutMapping("/out")
     @OperationLog("修改出库单")
-    public Result<Void> updateOut(@RequestBody InventoryOutUpdateRequest request) {
+    public Result<Void> updateOut(@Valid @RequestBody InventoryOutUpdateRequest request) {
         inventoryService.updateOut(request);
         return Result.success();
     }

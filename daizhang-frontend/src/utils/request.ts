@@ -2,17 +2,24 @@ import axios from 'axios'
 import type { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse } from 'axios'
 import { ElMessage } from 'element-plus'
 import type { Result } from '@/types/common'
+import { useUserStore } from '@/stores/user'
 
 const service: AxiosInstance = axios.create({
   baseURL: '/api',
   timeout: 30000
 })
 
+// 401 静默刷新:并发 401 共享同一次 refresh 尝试
+let isRefreshing = false
+let pendingRequests: Array<(token: string) => void> = []
+
 service.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const token = localStorage.getItem('token')
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`
+    // 通过 Pinia store 读取内存中的 access token,不再读 localStorage。
+    // 若调用方已显式设置 Authorization(如 /auth/refresh 用 refresh token),则不覆盖。
+    const userStore = useUserStore()
+    if (userStore.token && !config.headers.Authorization) {
+      config.headers.Authorization = `Bearer ${userStore.token}`
     }
     return config
   },
@@ -27,7 +34,7 @@ service.interceptors.response.use(
     if (res.code !== 200) {
       ElMessage.error(res.message || '请求失败')
       if (res.code === 401) {
-        localStorage.removeItem('token')
+        // 业务层 401:access token 已失效,刷新页面后由 initializeAuth 尝试静默恢复
         window.location.href = '/login'
       }
       return Promise.reject(new Error(res.message || '请求失败'))
@@ -36,12 +43,45 @@ service.interceptors.response.use(
     // 使 API 调用方通过 res.data 获取实际数据载荷,与 Promise<Result<T>> 类型一致
     return res as unknown as AxiosResponse
   },
-  (error) => {
+  async (error) => {
     if (error.response) {
       const status = error.response.status
-      if (status === 401) {
-        localStorage.removeItem('token')
-        window.location.href = '/login'
+      const originalConfig = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
+      // HTTP 401:尝试一次静默刷新 access token 后重放原请求
+      const isRefreshRequest = originalConfig?.url?.includes('/auth/refresh')
+      if (status === 401 && originalConfig && !originalConfig._retry && !isRefreshRequest) {
+        // 已有刷新在进行中:挂起等待新 token
+        if (isRefreshing) {
+          return new Promise((resolve, reject) => {
+            pendingRequests.push((newToken: string) => {
+              originalConfig.headers.Authorization = `Bearer ${newToken}`
+              service.request(originalConfig).then(resolve).catch(reject)
+            })
+          })
+        }
+        originalConfig._retry = true
+        isRefreshing = true
+        try {
+          const userStore = useUserStore()
+          const refreshed = await userStore.refreshToken()
+          if (refreshed) {
+            // 重放所有挂起的 401 请求
+            const newToken = userStore.token
+            pendingRequests.forEach((cb) => cb(newToken))
+            pendingRequests = []
+            // 重放当前请求
+            originalConfig.headers.Authorization = `Bearer ${newToken}`
+            return service.request(originalConfig)
+          }
+          // 刷新失败:清空挂起队列并跳转登录
+          pendingRequests = []
+          ElMessage.error('登录已过期，请重新登录')
+          window.location.href = '/login'
+          return Promise.reject(error)
+        } finally {
+          isRefreshing = false
+        }
+      } else if (status === 401) {
         ElMessage.error('登录已过期，请重新登录')
       } else if (status === 403) {
         ElMessage.error('没有权限访问该资源')

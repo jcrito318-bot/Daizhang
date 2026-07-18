@@ -3,10 +3,12 @@ package com.company.daizhang.module.salary.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.salary.dto.SpecialDeductionQueryRequest;
 import com.company.daizhang.module.salary.dto.SpecialDeductionRequest;
 import com.company.daizhang.module.salary.entity.Employee;
@@ -24,6 +26,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -36,14 +39,16 @@ public class SpecialDeductionServiceImpl implements SpecialDeductionService {
 
     private final SpecialDeductionMapper specialDeductionMapper;
     private final EmployeeMapper employeeMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Override
     public PageResult<SpecialDeductionVO> pageDeductions(SpecialDeductionQueryRequest request) {
         Page<SpecialDeduction> page = new Page<>(request.getPageNum(), request.getPageSize());
 
         LambdaQueryWrapper<SpecialDeduction> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(request.getAccountSetId() != null, SpecialDeduction::getAccountSetId, request.getAccountSetId())
-               .eq(request.getEmployeeId() != null, SpecialDeduction::getEmployeeId, request.getEmployeeId())
+        // IDOR治理:校验当前用户对该账套的访问权
+        applyAccountSetFilter(wrapper, SpecialDeduction::getAccountSetId, request.getAccountSetId());
+        wrapper.eq(request.getEmployeeId() != null, SpecialDeduction::getEmployeeId, request.getEmployeeId())
                .like(StrUtil.isNotBlank(request.getEmployeeName()), SpecialDeduction::getEmployeeName, request.getEmployeeName())
                .eq(StrUtil.isNotBlank(request.getDeductionType()), SpecialDeduction::getDeductionType, request.getDeductionType())
                .eq(request.getStatus() != null, SpecialDeduction::getStatus, request.getStatus())
@@ -181,5 +186,30 @@ public class SpecialDeductionServiceImpl implements SpecialDeductionService {
             case "INFANT_CARE": return "3岁以下婴幼儿照护";
             default: return type;
         }
+    }
+
+    /**
+     * 分页/列表查询的账套访问过滤(IDOR治理):
+     * - accountSetId 非空: checkAccess 校验后按该账套精确过滤
+     * - accountSetId 为空: 按当前用户可访问账套集合过滤(超级管理员返回null表示不限制;
+     *   空集合表示无权限,注入永不命中条件避免 MyBatis-Plus 对空集合in跳过导致越权)
+     */
+    private <T> void applyAccountSetFilter(LambdaQueryWrapper<T> wrapper,
+                                           SFunction<T, Long> accountSetIdColumn,
+                                           Long accountSetId) {
+        if (accountSetId != null) {
+            accountSetAccessService.checkAccess(accountSetId);
+            wrapper.eq(accountSetIdColumn, accountSetId);
+            return;
+        }
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds == null) {
+            return;
+        }
+        if (accessibleIds.isEmpty()) {
+            wrapper.eq(accountSetIdColumn, -1L);
+            return;
+        }
+        wrapper.in(accountSetIdColumn, accessibleIds);
     }
 }

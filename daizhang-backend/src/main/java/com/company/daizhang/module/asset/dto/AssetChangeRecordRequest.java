@@ -1,5 +1,7 @@
 package com.company.daizhang.module.asset.dto;
 
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
@@ -25,6 +27,9 @@ public class AssetChangeRecordRequest {
     @NotNull(message = "变动日期不能为空")
     private LocalDate changeDate;
 
+    @NotNull(message = "变动金额不能为空")
+    @DecimalMin(value = "0", message = "变动金额不能为负数")
+    @Digits(integer = 15, fraction = 2, message = "变动金额精度超出范围")
     private BigDecimal changeAmount;
 
     private String fromDepartment;

@@ -1,5 +1,7 @@
 package com.company.daizhang.module.salary.dto;
 
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
@@ -26,8 +28,14 @@ public class SpecialDeductionRequest {
 
     private String deductionName;
 
+    @NotNull(message = "月度金额不能为空")
+    @DecimalMin(value = "0", message = "月度金额不能为负数")
+    @Digits(integer = 12, fraction = 2, message = "月度金额精度超出范围")
     private BigDecimal monthlyAmount;
 
+    @NotNull(message = "年度金额不能为空")
+    @DecimalMin(value = "0", message = "年度金额不能为负数")
+    @Digits(integer = 12, fraction = 2, message = "年度金额精度超出范围")
     private BigDecimal annualAmount;
 
     private LocalDate effectiveFrom;

@@ -141,5 +141,23 @@ public class JwtUtils {
             return 0L;
         }
     }
+
+    /**
+     * B-022 修复:判断 token 是否为 refresh token。
+     * refresh token 在 claims 中带 type=refresh 标识,有效期长达7天;
+     * 若被当作 access token 用于业务接口访问,等同于变相延长 access token 有效期,
+     * 丢失了"短 access token + 长 refresh token"分层失效的安全收益。
+     *
+     * @param token JWT
+     * @return true=refresh token,false=access token 或解析失败
+     */
+    public boolean isRefreshToken(String token) {
+        try {
+            Claims claims = validateToken(token);
+            return "refresh".equals(claims.get("type", String.class));
+        } catch (Exception e) {
+            return false;
+        }
+    }
 }
 

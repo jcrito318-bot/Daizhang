@@ -3,6 +3,7 @@ package com.company.daizhang.module.asset.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
@@ -21,7 +22,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -41,8 +44,9 @@ public class AssetChangeRecordServiceImpl implements AssetChangeRecordService {
         Page<AssetChangeRecord> page = new Page<>(pageNum, pageSize);
 
         LambdaQueryWrapper<AssetChangeRecord> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(accountSetId != null, AssetChangeRecord::getAccountSetId, accountSetId)
-               .eq(assetId != null, AssetChangeRecord::getAssetId, assetId)
+        // IDOR治理:校验当前用户对该账套的访问权
+        applyAccountSetFilter(wrapper, AssetChangeRecord::getAccountSetId, accountSetId);
+        wrapper.eq(assetId != null, AssetChangeRecord::getAssetId, assetId)
                .eq(StrUtil.isNotBlank(changeType), AssetChangeRecord::getChangeType, changeType)
                .orderByDesc(AssetChangeRecord::getChangeDate)
                .orderByDesc(AssetChangeRecord::getCreateTime);
@@ -58,6 +62,13 @@ public class AssetChangeRecordServiceImpl implements AssetChangeRecordService {
 
     @Override
     public List<AssetChangeRecordVO> listByAssetId(Long assetId) {
+        // IDOR治理:该方法无 accountSetId 入参,通过资产反查所属账套后校验访问权
+        FixedAsset asset = fixedAssetMapper.selectById(assetId);
+        if (asset == null) {
+            return Collections.emptyList();
+        }
+        accountSetAccessService.checkAccess(asset.getAccountSetId());
+
         LambdaQueryWrapper<AssetChangeRecord> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AssetChangeRecord::getAssetId, assetId)
                .orderByDesc(AssetChangeRecord::getChangeDate)
@@ -202,5 +213,30 @@ public class AssetChangeRecordServiceImpl implements AssetChangeRecordService {
         AssetChangeRecordVO vo = new AssetChangeRecordVO();
         BeanUtil.copyProperties(record, vo);
         return vo;
+    }
+
+    /**
+     * 分页/列表查询的账套访问过滤(IDOR治理):
+     * - accountSetId 非空: checkAccess 校验后按该账套精确过滤
+     * - accountSetId 为空: 按当前用户可访问账套集合过滤(超级管理员返回null表示不限制;
+     *   空集合表示无权限,注入永不命中条件避免 MyBatis-Plus 对空集合in跳过导致越权)
+     */
+    private <T> void applyAccountSetFilter(LambdaQueryWrapper<T> wrapper,
+                                           SFunction<T, Long> accountSetIdColumn,
+                                           Long accountSetId) {
+        if (accountSetId != null) {
+            accountSetAccessService.checkAccess(accountSetId);
+            wrapper.eq(accountSetIdColumn, accountSetId);
+            return;
+        }
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds == null) {
+            return;
+        }
+        if (accessibleIds.isEmpty()) {
+            wrapper.eq(accountSetIdColumn, -1L);
+            return;
+        }
+        wrapper.in(accountSetIdColumn, accessibleIds);
     }
 }

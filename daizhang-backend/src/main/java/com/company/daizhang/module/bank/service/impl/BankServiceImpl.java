@@ -4,6 +4,7 @@ import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
@@ -47,6 +48,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -145,8 +147,9 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
         Page<BankTransaction> page = new Page<>(request.getPageNum(), request.getPageSize());
 
         LambdaQueryWrapper<BankTransaction> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(BankTransaction::getAccountSetId, request.getAccountSetId())
-               .eq(StrUtil.isNotBlank(request.getBankAccount()), BankTransaction::getBankAccount, request.getBankAccount())
+        // IDOR治理:校验当前用户对该账套的访问权
+        applyAccountSetFilter(wrapper, BankTransaction::getAccountSetId, request.getAccountSetId());
+        wrapper.eq(StrUtil.isNotBlank(request.getBankAccount()), BankTransaction::getBankAccount, request.getBankAccount())
                .eq(request.getTransactionType() != null, BankTransaction::getTransactionType, request.getTransactionType())
                .eq(request.getMatchedStatus() != null, BankTransaction::getMatchedStatus, request.getMatchedStatus())
                .ge(request.getStartDate() != null, BankTransaction::getTransactionDate, request.getStartDate())
@@ -499,8 +502,9 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
         Page<BankReconciliation> page = new Page<>(request.getPageNum(), request.getPageSize());
 
         LambdaQueryWrapper<BankReconciliation> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(BankReconciliation::getAccountSetId, request.getAccountSetId())
-               .eq(StrUtil.isNotBlank(request.getBankAccount()), BankReconciliation::getBankAccount, request.getBankAccount())
+        // IDOR治理:校验当前用户对该账套的访问权
+        applyAccountSetFilter(wrapper, BankReconciliation::getAccountSetId, request.getAccountSetId());
+        wrapper.eq(StrUtil.isNotBlank(request.getBankAccount()), BankReconciliation::getBankAccount, request.getBankAccount())
                .orderByDesc(BankReconciliation::getYear)
                .orderByDesc(BankReconciliation::getMonth);
 
@@ -515,6 +519,8 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
 
     @Override
     public List<Map<String, Object>> smartMatch(Long accountSetId) {
+        // IDOR治理:校验当前用户对该账套的访问权
+        accountSetAccessService.checkAccess(accountSetId);
         // 1. 查询未匹配的银行流水
         LambdaQueryWrapper<BankTransaction> txWrapper = new LambdaQueryWrapper<>();
         txWrapper.eq(BankTransaction::getAccountSetId, accountSetId)
@@ -729,6 +735,8 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
         if (accountSetId == null) {
             throw new BusinessException("账套ID不能为空");
         }
+        // IDOR治理:校验当前用户对该账套的访问权
+        accountSetAccessService.checkAccess(accountSetId);
 
         LambdaQueryWrapper<BankTransaction> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(BankTransaction::getAccountSetId, accountSetId)
@@ -888,5 +896,30 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
         vo.setUnreconciledTransactions(unreconciledList);
 
         return vo;
+    }
+
+    /**
+     * 分页/列表查询的账套访问过滤(IDOR治理):
+     * - accountSetId 非空: checkAccess 校验后按该账套精确过滤
+     * - accountSetId 为空: 按当前用户可访问账套集合过滤(超级管理员返回null表示不限制;
+     *   空集合表示无权限,注入永不命中条件避免 MyBatis-Plus 对空集合in跳过导致越权)
+     */
+    private <T> void applyAccountSetFilter(LambdaQueryWrapper<T> wrapper,
+                                           SFunction<T, Long> accountSetIdColumn,
+                                           Long accountSetId) {
+        if (accountSetId != null) {
+            accountSetAccessService.checkAccess(accountSetId);
+            wrapper.eq(accountSetIdColumn, accountSetId);
+            return;
+        }
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds == null) {
+            return;
+        }
+        if (accessibleIds.isEmpty()) {
+            wrapper.eq(accountSetIdColumn, -1L);
+            return;
+        }
+        wrapper.in(accountSetIdColumn, accessibleIds);
     }
 }

@@ -74,7 +74,9 @@ async function handleLogin() {
     await userStore.login({ username: loginForm.username, password: loginForm.password })
     ElMessage.success('登录成功')
     const redirect = (route.query.redirect as string) || '/dashboard'
-    router.push(redirect)
+    // 防 Open Redirect：必须以 / 开头且不以 // 开头，否则回退到 /dashboard
+    const safeRedirect = redirect.startsWith('/') && !redirect.startsWith('//') ? redirect : '/dashboard'
+    router.push(safeRedirect)
   } catch {
     // error already handled by request interceptor
   } finally {

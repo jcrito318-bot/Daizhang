@@ -14,8 +14,10 @@ import com.company.daizhang.module.accountset.service.AccountPeriodService;
 import com.company.daizhang.module.accountset.vo.AccountPeriodVO;
 import com.company.daizhang.module.voucher.entity.Voucher;
 import com.company.daizhang.module.voucher.mapper.VoucherMapper;
+import com.company.daizhang.module.voucher.service.VoucherService;
 import com.company.daizhang.common.enums.VoucherStatus;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +30,7 @@ import java.util.stream.Collectors;
 /**
  * 会计期间服务实现
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AccountPeriodServiceImpl implements AccountPeriodService {
@@ -35,6 +38,7 @@ public class AccountPeriodServiceImpl implements AccountPeriodService {
     private final AccountPeriodMapper accountPeriodMapper;
     private final VoucherMapper voucherMapper;
     private final AccountBalanceMapper accountBalanceMapper;
+    private final VoucherService voucherService;
     
     @Override
     public List<AccountPeriodVO> listPeriods(Long accountSetId) {
@@ -124,13 +128,18 @@ public class AccountPeriodServiceImpl implements AccountPeriodService {
             throw new BusinessException(400, "试算不平衡，借方合计" + totalDebit + "≠贷方合计" + totalCredit + "，无法结账");
         }
 
-        // 使用LambdaUpdateWrapper确保null字段能正确更新
+        // B-009 修复:使用条件update(eq(status, 未结账))模拟乐观锁,防止双用户并发结账同一期间时同时通过校验
+        // 原实现仅按id更新,不检查状态条件,并发下两事务都会通过校验并执行update,导致重复结账/状态混乱
         LambdaUpdateWrapper<AccountPeriod> updateWrapper = new LambdaUpdateWrapper<>();
         updateWrapper.eq(AccountPeriod::getId, period.getId())
+                .eq(AccountPeriod::getStatus, 0) // 仅未结账期间可结账
                 .set(AccountPeriod::getStatus, 1)
                 .set(AccountPeriod::getCloseBy, SecurityUtils.getCurrentUserId())
                 .set(AccountPeriod::getCloseTime, LocalDateTime.now());
-        accountPeriodMapper.update(null, updateWrapper);
+        int affected = accountPeriodMapper.update(null, updateWrapper);
+        if (affected == 0) {
+            throw new BusinessException(400, "期间状态已变更(并发冲突)，请刷新后重试");
+        }
     }
 
     @Override
@@ -156,13 +165,27 @@ public class AccountPeriodServiceImpl implements AccountPeriodService {
             throw new BusinessException(400, "存在已结账的后续期间，请先反结账后续期间");
         }
 
+        // B-009 修复:使用条件update(eq(status, 已结账))模拟乐观锁,防止双用户并发反结账同一期间
         // 使用LambdaUpdateWrapper显式置空closeBy/closeTime,避免NOT_NULL策略导致null字段不更新
         LambdaUpdateWrapper<AccountPeriod> updateWrapper = new LambdaUpdateWrapper<>();
         updateWrapper.eq(AccountPeriod::getId, period.getId())
+                .eq(AccountPeriod::getStatus, 1) // 仅已结账期间可反结账
                 .set(AccountPeriod::getStatus, 0)
                 .set(AccountPeriod::getCloseBy, null)
                 .set(AccountPeriod::getCloseTime, null);
-        accountPeriodMapper.update(null, updateWrapper);
+        int affected = accountPeriodMapper.update(null, updateWrapper);
+        if (affected == 0) {
+            throw new BusinessException(400, "期间状态已变更(并发冲突)，请刷新后重试");
+        }
+
+        // B-008 修复:反结账时清理本期系统生成的结转凭证(source=1)并反向回滚余额。
+        // 否则重新结账会撞 carryForward 幂等校验,形成"反结账后无法重新结账"的死锁。
+        // 必须放在期间状态更新之后,因为 voucherService 内部 reverseAccountBalance 不依赖期间状态,
+        // 但若期间未先解锁,unpostVoucher 路径会被 checkPeriodNotClosed 拦截。
+        int deleted = voucherService.deleteCarryForwardVouchers(accountSetId, year, month);
+        if (deleted > 0) {
+            log.info("反结账清理:账套ID={},期间={}-{},删除{}张系统结转凭证", accountSetId, year, month, deleted);
+        }
     }
     
     @Override

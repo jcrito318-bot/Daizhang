@@ -20,7 +20,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -251,25 +253,39 @@ public class SysMenuServiceImpl extends ServiceImpl<SysMenuMapper, SysMenu> impl
                 .collect(Collectors.toList());
     }
     
-    private List<MenuVO> buildMenuTree(List<SysMenu> menus, Long parentId) {
-        List<MenuVO> tree = new ArrayList<>();
-        
+    /**
+     * B-029 修复:改用 Map 一次分组 + 递归填充,O(N) 替代原 O(N²)。
+     * 原递归对每个父节点都全表扫描过滤,O(d*N);菜单量大时(权限管理界面)树构建明显变慢。
+     */
+    private List<MenuVO> buildMenuTree(List<SysMenu> menus, Long rootParentId) {
+        // 1. 一次性将 SysMenu 转 MenuVO,并按 parentId 分组
+        Map<Long, List<MenuVO>> byParent = new HashMap<>();
         for (SysMenu menu : menus) {
-            if (parentId.equals(menu.getParentId())) {
-                MenuVO vo = convertToVO(menu);
-                vo.setChildren(buildMenuTree(menus, menu.getId()));
-                tree.add(vo);
+            if (menu.getParentId() == null) {
+                continue;
             }
+            MenuVO vo = convertToVO(menu);
+            byParent.computeIfAbsent(menu.getParentId(), k -> new ArrayList<>()).add(vo);
         }
-        
+        // 2. 从 root 递归填充 children(同时按 sortOrder 排序)
+        return fillMenuChildren(rootParentId, byParent);
+    }
+
+    private List<MenuVO> fillMenuChildren(Long parentId, Map<Long, List<MenuVO>> byParent) {
+        List<MenuVO> children = byParent.get(parentId);
+        if (children == null || children.isEmpty()) {
+            return new ArrayList<>();
+        }
+        for (MenuVO child : children) {
+            child.setChildren(fillMenuChildren(child.getId(), byParent));
+        }
         // 按排序号排序
-        tree.sort((a, b) -> {
+        children.sort((a, b) -> {
             int sortA = a.getSortOrder() != null ? a.getSortOrder() : 0;
             int sortB = b.getSortOrder() != null ? b.getSortOrder() : 0;
             return sortA - sortB;
         });
-        
-        return tree;
+        return children;
     }
     
     private MenuVO convertToVO(SysMenu menu) {

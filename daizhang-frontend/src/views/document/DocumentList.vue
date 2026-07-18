@@ -351,11 +351,13 @@ import { documentApi } from '@/api/document'
 import { voucherApi } from '@/api/voucher'
 import { aiApi } from '@/api/ai'
 import { useAppStore } from '@/stores/app'
+import { useUserStore } from '@/stores/user'
 import type { DocumentVO, DocumentCreateRequest, DocumentQueryRequest } from '@/types/document'
 import type { VoucherVO, VoucherQueryRequest } from '@/types/voucher'
 
 const router = useRouter()
 const appStore = useAppStore()
+const userStore = useUserStore()
 
 const loading = ref(false)
 const total = ref(0)
@@ -410,7 +412,7 @@ const formRules: FormRules = {
 }
 
 const uploadHeaders = computed(() => ({
-  Authorization: `Bearer ${localStorage.getItem('token') || ''}`
+  Authorization: `Bearer ${userStore.token || ''}`
 }))
 
 // 关联凭证弹窗

@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
+import { useUserStore } from '@/stores/user'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -216,11 +217,21 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach((to, _from, next) => {
-  const token = localStorage.getItem('token')
-  if (to.meta.requiresAuth && !token) {
-    next({ path: '/login', query: { redirect: to.fullPath } })
-  } else if (to.path === '/login' && token) {
+// 首次导航时静默初始化认证:若存在 refresh token 则换取新的 access token
+let authInitialized = false
+
+router.beforeEach(async (to, _from, next) => {
+  const userStore = useUserStore()
+  if (!authInitialized) {
+    authInitialized = true
+    await userStore.initializeAuth()
+  }
+  const loggedIn = userStore.isLoggedIn
+  if (to.meta.requiresAuth && !loggedIn) {
+    // 防 Open Redirect：拒绝以 // 开头的路径（会被浏览器解析为协议相对 URL 外跳）
+    const redirectPath = to.fullPath.startsWith('//') ? '/dashboard' : to.fullPath
+    next({ path: '/login', query: { redirect: redirectPath } })
+  } else if (to.path === '/login' && loggedIn) {
     next({ path: '/dashboard' })
   } else {
     next()

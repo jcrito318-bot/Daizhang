@@ -22,6 +22,15 @@ public interface AccountSetAccessService {
     void checkAccess(Long accountSetId);
 
     /**
+     * 校验当前用户对指定账套的写操作权限(仅 OWNER/ACCOUNTANT 通过,VIEWER 拒绝)。
+     * 用于审核/过账/反审核/反过账等状态变更操作,VIEWER 不应有此权限。
+     * 无权访问时抛 BusinessException(FORBIDDEN)。
+     *
+     * @param accountSetId 账套ID
+     */
+    void checkAccountantOrOwner(Long accountSetId);
+
+    /**
      * 校验当前用户对指定账套的所有者权限(仅 OWNER 通过)。
      * 用于删除账套、初始化等高危操作。
      *

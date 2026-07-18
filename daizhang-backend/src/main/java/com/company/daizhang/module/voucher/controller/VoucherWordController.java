@@ -3,6 +3,7 @@ package com.company.daizhang.module.voucher.controller;
 import cn.hutool.core.bean.BeanUtil;
 import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.Result;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.voucher.entity.VoucherWord;
 import com.company.daizhang.module.voucher.service.VoucherWordService;
 import com.company.daizhang.module.voucher.vo.VoucherWordVO;
@@ -25,6 +26,7 @@ import java.util.stream.Collectors;
 public class VoucherWordController {
 
     private final VoucherWordService voucherWordService;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Operation(summary = "根据账套ID查询凭证字列表")
     @GetMapping("/list")
@@ -39,6 +41,7 @@ public class VoucherWordController {
 
     @Operation(summary = "创建凭证字")
     @PostMapping
+    @RequireAccountSetAccess
     public Result<Void> create(@Valid @RequestBody VoucherWordVO request) {
         VoucherWord voucherWord = new VoucherWord();
         BeanUtil.copyProperties(request, voucherWord);
@@ -53,8 +56,13 @@ public class VoucherWordController {
         if (voucherWord == null) {
             return Result.error(404, "凭证字不存在");
         }
+        // IDOR治理:校验当前用户对该凭证字所属账套的所有者权限
+        accountSetAccessService.checkOwner(voucherWord.getAccountSetId());
+        // 保存原始accountSetId,不允许通过update修改所属账套
+        Long originalAccountSetId = voucherWord.getAccountSetId();
         BeanUtil.copyProperties(request, voucherWord);
         voucherWord.setId(id);
+        voucherWord.setAccountSetId(originalAccountSetId);
         voucherWordService.updateById(voucherWord);
         return Result.success();
     }
@@ -62,6 +70,12 @@ public class VoucherWordController {
     @Operation(summary = "删除凭证字")
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
+        VoucherWord voucherWord = voucherWordService.getById(id);
+        if (voucherWord == null) {
+            return Result.error(404, "凭证字不存在");
+        }
+        // IDOR治理:校验当前用户对该凭证字所属账套的所有者权限
+        accountSetAccessService.checkOwner(voucherWord.getAccountSetId());
         voucherWordService.removeById(id);
         return Result.success();
     }

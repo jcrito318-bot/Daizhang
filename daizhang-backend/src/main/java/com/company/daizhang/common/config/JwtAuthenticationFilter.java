@@ -40,9 +40,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String token = extractToken(request);
 
         if (StringUtils.hasText(token) && !jwtUtils.isTokenExpired(token)) {
-            // 黑名单校验:登出时 token 会被加入黑名单,此处拒绝已登出的 token
-            // (JWT 无状态,否则登出后 token 在过期前仍可正常访问所有受保护接口)
-            if (tokenBlacklist.contains(token)) {
+            // B-022 修复:拒绝 refresh token 用于业务接口访问。
+            // refresh token 有效期长达7天,若被当作 access token 使用,等同于变相延长 access token 有效期,
+            // 丢失"短 access + 长 refresh"分层失效的安全收益。refresh token 仅可用于 /auth/refresh 端点。
+            if (jwtUtils.isRefreshToken(token)) {
+                log.warn("refresh token 被用于业务接口访问,已拒绝: {}", request.getRequestURI());
+            } else if (tokenBlacklist.contains(token)) {
+                // 黑名单校验:登出时 token 会被加入黑名单,此处拒绝已登出的 token
+                // (JWT 无状态,否则登出后 token 在过期前仍可正常访问所有受保护接口)
                 log.warn("token 已登出(在黑名单中),访问被拒绝");
             } else {
                 try {

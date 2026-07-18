@@ -105,6 +105,30 @@ public class AccountSetAccessServiceImpl implements AccountSetAccessService {
     }
 
     @Override
+    public void checkAccountantOrOwner(Long accountSetId) {
+        if (accountSetId == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "账套ID不能为空");
+        }
+        Long userId = SecurityUtils.getCurrentUserId();
+        if (userId == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED);
+        }
+        // 超级管理员放行
+        if (isSuperAdmin()) {
+            return;
+        }
+        // 仅 OWNER/ACCOUNTANT 通过,VIEWER 拒绝(审核/过账等状态变更操作不应由只读用户执行)
+        LambdaQueryWrapper<UserAccountSet> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(UserAccountSet::getUserId, userId)
+               .eq(UserAccountSet::getAccountSetId, accountSetId)
+               .in(UserAccountSet::getRoleType, "OWNER", "ACCOUNTANT");
+        if (userAccountSetMapper.selectCount(wrapper) == 0) {
+            log.warn("权限拦截: 用户{}对账套{}无写操作权限(需 ACCOUNTANT/OWNER 角色)", userId, accountSetId);
+            throw new BusinessException(ErrorCode.FORBIDDEN, "无权执行此操作,需要记账员或所有者权限");
+        }
+    }
+
+    @Override
     public Set<Long> listAccessibleAccountSetIds() {
         Long userId = SecurityUtils.getCurrentUserId();
         if (userId == null) {

@@ -3,10 +3,12 @@ package com.company.daizhang.module.asset.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.asset.dto.AssetStocktakeQueryRequest;
 import com.company.daizhang.module.asset.dto.AssetStocktakeRequest;
 import com.company.daizhang.module.asset.entity.AssetStocktake;
@@ -34,6 +36,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -50,6 +53,7 @@ public class AssetStocktakeServiceImpl implements AssetStocktakeService {
     private final SubjectMapper subjectMapper;
     private final VoucherService voucherService;
     private final VoucherDetailMapper voucherDetailMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     // 待处理财产损溢科目编码(1901)，固定资产科目编码(1601)，累计折旧科目编码(1602)
     private static final String CODE_PENDING_ASSET_LOSS = "1901";
@@ -69,8 +73,9 @@ public class AssetStocktakeServiceImpl implements AssetStocktakeService {
         Page<AssetStocktake> page = new Page<>(request.getPageNum(), request.getPageSize());
 
         LambdaQueryWrapper<AssetStocktake> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(request.getAccountSetId() != null, AssetStocktake::getAccountSetId, request.getAccountSetId())
-                .like(StrUtil.isNotBlank(request.getStocktakeNo()), AssetStocktake::getStocktakeNo, request.getStocktakeNo())
+        // IDOR治理:校验当前用户对该账套的访问权
+        applyAccountSetFilter(wrapper, AssetStocktake::getAccountSetId, request.getAccountSetId());
+        wrapper.like(StrUtil.isNotBlank(request.getStocktakeNo()), AssetStocktake::getStocktakeNo, request.getStocktakeNo())
                 .like(StrUtil.isNotBlank(request.getStocktakeName()), AssetStocktake::getStocktakeName, request.getStocktakeName())
                 .eq(request.getStatus() != null, AssetStocktake::getStatus, request.getStatus())
                 .orderByDesc(AssetStocktake::getCreateTime);
@@ -478,5 +483,30 @@ public class AssetStocktakeServiceImpl implements AssetStocktakeService {
             case RESULT_GAIN: return "盘盈";
             default: return result;
         }
+    }
+
+    /**
+     * 分页/列表查询的账套访问过滤(IDOR治理):
+     * - accountSetId 非空: checkAccess 校验后按该账套精确过滤
+     * - accountSetId 为空: 按当前用户可访问账套集合过滤(超级管理员返回null表示不限制;
+     *   空集合表示无权限,注入永不命中条件避免 MyBatis-Plus 对空集合in跳过导致越权)
+     */
+    private <T> void applyAccountSetFilter(LambdaQueryWrapper<T> wrapper,
+                                           SFunction<T, Long> accountSetIdColumn,
+                                           Long accountSetId) {
+        if (accountSetId != null) {
+            accountSetAccessService.checkAccess(accountSetId);
+            wrapper.eq(accountSetIdColumn, accountSetId);
+            return;
+        }
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds == null) {
+            return;
+        }
+        if (accessibleIds.isEmpty()) {
+            wrapper.eq(accountSetIdColumn, -1L);
+            return;
+        }
+        wrapper.in(accountSetIdColumn, accessibleIds);
     }
 }

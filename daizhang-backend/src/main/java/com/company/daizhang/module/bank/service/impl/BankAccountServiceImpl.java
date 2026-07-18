@@ -3,6 +3,7 @@ package com.company.daizhang.module.bank.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
@@ -24,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -44,8 +46,9 @@ public class BankAccountServiceImpl implements BankAccountService {
         Page<BankAccount> page = new Page<>(request.getPageNum(), request.getPageSize());
 
         LambdaQueryWrapper<BankAccount> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(request.getAccountSetId() != null, BankAccount::getAccountSetId, request.getAccountSetId())
-               .like(StrUtil.isNotBlank(request.getAccountName()), BankAccount::getAccountName, request.getAccountName())
+        // IDOR治理:校验当前用户对该账套的访问权
+        applyAccountSetFilter(wrapper, BankAccount::getAccountSetId, request.getAccountSetId());
+        wrapper.like(StrUtil.isNotBlank(request.getAccountName()), BankAccount::getAccountName, request.getAccountName())
                .like(StrUtil.isNotBlank(request.getAccountNumber()), BankAccount::getAccountNumber, request.getAccountNumber())
                .like(StrUtil.isNotBlank(request.getBankName()), BankAccount::getBankName, request.getBankName())
                .eq(StrUtil.isNotBlank(request.getAccountType()), BankAccount::getAccountType, request.getAccountType())
@@ -63,6 +66,8 @@ public class BankAccountServiceImpl implements BankAccountService {
 
     @Override
     public List<BankAccountVO> listByAccountSetId(Long accountSetId) {
+        // IDOR治理:校验当前用户对该账套的访问权
+        accountSetAccessService.checkAccess(accountSetId);
         LambdaQueryWrapper<BankAccount> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(BankAccount::getAccountSetId, accountSetId)
                .orderByDesc(BankAccount::getCreateTime);
@@ -191,5 +196,30 @@ public class BankAccountServiceImpl implements BankAccountService {
             }
         }
         return vo;
+    }
+
+    /**
+     * 分页/列表查询的账套访问过滤(IDOR治理):
+     * - accountSetId 非空: checkAccess 校验后按该账套精确过滤
+     * - accountSetId 为空: 按当前用户可访问账套集合过滤(超级管理员返回null表示不限制;
+     *   空集合表示无权限,注入永不命中条件避免 MyBatis-Plus 对空集合in跳过导致越权)
+     */
+    private <T> void applyAccountSetFilter(LambdaQueryWrapper<T> wrapper,
+                                           SFunction<T, Long> accountSetIdColumn,
+                                           Long accountSetId) {
+        if (accountSetId != null) {
+            accountSetAccessService.checkAccess(accountSetId);
+            wrapper.eq(accountSetIdColumn, accountSetId);
+            return;
+        }
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds == null) {
+            return;
+        }
+        if (accessibleIds.isEmpty()) {
+            wrapper.eq(accountSetIdColumn, -1L);
+            return;
+        }
+        wrapper.in(accountSetIdColumn, accessibleIds);
     }
 }

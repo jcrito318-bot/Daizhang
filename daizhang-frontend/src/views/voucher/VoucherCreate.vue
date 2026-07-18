@@ -349,7 +349,7 @@ onBeforeRouteLeave(async (_to, _from, next) => {
 onMounted(async () => {
   const id = route.params.id as string
   if (id) {
-    await loadVoucherDetail(id)
+    await loadVoucherDetail(Number(id))
   }
 
   const accountSetId = appStore.currentAccountSetId || form.accountSetId

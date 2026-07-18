@@ -1,5 +1,7 @@
 package com.company.daizhang.module.salary.dto;
 
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
@@ -23,5 +25,8 @@ public class SalaryCalculateRequest {
     /**
      * 个税起征点，默认5000
      */
+    @NotNull(message = "起征点不能为空")
+    @DecimalMin(value = "0", message = "起征点不能为负数")
+    @Digits(integer = 12, fraction = 2, message = "起征点精度超出范围")
     private BigDecimal threshold;
 }

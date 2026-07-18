@@ -3,6 +3,7 @@ package com.company.daizhang.module.document.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
@@ -34,6 +35,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
@@ -54,8 +56,9 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
         Page<Document> page = new Page<>(request.getPageNum(), request.getPageSize());
 
         LambdaQueryWrapper<Document> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Document::getAccountSetId, request.getAccountSetId())
-               .eq(request.getDocumentType() != null, Document::getDocumentType, request.getDocumentType())
+        // IDOR治理:校验当前用户对该账套的访问权
+        applyAccountSetFilter(wrapper, Document::getAccountSetId, request.getAccountSetId());
+        wrapper.eq(request.getDocumentType() != null, Document::getDocumentType, request.getDocumentType())
                .eq(request.getStatus() != null, Document::getStatus, request.getStatus())
                .like(StrUtil.isNotBlank(request.getDocumentNo()), Document::getDocumentNo, request.getDocumentNo())
                .like(StrUtil.isNotBlank(request.getSellerName()), Document::getSellerName, request.getSellerName())
@@ -351,5 +354,30 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
         }
 
         return vo;
+    }
+
+    /**
+     * 分页/列表查询的账套访问过滤(IDOR治理):
+     * - accountSetId 非空: checkAccess 校验后按该账套精确过滤
+     * - accountSetId 为空: 按当前用户可访问账套集合过滤(超级管理员返回null表示不限制;
+     *   空集合表示无权限,注入永不命中条件避免 MyBatis-Plus 对空集合in跳过导致越权)
+     */
+    private <T> void applyAccountSetFilter(LambdaQueryWrapper<T> wrapper,
+                                           SFunction<T, Long> accountSetIdColumn,
+                                           Long accountSetId) {
+        if (accountSetId != null) {
+            accountSetAccessService.checkAccess(accountSetId);
+            wrapper.eq(accountSetIdColumn, accountSetId);
+            return;
+        }
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds == null) {
+            return;
+        }
+        if (accessibleIds.isEmpty()) {
+            wrapper.eq(accountSetIdColumn, -1L);
+            return;
+        }
+        wrapper.in(accountSetIdColumn, accessibleIds);
     }
 }

@@ -29,7 +29,10 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 科目管理控制器
@@ -216,15 +219,28 @@ public class SubjectController {
 
     /**
      * 构建树形结构
+     * <p>
+     * B-029 修复:改用 Map 一次分组 + 递归填充,O(N) 替代原 O(N²)。
+     * 原实现对每个父节点都全表扫描过滤,O(d*N),科目层级深或科目多时显著拖慢树构建。
      */
-    private List<SubjectVO> buildTree(List<SubjectVO> subjects, Long parentId) {
-        return subjects.stream()
-                .filter(subject -> parentId.equals(subject.getParentId()))
-                .peek(subject -> {
-                    List<SubjectVO> children = buildTree(subjects, subject.getId());
-                    subject.setChildren(children);
-                })
-                .collect(java.util.stream.Collectors.toList());
+    private List<SubjectVO> buildTree(List<SubjectVO> subjects, Long rootParentId) {
+        // 1. 按 parentId 分组,O(N) 一次完成
+        Map<Long, List<SubjectVO>> byParent = subjects.stream()
+                .filter(s -> s.getParentId() != null)
+                .collect(Collectors.groupingBy(SubjectVO::getParentId));
+        // 2. 从 root 开始递归填充 children
+        return fillChildren(rootParentId, byParent);
+    }
+
+    private List<SubjectVO> fillChildren(Long parentId, Map<Long, List<SubjectVO>> byParent) {
+        List<SubjectVO> children = byParent.get(parentId);
+        if (children == null || children.isEmpty()) {
+            return new ArrayList<>();
+        }
+        for (SubjectVO child : children) {
+            child.setChildren(fillChildren(child.getId(), byParent));
+        }
+        return children;
     }
 
     /**

@@ -1,5 +1,7 @@
 package com.company.daizhang.module.document.dto;
 
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
@@ -22,10 +24,19 @@ public class DocumentCreateRequest {
 
     private LocalDate documentDate;
 
+    @NotNull(message = "金额不能为空")
+    @DecimalMin(value = "0", message = "金额不能为负数")
+    @Digits(integer = 15, fraction = 2, message = "金额精度超出范围")
     private BigDecimal amount;
 
+    @NotNull(message = "税额不能为空")
+    @DecimalMin(value = "0", message = "税额不能为负数")
+    @Digits(integer = 15, fraction = 2, message = "税额精度超出范围")
     private BigDecimal taxAmount;
 
+    @NotNull(message = "价税合计不能为空")
+    @DecimalMin(value = "0", message = "价税合计不能为负数")
+    @Digits(integer = 15, fraction = 2, message = "价税合计精度超出范围")
     private BigDecimal totalAmount;
 
     private String sellerName;

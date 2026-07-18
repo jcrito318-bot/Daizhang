@@ -3,6 +3,7 @@ package com.company.daizhang.module.document.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
@@ -29,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -51,8 +53,9 @@ public class InvoiceServiceImpl implements InvoiceService {
         Page<InputInvoice> page = new Page<>(request.getPageNum(), request.getPageSize());
 
         LambdaQueryWrapper<InputInvoice> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(InputInvoice::getAccountSetId, request.getAccountSetId())
-               .like(StrUtil.isNotBlank(request.getInvoiceNumber()), InputInvoice::getInvoiceNumber, request.getInvoiceNumber())
+        // IDOR治理:校验当前用户对该账套的访问权
+        applyAccountSetFilter(wrapper, InputInvoice::getAccountSetId, request.getAccountSetId());
+        wrapper.like(StrUtil.isNotBlank(request.getInvoiceNumber()), InputInvoice::getInvoiceNumber, request.getInvoiceNumber())
                .eq(StrUtil.isNotBlank(request.getInvoiceType()), InputInvoice::getInvoiceType, request.getInvoiceType())
                .eq(request.getAuthStatus() != null, InputInvoice::getAuthStatus, request.getAuthStatus())
                .ge(request.getStartDate() != null, InputInvoice::getInvoiceDate, request.getStartDate())
@@ -158,8 +161,9 @@ public class InvoiceServiceImpl implements InvoiceService {
         Page<OutputInvoice> page = new Page<>(request.getPageNum(), request.getPageSize());
 
         LambdaQueryWrapper<OutputInvoice> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(OutputInvoice::getAccountSetId, request.getAccountSetId())
-               .like(StrUtil.isNotBlank(request.getInvoiceNumber()), OutputInvoice::getInvoiceNumber, request.getInvoiceNumber())
+        // IDOR治理:校验当前用户对该账套的访问权
+        applyAccountSetFilter(wrapper, OutputInvoice::getAccountSetId, request.getAccountSetId());
+        wrapper.like(StrUtil.isNotBlank(request.getInvoiceNumber()), OutputInvoice::getInvoiceNumber, request.getInvoiceNumber())
                .eq(StrUtil.isNotBlank(request.getInvoiceType()), OutputInvoice::getInvoiceType, request.getInvoiceType())
                .eq(request.getInvoiceStatus() != null, OutputInvoice::getInvoiceStatus, request.getInvoiceStatus())
                .ge(request.getStartDate() != null, OutputInvoice::getInvoiceDate, request.getStartDate())
@@ -405,5 +409,30 @@ public class InvoiceServiceImpl implements InvoiceService {
      */
     private BigDecimal nullToZero(BigDecimal value) {
         return value != null ? value : BigDecimal.ZERO;
+    }
+
+    /**
+     * 分页/列表查询的账套访问过滤(IDOR治理):
+     * - accountSetId 非空: checkAccess 校验后按该账套精确过滤
+     * - accountSetId 为空: 按当前用户可访问账套集合过滤(超级管理员返回null表示不限制;
+     *   空集合表示无权限,注入永不命中条件避免 MyBatis-Plus 对空集合in跳过导致越权)
+     */
+    private <T> void applyAccountSetFilter(LambdaQueryWrapper<T> wrapper,
+                                           SFunction<T, Long> accountSetIdColumn,
+                                           Long accountSetId) {
+        if (accountSetId != null) {
+            accountSetAccessService.checkAccess(accountSetId);
+            wrapper.eq(accountSetIdColumn, accountSetId);
+            return;
+        }
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds == null) {
+            return;
+        }
+        if (accessibleIds.isEmpty()) {
+            wrapper.eq(accountSetIdColumn, -1L);
+            return;
+        }
+        wrapper.in(accountSetIdColumn, accessibleIds);
     }
 }

@@ -46,13 +46,15 @@ public class SysUserController {
     
     @Operation(summary = "分页查询用户")
     @GetMapping("/page")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<PageResult<UserVO>> page(UserQueryRequest request) {
         PageResult<UserVO> page = userService.pageUsers(request);
         return Result.success(page);
     }
-    
+
     @Operation(summary = "根据ID查询用户")
     @GetMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<UserVO> getById(@PathVariable Long id) {
         UserVO user = userService.getUserById(id);
         return Result.success(user);
@@ -100,6 +102,7 @@ public class SysUserController {
 
     @Operation(summary = "导出用户列表Excel")
     @GetMapping("/export")
+    @PreAuthorize("hasRole('ADMIN')")
     public void export(UserQueryRequest request, HttpServletResponse response) throws IOException {
         LambdaQueryWrapper<SysUser> wrapper = new LambdaQueryWrapper<>();
         wrapper.like(StrUtil.isNotBlank(request.getUsername()), SysUser::getUsername, request.getUsername())

@@ -466,6 +466,8 @@ CREATE TABLE IF NOT EXISTS `doc_document` (
   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_document_no` (`account_set_id`, `document_no`),
+  -- B-012: 防止并发重复发票入账(invoice_code/number 为 NULL 时 MySQL/H2 唯一索引不约束,不影响无发票号票据)
+  UNIQUE KEY `uk_document_invoice` (`account_set_id`, `invoice_code`, `invoice_number`),
   KEY `idx_document_type` (`document_type`),
   KEY `idx_document_date` (`document_date`),
   KEY `idx_document_voucher_id` (`voucher_id`)

@@ -27,10 +27,12 @@ spring:
       test-on-borrow: false
       test-on-return: false
 
-  # H2 控制台（开发调试用，生产可关闭）
+  # H2 控制台
+  # B-020 修复:默认关闭,防止生产环境暴露数据库控制台(/h2-console 可直接操作数据)。
+  # 开发环境请通过环境变量 H2_CONSOLE_ENABLED=true 启用。
   h2:
     console:
-      enabled: true
+      enabled: ${H2_CONSOLE_ENABLED:false}
       path: /h2-console
       settings:
         # 仅允许本机访问，防止远程未授权访问数据库控制台
@@ -87,8 +89,10 @@ jwt:
   refresh-expiration: 604800  # 7天(秒)
 
 # Knife4j配置
+# B-021 修复:默认关闭,生产环境不暴露 API 文档。
+# 开发环境请通过环境变量 KNIFE4J_ENABLED=true 或激活 dev profile 启用。
 knife4j:
-  enable: true
+  enable: ${KNIFE4J_ENABLED:false}
   setting:
     language: zh_cn
 
@@ -106,6 +110,12 @@ ai:
 # 文件上传存储路径（本地硬盘）
 file:
   upload-path: ./data/uploads/
+
+# 会计业务参数(B-015:从硬编码迁出,便于按行业/客户调整)
+accounting:
+  carry-forward-cost:
+    # 成本结转默认成本率(0-1之间),仅当客户端未传 costRate 时使用
+    default-rate: ${CARRY_FORWARD_COST_RATE:0.80}
 
 # 日志配置
 logging:

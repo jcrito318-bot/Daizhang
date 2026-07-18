@@ -31,20 +31,23 @@ public class SysRoleController {
     
     @Operation(summary = "分页查询角色")
     @GetMapping("/page")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<PageResult<RoleVO>> page(RoleQueryRequest request) {
         PageResult<RoleVO> page = roleService.pageRoles(request);
         return Result.success(page);
     }
-    
+
     @Operation(summary = "查询所有角色")
     @GetMapping("/list")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<List<RoleVO>> list() {
         List<RoleVO> list = roleService.listAllRoles();
         return Result.success(list);
     }
-    
+
     @Operation(summary = "根据ID查询角色")
     @GetMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<RoleVO> getById(@PathVariable Long id) {
         RoleVO role = roleService.getRoleById(id);
         return Result.success(role);
@@ -84,13 +87,15 @@ public class SysRoleController {
     
     @Operation(summary = "查询角色菜单ID列表")
     @GetMapping("/{id}/menu-ids")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<List<Long>> getMenuIds(@PathVariable Long id) {
         List<Long> menuIds = roleService.getRoleMenuIds(id);
         return Result.success(menuIds);
     }
-    
+
     @Operation(summary = "查询角色菜单树")
     @GetMapping("/{id}/menus")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<List<MenuVO>> getMenuTree(@PathVariable Long id) {
         List<MenuVO> tree = roleService.getRoleMenuTree(id);
         return Result.success(tree);

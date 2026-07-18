@@ -3,6 +3,7 @@ package com.company.daizhang.module.asset.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
@@ -41,6 +42,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -65,8 +67,9 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         Page<AssetCategory> page = new Page<>(request.getPageNum(), request.getPageSize());
 
         LambdaQueryWrapper<AssetCategory> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(request.getAccountSetId() != null, AssetCategory::getAccountSetId, request.getAccountSetId())
-               .like(StrUtil.isNotBlank(request.getCategoryCode()), AssetCategory::getCategoryCode, request.getCategoryCode())
+        // IDOR治理:校验当前用户对该账套的访问权
+        applyAccountSetFilter(wrapper, AssetCategory::getAccountSetId, request.getAccountSetId());
+        wrapper.like(StrUtil.isNotBlank(request.getCategoryCode()), AssetCategory::getCategoryCode, request.getCategoryCode())
                .like(StrUtil.isNotBlank(request.getCategoryName()), AssetCategory::getCategoryName, request.getCategoryName())
                .eq(StrUtil.isNotBlank(request.getDepreciationMethod()), AssetCategory::getDepreciationMethod, request.getDepreciationMethod())
                .eq(request.getParentId() != null, AssetCategory::getParentId, request.getParentId())
@@ -154,6 +157,8 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
 
     @Override
     public List<AssetCategoryVO> listCategoryTree(Long accountSetId) {
+        // IDOR治理:校验当前用户对该账套的访问权
+        accountSetAccessService.checkAccess(accountSetId);
         LambdaQueryWrapper<AssetCategory> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AssetCategory::getAccountSetId, accountSetId)
                .orderByAsc(AssetCategory::getCategoryCode);
@@ -171,8 +176,9 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         Page<FixedAsset> page = new Page<>(request.getPageNum(), request.getPageSize());
 
         LambdaQueryWrapper<FixedAsset> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(request.getAccountSetId() != null, FixedAsset::getAccountSetId, request.getAccountSetId())
-               .like(StrUtil.isNotBlank(request.getAssetCode()), FixedAsset::getAssetCode, request.getAssetCode())
+        // IDOR治理:校验当前用户对该账套的访问权
+        applyAccountSetFilter(wrapper, FixedAsset::getAccountSetId, request.getAccountSetId());
+        wrapper.like(StrUtil.isNotBlank(request.getAssetCode()), FixedAsset::getAssetCode, request.getAssetCode())
                .like(StrUtil.isNotBlank(request.getAssetName()), FixedAsset::getAssetName, request.getAssetName())
                .eq(request.getCategoryId() != null, FixedAsset::getCategoryId, request.getCategoryId())
                .eq(request.getStatus() != null, FixedAsset::getStatus, request.getStatus())
@@ -537,8 +543,9 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         Page<DepreciationRecord> page = new Page<>(request.getPageNum(), request.getPageSize());
 
         LambdaQueryWrapper<DepreciationRecord> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(request.getAccountSetId() != null, DepreciationRecord::getAccountSetId, request.getAccountSetId())
-               .eq(request.getAssetId() != null, DepreciationRecord::getAssetId, request.getAssetId())
+        // IDOR治理:校验当前用户对该账套的访问权
+        applyAccountSetFilter(wrapper, DepreciationRecord::getAccountSetId, request.getAccountSetId());
+        wrapper.eq(request.getAssetId() != null, DepreciationRecord::getAssetId, request.getAssetId())
                .like(StrUtil.isNotBlank(request.getAssetCode()), DepreciationRecord::getAssetCode, request.getAssetCode())
                .like(StrUtil.isNotBlank(request.getAssetName()), DepreciationRecord::getAssetName, request.getAssetName())
                .eq(request.getYear() != null, DepreciationRecord::getYear, request.getYear())
@@ -744,6 +751,8 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
 
     @Override
     public AssetReportVO getAssetReport(Long accountSetId, Integer year) {
+        // IDOR治理:校验当前用户对该账套的访问权
+        accountSetAccessService.checkAccess(accountSetId);
         // 查询该账套所有资产
         LambdaQueryWrapper<FixedAsset> assetWrapper = new LambdaQueryWrapper<>();
         assetWrapper.eq(FixedAsset::getAccountSetId, accountSetId);
@@ -1044,5 +1053,30 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
         DepreciationRecordVO vo = new DepreciationRecordVO();
         BeanUtil.copyProperties(record, vo);
         return vo;
+    }
+
+    /**
+     * 分页/列表查询的账套访问过滤(IDOR治理):
+     * - accountSetId 非空: checkAccess 校验后按该账套精确过滤
+     * - accountSetId 为空: 按当前用户可访问账套集合过滤(超级管理员返回null表示不限制;
+     *   空集合表示无权限,注入永不命中条件避免 MyBatis-Plus 对空集合in跳过导致越权)
+     */
+    private <T> void applyAccountSetFilter(LambdaQueryWrapper<T> wrapper,
+                                           SFunction<T, Long> accountSetIdColumn,
+                                           Long accountSetId) {
+        if (accountSetId != null) {
+            accountSetAccessService.checkAccess(accountSetId);
+            wrapper.eq(accountSetIdColumn, accountSetId);
+            return;
+        }
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds == null) {
+            return;
+        }
+        if (accessibleIds.isEmpty()) {
+            wrapper.eq(accountSetIdColumn, -1L);
+            return;
+        }
+        wrapper.in(accountSetIdColumn, accessibleIds);
     }
 }

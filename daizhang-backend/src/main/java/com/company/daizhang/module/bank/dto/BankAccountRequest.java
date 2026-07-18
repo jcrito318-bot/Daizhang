@@ -1,5 +1,7 @@
 package com.company.daizhang.module.bank.dto;
 
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
@@ -32,6 +34,8 @@ public class BankAccountRequest {
 
     private Long subjectId;
 
+    @DecimalMin(value = "0", message = "期初余额不能为负数")
+    @Digits(integer = 15, fraction = 2, message = "余额精度超出范围")
     private BigDecimal beginningBalance;
 
     private Integer status;

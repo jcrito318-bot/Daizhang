@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.salary.dto.SalaryFormulaRequest;
 import com.company.daizhang.module.salary.entity.SalaryFormula;
 import com.company.daizhang.module.salary.mapper.SalaryFormulaMapper;
@@ -30,8 +31,12 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class SalaryFormulaServiceImpl extends ServiceImpl<SalaryFormulaMapper, SalaryFormula> implements SalaryFormulaService {
 
+    private final AccountSetAccessService accountSetAccessService;
+
     @Override
     public List<SalaryFormulaVO> listFormulas(Long accountSetId) {
+        // IDOR治理:校验当前用户对该账套的访问权
+        accountSetAccessService.checkAccess(accountSetId);
         LambdaQueryWrapper<SalaryFormula> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SalaryFormula::getAccountSetId, accountSetId)
                .orderByAsc(SalaryFormula::getPriority)

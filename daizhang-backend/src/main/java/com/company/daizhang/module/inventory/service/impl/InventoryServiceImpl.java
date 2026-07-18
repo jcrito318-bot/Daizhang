@@ -13,6 +13,7 @@ import com.company.daizhang.module.inventory.mapper.*;
 import com.company.daizhang.module.inventory.service.InventoryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -189,8 +190,6 @@ public class InventoryServiceImpl implements InventoryService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long createIn(InventoryInCreateRequest request) {
-        String inNo = generateInNo(request.getAccountSetId(), request.getInDate());
-
         BigDecimal totalQty = BigDecimal.ZERO;
         BigDecimal totalAmt = BigDecimal.ZERO;
         if (request.getDetails() != null) {
@@ -203,7 +202,6 @@ public class InventoryServiceImpl implements InventoryService {
 
         InventoryIn in = new InventoryIn();
         in.setAccountSetId(request.getAccountSetId());
-        in.setInNo(inNo);
         in.setInType(request.getInType());
         in.setInDate(request.getInDate());
         in.setSupplier(request.getSupplier());
@@ -214,7 +212,27 @@ public class InventoryServiceImpl implements InventoryService {
         in.setCreateBy(SecurityUtils.getCurrentUserId());
         in.setCreateTime(LocalDateTime.now());
         in.setUpdateTime(LocalDateTime.now());
-        inMapper.insert(in);
+
+        // B-030 修复:并发下 generateInNo(count+1 模式无行锁)可能生成相同单号,
+        // 第二事务撞 uk_inv_in_no 唯一索引抛 DuplicateKeyException。整体回滚后用户重试体验差。
+        // 此处参考 VoucherServiceImpl.createVoucher 的重试模式:捕获后重新生成单号,最多重试3次。
+        String inNo = null;
+        int maxRetry = 3;
+        for (int attempt = 0; attempt < maxRetry; attempt++) {
+            inNo = generateInNo(request.getAccountSetId(), request.getInDate());
+            in.setInNo(inNo);
+            try {
+                inMapper.insert(in);
+                break;
+            } catch (DuplicateKeyException e) {
+                if (attempt == maxRetry - 1) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                            "入库单号生成失败(并发冲突)，请重试");
+                }
+                log.warn("入库单号冲突,第{}次重试: {}", attempt + 1, inNo);
+                in.setId(null);
+            }
+        }
 
         if (request.getDetails() != null) {
             for (InventoryInCreateRequest.InDetailDTO d : request.getDetails()) {
@@ -378,8 +396,6 @@ public class InventoryServiceImpl implements InventoryService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long createOut(InventoryOutCreateRequest request) {
-        String outNo = generateOutNo(request.getAccountSetId(), request.getOutDate());
-
         BigDecimal totalQty = BigDecimal.ZERO;
         BigDecimal totalAmt = BigDecimal.ZERO;
         if (request.getDetails() != null) {
@@ -392,7 +408,6 @@ public class InventoryServiceImpl implements InventoryService {
 
         InventoryOut out = new InventoryOut();
         out.setAccountSetId(request.getAccountSetId());
-        out.setOutNo(outNo);
         out.setOutType(request.getOutType());
         out.setOutDate(request.getOutDate());
         out.setCustomer(request.getCustomer());
@@ -404,7 +419,27 @@ public class InventoryServiceImpl implements InventoryService {
         out.setCreateBy(SecurityUtils.getCurrentUserId());
         out.setCreateTime(LocalDateTime.now());
         out.setUpdateTime(LocalDateTime.now());
-        outMapper.insert(out);
+
+        // B-030 修复:并发下 generateOutNo(count+1 模式无行锁)可能生成相同单号,
+        // 第二事务撞 uk_inv_out_no 唯一索引抛 DuplicateKeyException。整体回滚后用户重试体验差。
+        // 此处参考 createIn 的重试模式:捕获后重新生成单号,最多重试3次。
+        String outNo = null;
+        int maxRetry = 3;
+        for (int attempt = 0; attempt < maxRetry; attempt++) {
+            outNo = generateOutNo(request.getAccountSetId(), request.getOutDate());
+            out.setOutNo(outNo);
+            try {
+                outMapper.insert(out);
+                break;
+            } catch (DuplicateKeyException e) {
+                if (attempt == maxRetry - 1) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                            "出库单号生成失败(并发冲突)，请重试");
+                }
+                log.warn("出库单号冲突,第{}次重试: {}", attempt + 1, outNo);
+                out.setId(null);
+            }
+        }
 
         if (request.getDetails() != null) {
             for (InventoryOutCreateRequest.OutDetailDTO d : request.getDetails()) {
@@ -656,6 +691,26 @@ public class InventoryServiceImpl implements InventoryService {
             stock.setEndQuantity(carriedBeginQty);
             stock.setEndAmount(carriedBeginAmt);
             stock.setUnitCost(BigDecimal.ZERO);
+            stock.setVersion(0); // B-018 修复:乐观锁版本号初始化
+            // B-018 修复:并发竞态治理
+            // 原实现仅返回内存对象,延迟到 saveOrUpdateStock 中 insert。两个事务可能同时通过 stock==null 判定,
+            // 各自构造内存对象,后续 insert 时第二事务撞唯一索引 uk_inv_stock_item_period 抛 DuplicateKeyException,
+            // 整个审核事务回滚,用户体验差。
+            // 此处立即 insert 持久化"空模板"行,若另一事务已抢先插入,则捕获 DuplicateKeyException 后重查,
+            // 返回已落库的 stock(id 已设值),后续修改走 saveOrUpdateStock 的 updateById 路径,
+            // 由 @Version 乐观锁接管并发冲突(行数=0 → CONCURRENT_UPDATE_FAILED)。
+            try {
+                stockMapper.insert(stock);
+            } catch (DuplicateKeyException e) {
+                InventoryStock existing = getCurrentStock(accountSetId, itemId, year, month);
+                if (existing == null) {
+                    // 理论上不应发生(唯一索引冲突意味着记录已存在);若并发删除等极端场景触发,抛出供上层处理
+                    throw e;
+                }
+                log.warn("库存记录已被并发创建,改用已存在记录: accountSetId={}, itemId={}, year={}, month={}",
+                        accountSetId, itemId, year, month);
+                return existing;
+            }
         }
         return stock;
     }

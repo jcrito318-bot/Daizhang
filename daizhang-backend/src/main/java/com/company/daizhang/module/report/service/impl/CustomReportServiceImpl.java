@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.common.utils.SecurityUtils;
 import com.company.daizhang.module.accountset.entity.AccountBalance;
 import com.company.daizhang.module.accountset.mapper.AccountBalanceMapper;
 import com.company.daizhang.module.accountset.service.AccountSetAccessService;
@@ -47,10 +48,15 @@ public class CustomReportServiceImpl extends ServiceImpl<CustomReportMapper, Cus
 
     @Override
     public PageResult<CustomReportVO> pageReports(String reportName, int pageNum, int pageSize) {
+        Long currentUserId = SecurityUtils.getCurrentUserId();
+        boolean admin = isAdmin();
+
         Page<CustomReport> page = new Page<>(pageNum, pageSize);
 
         LambdaQueryWrapper<CustomReport> wrapper = new LambdaQueryWrapper<>();
         wrapper.like(StrUtil.isNotBlank(reportName), CustomReport::getReportName, reportName)
+               // 非管理员仅查看自己创建的报表
+               .eq(!admin, CustomReport::getCreateBy, currentUserId)
                .orderByDesc(CustomReport::getCreateTime);
 
         Page<CustomReport> result = this.page(page, wrapper);
@@ -68,6 +74,8 @@ public class CustomReportServiceImpl extends ServiceImpl<CustomReportMapper, Cus
         if (report == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "自定义报表不存在");
         }
+        // 权限校验:仅创建者或管理员可查看
+        checkReportOwner(report);
 
         CustomReportVO vo = convertToVO(report);
 
@@ -98,6 +106,7 @@ public class CustomReportServiceImpl extends ServiceImpl<CustomReportMapper, Cus
         // 保存报表
         CustomReport report = new CustomReport();
         BeanUtil.copyProperties(request, report);
+        report.setCreateBy(SecurityUtils.getCurrentUserId());
         if (report.getStatus() == null) {
             report.setStatus(1);
         }
@@ -116,6 +125,8 @@ public class CustomReportServiceImpl extends ServiceImpl<CustomReportMapper, Cus
         if (report == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "自定义报表不存在");
         }
+        // 权限校验:仅创建者或管理员可修改
+        checkReportOwner(report);
 
         // 检查编码是否与其他记录冲突
         LambdaQueryWrapper<CustomReport> wrapper = new LambdaQueryWrapper<>();
@@ -126,8 +137,10 @@ public class CustomReportServiceImpl extends ServiceImpl<CustomReportMapper, Cus
         }
 
         // 更新报表
+        Long originalCreateBy = report.getCreateBy();
         BeanUtil.copyProperties(request, report);
         report.setId(id);
+        report.setCreateBy(originalCreateBy);
         this.updateById(report);
 
         // 删除旧项目
@@ -148,6 +161,8 @@ public class CustomReportServiceImpl extends ServiceImpl<CustomReportMapper, Cus
         if (report == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND, "自定义报表不存在");
         }
+        // 权限校验:仅创建者或管理员可删除
+        checkReportOwner(report);
 
         // 删除报表项目
         LambdaQueryWrapper<CustomReportItem> itemWrapper = new LambdaQueryWrapper<>();
@@ -313,6 +328,25 @@ public class CustomReportServiceImpl extends ServiceImpl<CustomReportMapper, Cus
             item.setParentRowNo(request.getParentRowNo());
             customReportItemMapper.insert(item);
         }
+    }
+
+    /**
+     * 权限校验:仅创建者或管理员可操作
+     */
+    private void checkReportOwner(CustomReport report) {
+        Long currentUserId = SecurityUtils.getCurrentUserId();
+        if (!currentUserId.equals(report.getCreateBy()) && !isAdmin()) {
+            throw new BusinessException(ErrorCode.FORBIDDEN, "无权操作他人创建的自定义报表");
+        }
+    }
+
+    /**
+     * 判断当前用户是否为管理员
+     */
+    private boolean isAdmin() {
+        return SecurityUtils.getAuthentication() != null
+                && SecurityUtils.getAuthentication().getAuthorities().stream()
+                        .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
     }
 
     /**

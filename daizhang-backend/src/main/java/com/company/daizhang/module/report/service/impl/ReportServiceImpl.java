@@ -782,6 +782,11 @@ public class ReportServiceImpl implements ReportService {
      *       1401材料采购/1403原材料/1405库存商品(存货增减归属经营活动)
      * 投资：1601固定资产/1602累计折旧/1604在建工程/1606固定资产清理/1701无形资产
      * 筹资：2001短期借款/2501长期借款/2241其他应付款/5603财务费用(利息支出)
+     * <p>
+     * B-017 修复:无匹配前缀时返回"经营"而非 null。
+     * 原实现返回 null,调用方继续 continue 跳过该凭证,导致现金流量表合计与利润表/资产负债表勾稽不平,
+     * 未识别的现金流(如其他业务支出 6601、营业外支出某些明细等)在现金流量表中完全消失。
+     * 按会计准则"未明确指定的现金流默认归入经营活动"的标准处理方式,默认归"经营"并打 warn 日志便于审计追溯。
      */
     private String determineCashFlowCategory(List<VoucherDetail> nonCashLines) {
         for (VoucherDetail d : nonCashLines) {
@@ -809,7 +814,16 @@ public class ReportServiceImpl implements ReportService {
                 return "筹资";
             }
         }
-        return null;
+        // B-017:无匹配前缀默认归"经营",避免现金流数据被静默丢弃导致报表勾稽不平。
+        // 输出 warn 便于审计追溯哪些凭证走了默认分类(可能需补充科目映射规则)。
+        if (!nonCashLines.isEmpty()) {
+            String unmatchedCodes = nonCashLines.stream()
+                    .map(VoucherDetail::getSubjectCode)
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.joining(","));
+            log.warn("现金流分类无匹配前缀,默认归入经营活动。科目编码: [{}]", unmatchedCodes);
+        }
+        return "经营";
     }
 
     /**

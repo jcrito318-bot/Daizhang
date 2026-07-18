@@ -1,5 +1,6 @@
 package com.company.daizhang.module.bank.dto;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
@@ -21,6 +22,7 @@ public class BankTransactionImportRequest {
     private String bankAccount;
 
     @NotEmpty(message = "银行流水列表不能为空")
+    @Valid
     private List<BankTransactionItem> transactions;
 
     @Data

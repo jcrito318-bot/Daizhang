@@ -382,8 +382,9 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
         }
         // IDOR治理:校验当前用户对该凭证所属账套的访问权(OWNER/ACCOUNTANT/VIEWER)
-        // 审核为状态变更(非删除/资金类操作)，会计员(ACCOUNTANT)应可审核凭证
-        accountSetAccessService.checkAccess(voucher.getAccountSetId());
+        // B-019 修复:审核为状态变更操作,VIEWER 只读用户不应有此权限,改为 checkAccountantOrOwner
+        // 原 checkAccess 允许 OWNER/ACCOUNTANT/VIEWER 均通过,VIEWER 也能审核凭证存在越权风险
+        accountSetAccessService.checkAccountantOrOwner(voucher.getAccountSetId());
 
         // 期间校验:已结账期间内的凭证不可审核,与 create/update/post/unpost 保持一致,
         // 避免破坏结账冻结(已结账期间内不应再发生状态变更)
@@ -429,8 +430,8 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             throw new BusinessException(ErrorCode.VOUCHER_NOT_FOUND);
         }
         // IDOR治理:校验当前用户对该凭证所属账套的访问权(OWNER/ACCOUNTANT/VIEWER)
-        // 反审核为状态变更(非删除/资金类操作)，会计员(ACCOUNTANT)应可反审核凭证
-        accountSetAccessService.checkAccess(voucher.getAccountSetId());
+        // B-019 修复:反审核为状态变更操作,VIEWER 只读用户不应有此权限,改为 checkAccountantOrOwner
+        accountSetAccessService.checkAccountantOrOwner(voucher.getAccountSetId());
 
         // 期间校验:已结账期间内的凭证不可反审核,与 create/update/post/unpost 保持一致,
         // 避免破坏结账冻结(已结账期间内不应再发生状态变更)
@@ -445,12 +446,16 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         voucher.setAuditBy(null);
         voucher.setAuditTime(null);
         // 使用updateById保留@Version乐观锁(OptimisticLockerInnerInterceptor仅拦截updateById(entity),
-        // 不拦截update(wrapper))。限制:MyBatis-Plus默认NOT_NULL策略不会将null字段写入UPDATE SET子句,
-        // auditBy/auditTime的清空依赖实体字段策略;此处优先保证并发安全,与auditVoucher保持一致。
+        // 不拦截update(wrapper))
         boolean updated = this.updateById(voucher);
         if (!updated) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "凭证更新失败(并发冲突)，请重试");
         }
+        // MyBatis-Plus默认NOT_NULL策略不会将null字段写入UPDATE SET,需显式用LambdaUpdateWrapper清空
+        this.update(new LambdaUpdateWrapper<Voucher>()
+                .eq(Voucher::getId, id)
+                .set(Voucher::getAuditBy, null)
+                .set(Voucher::getAuditTime, null));
 
         log.info("反审核凭证成功，凭证ID: {}, 凭证号: {}", id, voucher.getVoucherNo());
     }
@@ -476,9 +481,9 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                 continue;
             }
             // IDOR治理:校验当前用户对该凭证所属账套的访问权(OWNER/ACCOUNTANT/VIEWER)
-            // 审核为状态变更(非删除/资金类操作)，会计员(ACCOUNTANT)应可审核凭证
+            // B-019 修复:批量审核同 auditVoucher,改用 checkAccountantOrOwner 排除 VIEWER
             try {
-                accountSetAccessService.checkAccess(voucher.getAccountSetId());
+                accountSetAccessService.checkAccountantOrOwner(voucher.getAccountSetId());
             } catch (BusinessException e) {
                 failedIds.add(id);
                 errors.add("凭证" + voucher.getVoucherNo() + " 无访问权限:" + e.getMessage());
@@ -538,9 +543,9 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                 continue;
             }
             // IDOR治理:校验当前用户对该凭证所属账套的访问权(OWNER/ACCOUNTANT/VIEWER)
-            // 反审核为状态变更(非删除/资金类操作)，会计员(ACCOUNTANT)应可反审核凭证
+            // B-019 修复:批量反审核同 unauditVoucher,改用 checkAccountantOrOwner 排除 VIEWER
             try {
-                accountSetAccessService.checkAccess(voucher.getAccountSetId());
+                accountSetAccessService.checkAccountantOrOwner(voucher.getAccountSetId());
             } catch (BusinessException e) {
                 failedIds.add(id);
                 errors.add("凭证" + voucher.getVoucherNo() + " 无访问权限:" + e.getMessage());
@@ -652,12 +657,16 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         voucher.setPostBy(null);
         voucher.setPostTime(null);
         // 使用updateById保留@Version乐观锁(OptimisticLockerInnerInterceptor仅拦截updateById(entity),
-        // 不拦截update(wrapper))。限制:MyBatis-Plus默认NOT_NULL策略不会将null字段写入UPDATE SET子句,
-        // postBy/postTime的清空依赖实体字段策略;此处优先保证并发安全,与postVoucher保持一致。
+        // 不拦截update(wrapper))
         boolean updated = this.updateById(voucher);
         if (!updated) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "凭证更新失败(并发冲突)，请重试");
         }
+        // MyBatis-Plus默认NOT_NULL策略不会将null字段写入UPDATE SET,需显式用LambdaUpdateWrapper清空
+        this.update(new LambdaUpdateWrapper<Voucher>()
+                .eq(Voucher::getId, id)
+                .set(Voucher::getPostBy, null)
+                .set(Voucher::getPostTime, null));
 
         log.info("反过账凭证成功，凭证ID: {}, 凭证号: {}", id, voucher.getVoucherNo());
     }
@@ -979,7 +988,15 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             balance.setPeriodCredit(BigDecimal.ZERO);
             balance.setYearDebit(carriedYearDebit);
             balance.setYearCredit(carriedYearCredit);
-            accountBalanceMapper.insert(balance);
+            try {
+                accountBalanceMapper.insert(balance);
+            } catch (org.springframework.dao.DuplicateKeyException e) {
+                // 并发兜底:唯一索引 uk_balance 拦截重复插入,重新查询已存在的记录继续更新
+                balance = accountBalanceMapper.selectOne(wrapper);
+                if (balance == null) {
+                    throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "科目余额记录创建失败,请重试");
+                }
+            }
         }
 
         // 累加本期发生额
@@ -1752,5 +1769,69 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         } catch (NumberFormatException e) {
             return 0;
         }
+    }
+
+    /**
+     * B-008 修复:反结账时由系统调用,删除指定期间内的系统结转凭证(source=1)并反向回滚余额。
+     *
+     * 结转凭证由 carryForward 在结账前自动生成并过账(status=2),会更新科目余额:
+     * 损益类科目清零、本年利润累加。若反结账不清理这些凭证,重新结账会撞幂等校验
+     * (carryForward 检查到 source=1 凭证直接抛异常),形成"反结账后无法重新结账"的死锁。
+     *
+     * 实现要点:
+     * 1. 仅处理已过账(status=2)的 source=1 凭证,直接复用 reverseAccountBalance 反向冲减余额
+     *    (与 unpostVoucher 同一公式,保证借贷必等);
+     * 2. 不走 unpostVoucher 是因为该方法会校验凭证状态并把凭证回退到已审核,而结转凭证应当被彻底删除;
+     * 3. 删除顺序:先反向冲减余额 → 删明细 → 删凭证,全程在 @Transactional 内,失败回滚。
+     *
+     * @param accountSetId 账套ID
+     * @param year         年
+     * @param month        月
+     * @return 删除的凭证数量
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int deleteCarryForwardVouchers(Long accountSetId, int year, int month) {
+        LambdaQueryWrapper<Voucher> carryWrapper = new LambdaQueryWrapper<>();
+        carryWrapper.eq(Voucher::getAccountSetId, accountSetId)
+                    .eq(Voucher::getYear, year)
+                    .eq(Voucher::getMonth, month)
+                    .eq(Voucher::getSource, 1);
+        // VoucherServiceImpl 继承 ServiceImpl<VoucherMapper, Voucher>,凭证查询走 baseMapper(无单独 voucherMapper 字段)
+        List<Voucher> carryVouchers = baseMapper.selectList(carryWrapper);
+        if (carryVouchers.isEmpty()) {
+            return 0;
+        }
+
+        log.info("反结账清理:账套ID={},期间={}-{},发现{}张系统结转凭证,开始反向回滚余额并删除",
+                accountSetId, year, month, carryVouchers.size());
+
+        for (Voucher voucher : carryVouchers) {
+            // 仅处理已过账凭证;其他状态说明数据异常,跳过余额回滚但仍在下方统一删除
+            if (voucher.getStatus() == null || voucher.getStatus() != 2) {
+                log.warn("反结账清理:凭证ID={}状态非已过账(status={}),跳过余额回滚",
+                        voucher.getId(), voucher.getStatus());
+                continue;
+            }
+            LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
+            detailWrapper.eq(VoucherDetail::getVoucherId, voucher.getId());
+            List<VoucherDetail> details = voucherDetailMapper.selectList(detailWrapper);
+            for (VoucherDetail detail : details) {
+                reverseAccountBalance(voucher, detail);
+            }
+        }
+
+        List<Long> voucherIds = carryVouchers.stream().map(Voucher::getId).collect(Collectors.toList());
+        LambdaQueryWrapper<VoucherDetail> detailDeleteWrapper = new LambdaQueryWrapper<>();
+        detailDeleteWrapper.in(VoucherDetail::getVoucherId, voucherIds);
+        voucherDetailMapper.delete(detailDeleteWrapper);
+
+        LambdaQueryWrapper<Voucher> voucherDeleteWrapper = new LambdaQueryWrapper<>();
+        voucherDeleteWrapper.in(Voucher::getId, voucherIds);
+        int deleted = baseMapper.delete(voucherDeleteWrapper);
+
+        log.info("反结账清理完成:账套ID={},期间={}-{},删除{}张结转凭证及明细",
+                accountSetId, year, month, deleted);
+        return deleted;
     }
 }

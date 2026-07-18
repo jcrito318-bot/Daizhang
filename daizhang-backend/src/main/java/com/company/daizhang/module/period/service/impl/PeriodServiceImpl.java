@@ -12,9 +12,11 @@ import com.company.daizhang.common.utils.SecurityUtils;
 import com.company.daizhang.module.accountset.entity.AccountBalance;
 import com.company.daizhang.module.accountset.entity.AccountPeriod;
 import com.company.daizhang.module.accountset.entity.AccountSet;
+import com.company.daizhang.module.accountset.entity.SubjectBalance;
 import com.company.daizhang.module.accountset.mapper.AccountBalanceMapper;
 import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
 import com.company.daizhang.module.accountset.mapper.AccountSetMapper;
+import com.company.daizhang.module.accountset.mapper.SubjectBalanceMapper;
 import com.company.daizhang.module.period.dto.TrialBalanceRequest;
 import com.company.daizhang.module.period.service.PeriodService;
 import com.company.daizhang.module.period.vo.ClosePeriodResultVO;
@@ -26,8 +28,10 @@ import com.company.daizhang.module.voucher.entity.Voucher;
 import com.company.daizhang.module.voucher.entity.VoucherDetail;
 import com.company.daizhang.module.voucher.mapper.VoucherDetailMapper;
 import com.company.daizhang.module.voucher.mapper.VoucherMapper;
+import com.company.daizhang.module.voucher.service.VoucherService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -55,6 +59,16 @@ public class PeriodServiceImpl implements PeriodService {
     private final VoucherMapper voucherMapper;
     private final VoucherDetailMapper voucherDetailMapper;
     private final AccountSetMapper accountSetMapper;
+    private final VoucherService voucherService;
+    private final SubjectBalanceMapper subjectBalanceMapper;
+
+    /**
+     * B-015 修复:成本结转默认成本率,从配置读取。
+     * 业务参数不应硬编码在代码中,改通过 application.yml 的 accounting.carry-forward-cost.default-rate 配置,
+     * 默认值 0.80(80%)与历史行为保持一致,便于不同行业/客户灵活调整。
+     */
+    @Value("${accounting.carry-forward-cost.default-rate:0.80}")
+    private BigDecimal defaultCarryForwardCostRate;
 
     /**
      * 生成结转凭证号：格式 year-month-sequence，基于本期最大序号+1。
@@ -302,20 +316,15 @@ public class PeriodServiceImpl implements PeriodService {
                     "期间状态已变更(并发冲突)，请刷新后重试");
         }
 
-        // 已知限制：反结账未自动清理本期系统生成的结转凭证（source=1，含损益结转/成本结转）。
-        // 这些凭证已过账（status=2）并更新了科目余额（损益科目清零、本年利润累加等），
-        // 直接删除会导致余额混乱；安全删除需先按结转逻辑反向回滚余额，逻辑复杂且风险较高，故未自动清理。
-        // 如需修改本期凭证请先手动删除结转凭证并调整余额，否则重新结转会撞幂等校验。
-        LambdaQueryWrapper<Voucher> carryVoucherWrapper = new LambdaQueryWrapper<>();
-        carryVoucherWrapper.eq(Voucher::getAccountSetId, accountSetId)
-                .eq(Voucher::getYear, year)
-                .eq(Voucher::getMonth, month)
-                .eq(Voucher::getSource, 1);
-        Long carryVoucherCount = voucherMapper.selectCount(carryVoucherWrapper);
-        if (carryVoucherCount != null && carryVoucherCount > 0) {
-            log.warn("反结账告警：账套ID={}，期间={}-{} 存在{}张系统结转凭证（source=1），反结账未自动清理。"
-                            + "如需修改本期凭证请先手动删除结转凭证并调整余额，否则重新结转会撞幂等校验",
-                    accountSetId, year, month, carryVoucherCount);
+        // B-008 修复:反结账时清理本期系统生成的结转凭证(source=1)并反向回滚余额。
+        // 结转凭证由 carryForward 在结账前生成并过账,会更新科目余额(损益清零、本年利润累加)。
+        // 若不清理,重新结账会撞 carryForward 幂等校验抛异常,形成"反结账后无法重新结账"的死锁;
+        // 用户也无法修改本期凭证(结转凭证占据凭证号区间且不可编辑)。
+        // 调用 voucherService.deleteCarryForwardVouchers 内部会按 unpostVoucher 同公式反向冲减余额。
+        int deleted = voucherService.deleteCarryForwardVouchers(accountSetId, year, month);
+        if (deleted > 0) {
+            log.info("反结账清理完成:账套ID={},期间={}-{},删除{}张系统结转凭证",
+                    accountSetId, year, month, deleted);
         }
 
         log.info("期末反结账成功，账套ID：{}，期间：{}-{}", accountSetId, year, month);
@@ -834,6 +843,11 @@ public class PeriodServiceImpl implements PeriodService {
         }
 
         // 为下一年创建各月份的科目余额记录
+        // B-016 修复:同时为下一年创建 SubjectBalance(年度期初余额)记录。
+        // 原 carryForwardYear 仅复制 AccountBalance(月度余额)到次年1月,但未生成 SubjectBalance(年度期初),
+        // 导致次年"期初余额"界面/试算平衡表查询(acc_subject_balance 表)返回空,
+        // 资产负债表"年初余额"列也恒为0,严重影响次年报表准确性。
+        int subjectBalanceCreated = 0;
         for (Subject subject : subjects) {
             // 找到该科目fromYear 12月的期末余额
             AccountBalance decBalance = decBalances.stream()
@@ -864,8 +878,27 @@ public class PeriodServiceImpl implements PeriodService {
             newBalance.setYearDebit(BigDecimal.ZERO);
             newBalance.setYearCredit(BigDecimal.ZERO);
             accountBalanceMapper.insert(newBalance);
+
+            // B-016:同步创建次年 SubjectBalance(period=1 期初余额)
+            // 与 AccountBalance.beginDebit/beginCredit 保持一致(均取自上年12月期末余额)
+            // 跳过余额为0的科目以减少冗余记录(查询时 JOIN acc_subject 即可补全)
+            if (beginDebit.compareTo(BigDecimal.ZERO) != 0 || beginCredit.compareTo(BigDecimal.ZERO) != 0) {
+                SubjectBalance sb = new SubjectBalance();
+                sb.setAccountSetId(accountSetId);
+                sb.setSubjectId(subject.getId());
+                sb.setSubjectCode(subject.getCode());
+                sb.setSubjectName(subject.getName());
+                sb.setYear(toYear);
+                sb.setPeriod(1); // 1=期初
+                sb.setBeginDebit(beginDebit);
+                sb.setBeginCredit(beginCredit);
+                sb.setAuxiliaryId(null);
+                subjectBalanceMapper.insert(sb);
+                subjectBalanceCreated++;
+            }
         }
-        log.info("结转{}年度年末余额至{}年度1月年初余额完成，共{}个科目", fromYear, toYear, subjects.size());
+        log.info("结转{}年度年末余额至{}年度1月年初余额完成，共{}个科目(其中{}个科目有期初余额,已写入 acc_subject_balance)",
+                fromYear, toYear, subjects.size(), subjectBalanceCreated);
 
         // 5. 标记年度结转完成
         log.info("年度结转完成，账套ID：{}，从{}年度结转至{}年度", accountSetId, fromYear, toYear);
@@ -877,7 +910,8 @@ public class PeriodServiceImpl implements PeriodService {
         log.info("期末成本结转，账套ID：{}，期间：{}-{}，成本率：{}", accountSetId, year, month, costRate);
 
         if (costRate == null) {
-            costRate = new BigDecimal("0.80");
+            // B-015 修复:从配置读取默认成本率,避免硬编码 0.80
+            costRate = defaultCarryForwardCostRate;
         }
         if (costRate.compareTo(BigDecimal.ZERO) < 0 || costRate.compareTo(BigDecimal.ONE) > 0) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "成本率必须在0-1之间");

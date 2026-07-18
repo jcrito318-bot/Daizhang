@@ -2,6 +2,7 @@ package com.company.daizhang.module.salary.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
@@ -79,8 +80,9 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         Page<Employee> page = new Page<>(request.getPageNum(), request.getPageSize());
 
         LambdaQueryWrapper<Employee> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(Employee::getAccountSetId, request.getAccountSetId())
-               .like(request.getEmployeeCode() != null, Employee::getEmployeeCode, request.getEmployeeCode())
+        // IDOR治理:校验当前用户对该账套的访问权
+        applyAccountSetFilter(wrapper, Employee::getAccountSetId, request.getAccountSetId());
+        wrapper.like(request.getEmployeeCode() != null, Employee::getEmployeeCode, request.getEmployeeCode())
                .like(request.getEmployeeName() != null, Employee::getEmployeeName, request.getEmployeeName())
                .like(request.getDepartment() != null, Employee::getDepartment, request.getDepartment())
                .eq(request.getStatus() != null, Employee::getStatus, request.getStatus())
@@ -180,8 +182,9 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         Page<SalaryItem> page = new Page<>(request.getPageNum(), request.getPageSize());
 
         LambdaQueryWrapper<SalaryItem> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(SalaryItem::getAccountSetId, request.getAccountSetId())
-               .like(request.getItemName() != null, SalaryItem::getItemName, request.getItemName())
+        // IDOR治理:校验当前用户对该账套的访问权
+        applyAccountSetFilter(wrapper, SalaryItem::getAccountSetId, request.getAccountSetId());
+        wrapper.like(request.getItemName() != null, SalaryItem::getItemName, request.getItemName())
                .like(request.getItemCode() != null, SalaryItem::getItemCode, request.getItemCode())
                .eq(request.getItemType() != null, SalaryItem::getItemType, request.getItemType())
                .orderByDesc(SalaryItem::getCreateTime);
@@ -268,8 +271,9 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         Page<SalarySheet> page = new Page<>(request.getPageNum(), request.getPageSize());
 
         LambdaQueryWrapper<SalarySheet> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(SalarySheet::getAccountSetId, request.getAccountSetId())
-               .eq(request.getYear() != null, SalarySheet::getYear, request.getYear())
+        // IDOR治理:校验当前用户对该账套的访问权
+        applyAccountSetFilter(wrapper, SalarySheet::getAccountSetId, request.getAccountSetId());
+        wrapper.eq(request.getYear() != null, SalarySheet::getYear, request.getYear())
                .eq(request.getMonth() != null, SalarySheet::getMonth, request.getMonth())
                .eq(request.getEmployeeId() != null, SalarySheet::getEmployeeId, request.getEmployeeId())
                .like(request.getEmployeeName() != null, SalarySheet::getEmployeeName, request.getEmployeeName())
@@ -1155,5 +1159,30 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
         wrapper.eq(Employee::getAccountSetId, accountSetId);
         List<Employee> employees = employeeMapper.selectList(wrapper);
         return employees.stream().collect(Collectors.toMap(Employee::getId, e -> e, (x, y) -> x));
+    }
+
+    /**
+     * 分页/列表查询的账套访问过滤(IDOR治理):
+     * - accountSetId 非空: checkAccess 校验后按该账套精确过滤
+     * - accountSetId 为空: 按当前用户可访问账套集合过滤(超级管理员返回null表示不限制;
+     *   空集合表示无权限,注入永不命中条件避免 MyBatis-Plus 对空集合in跳过导致越权)
+     */
+    private <T> void applyAccountSetFilter(LambdaQueryWrapper<T> wrapper,
+                                           SFunction<T, Long> accountSetIdColumn,
+                                           Long accountSetId) {
+        if (accountSetId != null) {
+            accountSetAccessService.checkAccess(accountSetId);
+            wrapper.eq(accountSetIdColumn, accountSetId);
+            return;
+        }
+        Set<Long> accessibleIds = accountSetAccessService.listAccessibleAccountSetIds();
+        if (accessibleIds == null) {
+            return;
+        }
+        if (accessibleIds.isEmpty()) {
+            wrapper.eq(accountSetIdColumn, -1L);
+            return;
+        }
+        wrapper.in(accountSetIdColumn, accessibleIds);
     }
 }

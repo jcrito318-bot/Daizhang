@@ -77,7 +77,7 @@
         :page-sizes="[10, 20, 50, 100]"
         layout="total, sizes, prev, pager, next, jumper"
         class="pagination"
-        @size-change="loadData"
+        @size-change="handleSizeChange"
         @current-change="loadData"
       />
     </el-card>
@@ -148,6 +148,12 @@ function handleSearch() {
   loadData()
 }
 
+function handleSizeChange(size: number) {
+  queryForm.pageSize = size
+  queryForm.pageNum = 1
+  loadData()
+}
+
 function handleReset() {
   queryForm.year = now.getFullYear()
   queryForm.month = now.getMonth() + 1
@@ -166,11 +172,16 @@ function handleView(row: VoucherVO) {
 }
 
 async function handleAudit(row: VoucherVO) {
-  await ElMessageBox.confirm(`确定要审核凭证"${row.voucherNo}"吗？`, '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning'
-  })
+  try {
+    await ElMessageBox.confirm(`确定要审核凭证"${row.voucherNo}"吗？`, '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    // 用户取消，不执行后续操作
+    return
+  }
   try {
     await voucherApi.audit(row.id)
     ElMessage.success('审核成功')
@@ -181,11 +192,16 @@ async function handleAudit(row: VoucherVO) {
 }
 
 async function handleUnaudit(row: VoucherVO) {
-  await ElMessageBox.confirm(`确定要反审核凭证"${row.voucherNo}"吗？`, '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning'
-  })
+  try {
+    await ElMessageBox.confirm(`确定要反审核凭证"${row.voucherNo}"吗？`, '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    // 用户取消，不执行后续操作
+    return
+  }
   try {
     await voucherApi.unaudit(row.id)
     ElMessage.success('反审核成功')
@@ -196,11 +212,16 @@ async function handleUnaudit(row: VoucherVO) {
 }
 
 async function handlePost(row: VoucherVO) {
-  await ElMessageBox.confirm(`确定要过账凭证"${row.voucherNo}"吗？`, '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning'
-  })
+  try {
+    await ElMessageBox.confirm(`确定要过账凭证"${row.voucherNo}"吗？`, '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    // 用户取消，不执行后续操作
+    return
+  }
   try {
     await voucherApi.post(row.id)
     ElMessage.success('过账成功')
@@ -211,11 +232,16 @@ async function handlePost(row: VoucherVO) {
 }
 
 async function handleDelete(row: VoucherVO) {
-  await ElMessageBox.confirm(`确定要删除凭证"${row.voucherNo}"吗？`, '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning'
-  })
+  try {
+    await ElMessageBox.confirm(`确定要删除凭证"${row.voucherNo}"吗？`, '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    // 用户取消，不执行后续操作
+    return
+  }
   try {
     await voucherApi.delete(row.id)
     ElMessage.success('删除成功')
