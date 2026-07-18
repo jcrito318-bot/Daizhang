@@ -24,3 +24,56 @@ a, button, input, textarea, select,
 table, th, td, label, li, ul, ol {
   font-family: inherit;
 }
+
+/* F-007 修复:全局响应式断点。
+   项目原无任何 @media 声明,导致小屏(平板/手机)下表格溢出、按钮挤压、侧边栏遮挡内容。
+   这里设置三档断点:平板(<=992px)、手机(<=768px)、小手机(<=480px)。
+   仅为全局通用规则,具体页面布局由 Element Plus 的响应式栅格自行处理。 */
+@media (max-width: 992px) {
+  /* 平板及以下:缩小主内容内边距,避免大屏留白浪费 */
+  .app-main,
+  .el-main {
+    padding: 12px !important;
+  }
+  /* 表格列宽自适应,避免横向滚动条 */
+  .el-table {
+    width: 100% !important;
+  }
+}
+
+@media (max-width: 768px) {
+  /* 手机:隐藏非核心操作按钮文字,仅留图标;压缩表头高度 */
+  .el-button span {
+    font-size: 13px;
+  }
+  /* 弹窗在手机上铺满屏幕宽度 */
+  .el-dialog {
+    width: 92% !important;
+    margin: 5vh auto !important;
+  }
+  /* 表单标签顶部对齐,避免标签被压缩换行 */
+  .el-form-item__label {
+    text-align: left !important;
+    float: none !important;
+    display: block !important;
+    padding: 0 0 6px !important;
+  }
+  .el-form-item__content {
+    margin-left: 0 !important;
+  }
+  /* 分页组件在手机上居中且紧凑 */
+  .el-pagination {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 480px) {
+  /* 极小屏:进一步压缩内边距,隐藏次要表格列(由具体页面 scoped 样式控制) */
+  body {
+    font-size: 13px;
+  }
+  .el-button {
+    padding: 8px 12px !important;
+  }
+}

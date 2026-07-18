@@ -61,6 +61,7 @@
         v-loading="loading"
         border
         stripe
+        empty-text="暂无票据数据,可点击「新增票据」或调整筛选条件"
         @selection-change="handleSelectionChange"
       >
         <el-table-column type="selection" width="55" />
@@ -410,16 +411,19 @@ const formRules: FormRules = {
 }
 
 // F-010 修复:el-upload 不再使用 action+headers(会绕过 axios 拦截器,丢失 401 自动刷新/统一错误处理),
-// 改用 :http-request 接入 request 工具,所有上传请求统一走 axios 拦截器。
-// 后端 /upload 端点若不存在,需后续补充;此处保持原有 URL 与 payload 结构不变,仅切换到 axios 通道。
+// 改用 :http-request 接入 request 工具,调用后端 /document/upload 端点。
 const customUploadRequest = async (options: UploadRequestOptions) => {
   const { file, onSuccess, onError } = options
   const formData = new FormData()
   formData.append('file', file)
   try {
-    const res = await request.post('/upload', formData, {
+    const res = await request.post('/document/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
+    // 上传成功后将 fileUrl 回填到表单
+    if (res?.data?.fileUrl) {
+      form.fileUrl = res.data.fileUrl
+    }
     // Element Plus onSuccess 签名:(response, uploadFile?) => void
     onSuccess?.(res)
   } catch (err) {
@@ -427,7 +431,7 @@ const customUploadRequest = async (options: UploadRequestOptions) => {
     const e = err as Error & { status?: number; method?: string; url?: string }
     e.status = 0
     e.method = 'POST'
-    e.url = '/upload'
+    e.url = '/document/upload'
     onError?.(e as any)
   }
 }

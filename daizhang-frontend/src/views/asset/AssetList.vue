@@ -30,7 +30,7 @@
         </div>
       </template>
 
-      <el-table :data="tableData" v-loading="loading" border>
+      <el-table :data="tableData" v-loading="loading" border empty-text="暂无资产数据,可点击「新增资产」或调整筛选条件">
         <el-table-column prop="assetCode" label="资产编号" width="120" />
         <el-table-column prop="assetName" label="资产名称" width="150" />
         <el-table-column prop="categoryName" label="资产分类" width="120" />

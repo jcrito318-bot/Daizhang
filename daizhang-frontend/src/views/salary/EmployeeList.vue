@@ -23,7 +23,7 @@
         </div>
       </template>
 
-      <el-table :data="tableData" v-loading="loading" border>
+      <el-table :data="tableData" v-loading="loading" border empty-text="暂无员工数据,可点击「新增员工」或调整筛选条件">
         <el-table-column prop="employeeCode" label="员工编号" width="120" />
         <el-table-column prop="employeeName" label="员工姓名" width="120" />
         <el-table-column prop="idCard" label="身份证号" width="180" />

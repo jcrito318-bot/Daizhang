@@ -29,7 +29,7 @@
         </div>
       </template>
 
-      <el-table :data="tableData" v-loading="loading" border>
+      <el-table :data="tableData" v-loading="loading" border empty-text="暂无客户数据,可点击「新增客户」或调整筛选条件">
         <el-table-column prop="customerCode" label="客户编号" width="120" />
         <el-table-column prop="customerName" label="客户名称" width="180" />
         <el-table-column prop="customerType" label="客户类型" width="100" />
