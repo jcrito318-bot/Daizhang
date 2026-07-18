@@ -7,6 +7,7 @@ import com.company.daizhang.module.accountset.vo.AccountPeriodVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -33,6 +34,7 @@ public class AccountPeriodController {
     @Operation(summary = "初始化会计期间")
     @PostMapping("/init")
     @RequireAccountSetAccess
+    @PreAuthorize("hasAnyRole('ADMIN','MANAGER')")
     public Result<Void> init(@RequestParam Long accountSetId, @RequestParam int year) {
         accountPeriodService.createPeriod(accountSetId, year);
         return Result.success();
@@ -41,6 +43,7 @@ public class AccountPeriodController {
     @Operation(summary = "结账")
     @PostMapping("/{accountSetId}/close")
     @RequireAccountSetAccess
+    @PreAuthorize("hasAnyRole('ADMIN','MANAGER')")
     public Result<Void> close(@PathVariable Long accountSetId,
                               @RequestParam int year,
                               @RequestParam int month) {
@@ -51,6 +54,7 @@ public class AccountPeriodController {
     @Operation(summary = "反结账")
     @PostMapping("/{accountSetId}/reopen")
     @RequireAccountSetAccess
+    @PreAuthorize("hasAnyRole('ADMIN','MANAGER')")
     public Result<Void> reopen(@PathVariable Long accountSetId,
                                @RequestParam int year,
                                @RequestParam int month) {

@@ -6,6 +6,7 @@ import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.module.accountset.entity.AccountPeriod;
 import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.bank.entity.BankTransaction;
 import com.company.daizhang.module.bank.mapper.BankTransactionMapper;
 import com.company.daizhang.module.bank.service.BankVoucherService;
@@ -41,6 +42,7 @@ public class BankVoucherServiceImpl implements BankVoucherService {
     private final SubjectMapper subjectMapper;
     private final AccountPeriodMapper accountPeriodMapper;
     private final VoucherWordMapper voucherWordMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     // 科目编码常量
     private static final String CODE_BANK_DEPOSIT = "1002";          // 银行存款
@@ -76,6 +78,8 @@ public class BankVoucherServiceImpl implements BankVoucherService {
         }
 
         Long accountSetId = transaction.getAccountSetId();
+        // IDOR治理:校验当前用户对该流水所属账套的所有者权限,防止跨账套生成凭证
+        accountSetAccessService.checkOwner(accountSetId);
         LocalDate voucherDate = transaction.getTransactionDate() != null
                 ? transaction.getTransactionDate() : LocalDate.now();
         int year = voucherDate.getYear();

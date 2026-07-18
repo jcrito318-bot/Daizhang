@@ -73,6 +73,8 @@ public class TaxDeclarationServiceImpl implements TaxDeclarationService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createDeclaration(TaxDeclarationCreateRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         TaxDeclaration declaration = new TaxDeclaration();
         BeanUtil.copyProperties(request, declaration);
         // 默认未申报状态

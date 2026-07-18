@@ -42,6 +42,7 @@ public class DocumentController {
 
     @Operation(summary = "创建票据")
     @PostMapping
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> create(@Valid @RequestBody DocumentCreateRequest request) {
         documentService.createDocument(request);
         return Result.success();
@@ -49,6 +50,7 @@ public class DocumentController {
 
     @Operation(summary = "更新票据")
     @PutMapping("/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody DocumentUpdateRequest request) {
         documentService.updateDocument(id, request);
         return Result.success();
@@ -56,6 +58,7 @@ public class DocumentController {
 
     @Operation(summary = "删除票据")
     @DeleteMapping("/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> delete(@PathVariable Long id) {
         documentService.deleteDocument(id);
         return Result.success();
@@ -63,6 +66,7 @@ public class DocumentController {
 
     @Operation(summary = "关联凭证")
     @PostMapping("/{id}/link-voucher/{voucherId}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> linkVoucher(@PathVariable Long id, @PathVariable Long voucherId) {
         documentService.linkVoucher(id, voucherId);
         return Result.success();
@@ -70,6 +74,7 @@ public class DocumentController {
 
     @Operation(summary = "取消关联凭证")
     @PostMapping("/{id}/unlink-voucher")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> unlinkVoucher(@PathVariable Long id) {
         documentService.unlinkVoucher(id);
         return Result.success();

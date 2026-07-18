@@ -111,6 +111,8 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createEmployee(EmployeeCreateRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         // 检查员工编号是否已存在
         LambdaQueryWrapper<Employee> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(Employee::getAccountSetId, request.getAccountSetId())
@@ -212,6 +214,8 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createSalaryItem(SalaryItemCreateRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         // 检查项目编码是否已存在
         LambdaQueryWrapper<SalaryItem> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SalaryItem::getAccountSetId, request.getAccountSetId())
@@ -303,6 +307,8 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createSalarySheet(SalarySheetCreateRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         // 检查员工是否存在
         Employee employee = employeeMapper.selectById(request.getEmployeeId());
         if (employee == null) {
@@ -413,6 +419,8 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void calculateSalary(SalaryCalculateRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限(触发批量薪资计算)
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         // 查询该账套该月份的所有在职员工
         LambdaQueryWrapper<Employee> empWrapper = new LambdaQueryWrapper<>();
         empWrapper.eq(Employee::getAccountSetId, request.getAccountSetId())
@@ -463,6 +471,8 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void generateSalaryVoucher(SalaryVoucherGenerateRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限(生成薪资凭证)
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         // 查询该月份的已确认薪资记录
         LambdaQueryWrapper<SalarySheet> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(SalarySheet::getAccountSetId, request.getAccountSetId())

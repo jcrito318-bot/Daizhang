@@ -56,6 +56,7 @@ public class VoucherController {
 
     @Operation(summary = "创建凭证")
     @PostMapping
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Long> create(@Valid @RequestBody VoucherCreateRequest request) {
         Long id = voucherService.createVoucher(request);
         return Result.success(id);
@@ -63,6 +64,7 @@ public class VoucherController {
 
     @Operation(summary = "更新凭证")
     @PutMapping("/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody VoucherUpdateRequest request) {
         voucherService.updateVoucher(id, request);
         return Result.success();
@@ -70,6 +72,7 @@ public class VoucherController {
 
     @Operation(summary = "删除凭证")
     @DeleteMapping("/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> delete(@PathVariable Long id) {
         voucherService.deleteVoucher(id);
         return Result.success();
@@ -77,6 +80,7 @@ public class VoucherController {
 
     @Operation(summary = "审核凭证")
     @PostMapping("/{id}/audit")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> audit(@PathVariable Long id) {
         voucherService.auditVoucher(id);
         return Result.success();
@@ -84,6 +88,7 @@ public class VoucherController {
 
     @Operation(summary = "反审核凭证")
     @PostMapping("/{id}/unaudit")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> unaudit(@PathVariable Long id) {
         voucherService.unauditVoucher(id);
         return Result.success();
@@ -91,6 +96,7 @@ public class VoucherController {
 
     @Operation(summary = "批量审核凭证")
     @PostMapping("/batch-audit")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Integer> batchAudit(@RequestBody java.util.List<Long> ids) {
         int success = voucherService.batchAuditVoucher(ids);
         return Result.success(success);
@@ -98,6 +104,7 @@ public class VoucherController {
 
     @Operation(summary = "批量反审核凭证")
     @PostMapping("/batch-unaudit")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Integer> batchUnaudit(@RequestBody java.util.List<Long> ids) {
         int success = voucherService.batchUnauditVoucher(ids);
         return Result.success(success);
@@ -105,6 +112,7 @@ public class VoucherController {
 
     @Operation(summary = "过账凭证")
     @PostMapping("/{id}/post")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> post(@PathVariable Long id) {
         voucherService.postVoucher(id);
         return Result.success();
@@ -112,6 +120,7 @@ public class VoucherController {
 
     @Operation(summary = "反过账凭证")
     @PostMapping("/{id}/unpost")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> unpost(@PathVariable Long id) {
         voucherService.unpostVoucher(id);
         return Result.success();
@@ -119,6 +128,7 @@ public class VoucherController {
 
     @Operation(summary = "作废凭证")
     @PostMapping("/{id}/cancel")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> cancel(@PathVariable Long id) {
         voucherService.cancelVoucher(id);
         return Result.success();
@@ -126,6 +136,7 @@ public class VoucherController {
 
     @Operation(summary = "复制凭证")
     @PostMapping("/{id}/copy")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Long> copy(@PathVariable Long id) {
         Long newId = voucherService.copyVoucher(id);
         return Result.success(newId);
@@ -133,6 +144,7 @@ public class VoucherController {
 
     @Operation(summary = "红冲凭证")
     @PostMapping("/{id}/reverse")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Long> reverse(@PathVariable Long id,
                                 @RequestParam(required = false) Integer targetYear,
                                 @RequestParam(required = false) Integer targetMonth) {
@@ -142,6 +154,7 @@ public class VoucherController {
 
     @Operation(summary = "保存凭证草稿")
     @PostMapping("/draft")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Long> saveDraft(@Valid @RequestBody VoucherCreateRequest request) {
         Long id = voucherService.saveDraft(request);
         return Result.success(id);
@@ -149,6 +162,7 @@ public class VoucherController {
 
     @Operation(summary = "提交凭证草稿")
     @PostMapping("/{id}/submit-draft")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> submitDraft(@PathVariable Long id) {
         voucherService.submitDraft(id);
         return Result.success();

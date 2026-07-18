@@ -1,5 +1,6 @@
 package com.company.daizhang.module.customer.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.customer.dto.BillingRecordCreateRequest;
@@ -49,6 +50,7 @@ public class BillingRecordController {
 
     @Operation(summary = "创建开票记录（自动计算税额和不含税金额）")
     @PostMapping
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Long> create(@Valid @RequestBody BillingRecordCreateRequest request) {
         Long id = billingRecordService.createBillingRecord(request);
         return Result.success(id);
@@ -56,6 +58,7 @@ public class BillingRecordController {
 
     @Operation(summary = "更新开票记录")
     @PutMapping("/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody BillingRecordUpdateRequest request) {
         billingRecordService.updateBillingRecord(id, request);
         return Result.success();
@@ -63,6 +66,7 @@ public class BillingRecordController {
 
     @Operation(summary = "删除开票记录")
     @DeleteMapping("/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> delete(@PathVariable Long id) {
         billingRecordService.deleteBillingRecord(id);
         return Result.success();
@@ -70,6 +74,7 @@ public class BillingRecordController {
 
     @Operation(summary = "作废开票记录")
     @PutMapping("/{id}/void")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> voidBillingRecord(@PathVariable Long id) {
         billingRecordService.voidBillingRecord(id);
         return Result.success();
@@ -77,6 +82,7 @@ public class BillingRecordController {
 
     @Operation(summary = "标记开票记录为已收款")
     @PutMapping("/{id}/paid")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> markAsPaid(@PathVariable Long id,
                                     @RequestParam(required = false) Long paymentRecordId) {
         billingRecordService.markAsPaid(id, paymentRecordId);

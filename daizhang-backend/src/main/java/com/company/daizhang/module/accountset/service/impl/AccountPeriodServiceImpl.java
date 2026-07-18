@@ -11,6 +11,7 @@ import com.company.daizhang.module.accountset.entity.AccountPeriod;
 import com.company.daizhang.module.accountset.mapper.AccountBalanceMapper;
 import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
 import com.company.daizhang.module.accountset.service.AccountPeriodService;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.accountset.vo.AccountPeriodVO;
 import com.company.daizhang.module.voucher.entity.Voucher;
 import com.company.daizhang.module.voucher.mapper.VoucherMapper;
@@ -39,6 +40,7 @@ public class AccountPeriodServiceImpl implements AccountPeriodService {
     private final VoucherMapper voucherMapper;
     private final AccountBalanceMapper accountBalanceMapper;
     private final VoucherService voucherService;
+    private final AccountSetAccessService accountSetAccessService;
     
     @Override
     public List<AccountPeriodVO> listPeriods(Long accountSetId) {
@@ -57,6 +59,7 @@ public class AccountPeriodServiceImpl implements AccountPeriodService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createPeriod(Long accountSetId, int year) {
+        accountSetAccessService.checkOwner(accountSetId);
         // 检查是否已存在该年度的期间
         LambdaQueryWrapper<AccountPeriod> checkWrapper = new LambdaQueryWrapper<>();
         checkWrapper.eq(AccountPeriod::getAccountSetId, accountSetId)
@@ -83,6 +86,7 @@ public class AccountPeriodServiceImpl implements AccountPeriodService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void closePeriod(Long accountSetId, int year, int month) {
+        accountSetAccessService.checkOwner(accountSetId);
         AccountPeriod period = getPeriod(accountSetId, year, month);
 
         if (Integer.valueOf(1).equals(period.getStatus())) {
@@ -145,6 +149,7 @@ public class AccountPeriodServiceImpl implements AccountPeriodService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void reopenPeriod(Long accountSetId, int year, int month) {
+        accountSetAccessService.checkOwner(accountSetId);
         AccountPeriod period = getPeriod(accountSetId, year, month);
 
         if (Integer.valueOf(0).equals(period.getStatus())) {

@@ -133,6 +133,7 @@ public class TaxController {
 
     @Operation(summary = "创建税务申报记录")
     @PostMapping("/declaration")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> createDeclaration(@Valid @RequestBody TaxDeclarationCreateRequest request) {
         taxDeclarationService.createDeclaration(request);
         return Result.success();
@@ -140,6 +141,7 @@ public class TaxController {
 
     @Operation(summary = "更新税务申报记录")
     @PutMapping("/declaration/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> updateDeclaration(@PathVariable Long id, @Valid @RequestBody TaxDeclarationUpdateRequest request) {
         taxDeclarationService.updateDeclaration(id, request);
         return Result.success();
@@ -147,6 +149,7 @@ public class TaxController {
 
     @Operation(summary = "删除税务申报记录")
     @DeleteMapping("/declaration/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> deleteDeclaration(@PathVariable Long id) {
         taxDeclarationService.deleteDeclaration(id);
         return Result.success();
@@ -154,6 +157,7 @@ public class TaxController {
 
     @Operation(summary = "执行申报")
     @PostMapping("/declaration/{id}/declare")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> declare(@PathVariable Long id) {
         taxDeclarationService.declare(id);
         return Result.success();
@@ -161,6 +165,7 @@ public class TaxController {
 
     @Operation(summary = "执行缴款")
     @PostMapping("/declaration/{id}/pay")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> pay(@PathVariable Long id,
                            @RequestParam(required = false) BigDecimal actualAmount) {
         taxDeclarationService.pay(id, actualAmount);
@@ -185,6 +190,7 @@ public class TaxController {
 
     @Operation(summary = "创建税务计算记录")
     @PostMapping("/calculation")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> createCalculation(@Valid @RequestBody TaxCalculationCreateRequest request) {
         taxCalculationRecordService.createCalculation(request);
         return Result.success();
@@ -192,6 +198,7 @@ public class TaxController {
 
     @Operation(summary = "更新税务计算记录")
     @PutMapping("/calculation/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> updateCalculation(@PathVariable Long id, @Valid @RequestBody TaxCalculationUpdateRequest request) {
         taxCalculationRecordService.updateCalculation(id, request);
         return Result.success();
@@ -199,6 +206,7 @@ public class TaxController {
 
     @Operation(summary = "删除税务计算记录")
     @DeleteMapping("/calculation/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> deleteCalculation(@PathVariable Long id) {
         taxCalculationRecordService.deleteCalculation(id);
         return Result.success();

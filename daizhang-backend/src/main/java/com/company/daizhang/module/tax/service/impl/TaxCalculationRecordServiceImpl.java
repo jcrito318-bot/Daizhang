@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.system.entity.SysUser;
 import com.company.daizhang.module.system.mapper.SysUserMapper;
 import com.company.daizhang.module.tax.dto.TaxCalculationCreateRequest;
@@ -38,6 +39,7 @@ public class TaxCalculationRecordServiceImpl implements TaxCalculationRecordServ
     private final TaxCalculationMapper taxCalculationMapper;
     private final SysUserMapper sysUserMapper;
     private final TaxCalculateService taxCalculateService;
+    private final AccountSetAccessService accountSetAccessService;
 
     @Override
     public PageResult<TaxCalculationVO> pageCalculations(TaxCalculationQueryRequest request) {
@@ -72,6 +74,8 @@ public class TaxCalculationRecordServiceImpl implements TaxCalculationRecordServ
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createCalculation(TaxCalculationCreateRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         TaxCalculation calculation = new TaxCalculation();
         BeanUtil.copyProperties(request, calculation);
         taxCalculationMapper.insert(calculation);
@@ -85,6 +89,8 @@ public class TaxCalculationRecordServiceImpl implements TaxCalculationRecordServ
         if (calculation == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "税务计算记录不存在");
         }
+        // IDOR治理:校验当前用户对该计算记录所属账套的所有者权限
+        accountSetAccessService.checkOwner(calculation.getAccountSetId());
         if (request.getTaxType() != null) {
             calculation.setTaxType(request.getTaxType());
         }
@@ -114,6 +120,8 @@ public class TaxCalculationRecordServiceImpl implements TaxCalculationRecordServ
         if (calculation == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "税务计算记录不存在");
         }
+        // IDOR治理:校验当前用户对该计算记录所属账套的所有者权限
+        accountSetAccessService.checkOwner(calculation.getAccountSetId());
         taxCalculationMapper.deleteById(id);
         log.info("删除税务计算记录成功，ID: {}", id);
     }

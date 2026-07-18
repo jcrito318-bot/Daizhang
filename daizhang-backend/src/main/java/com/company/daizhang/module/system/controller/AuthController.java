@@ -7,6 +7,7 @@ import com.company.daizhang.common.result.Result;
 import com.company.daizhang.common.utils.JwtUtils;
 import com.company.daizhang.module.system.dto.LoginRequest;
 import com.company.daizhang.module.system.dto.LoginResponse;
+import com.company.daizhang.module.system.dto.LogoutRequest;
 import com.company.daizhang.module.system.entity.LoginLog;
 import com.company.daizhang.module.system.service.LoginLogService;
 import com.company.daizhang.module.system.service.SysUserService;
@@ -107,34 +108,67 @@ public class AuthController {
             return Result.error(401, "非refresh token");
         }
 
+        // S-007 修复:refresh token 已入黑名单则拒绝(登出过的 refresh token 不能再用)
+        if (tokenBlacklist.contains(token)) {
+            return Result.error(401, "refresh token已失效,请重新登录");
+        }
+
         Long userId = claims.get("userId", Long.class);
         String username = claims.getSubject();
 
-        // 生成新的accessToken;refresh token不重新签发,用满7天后需重新登录,避免无限刷新
+        // S-007 修复:Refresh Token Rotation — 每次刷新签发新的 refresh token,旧 refresh token 吊销。
+        // 原 refresh 不轮换,窃取后可在7天有效期内永久访问;轮换后单次使用,即使泄露也只能用一次,
+        // 大幅缩小攻击窗口。同时保持 access token 短期(2小时)有效。
         String newAccessToken = jwtUtils.generateToken(userId, username);
+        String newRefreshToken = jwtUtils.generateRefreshToken(userId, username);
+        // 旧 refresh token 立即吊销,防止重放
+        long oldRefreshExpMillis = jwtUtils.getExpirationMillis(token);
+        tokenBlacklist.add(token, oldRefreshExpMillis);
 
         LoginResponse response = new LoginResponse();
         response.setToken(newAccessToken);
-        response.setRefreshToken(token);
+        response.setRefreshToken(newRefreshToken);
         return Result.success("刷新成功", response);
     }
 
     @PostMapping("/logout")
     @Operation(summary = "用户登出")
-    public Result<Void> logout(HttpServletRequest httpRequest) {
+    public Result<Void> logout(HttpServletRequest httpRequest,
+                               @RequestBody(required = false) LogoutRequest logoutRequest) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication != null && authentication.getPrincipal() instanceof SecurityUserDetails userDetails) {
             // 记录登出日志(原代码仅清SecurityContext,无任何审计记录)
             saveLoginLog(userDetails.getUsername(), userDetails.getUserId(), 2, 1,
                     getClientIp(httpRequest), httpRequest.getHeader("User-Agent"), "登出成功");
         }
-        // 将当前 token 加入黑名单:JWT 无状态,仅清 SecurityContext 后 token 在过期前仍可用,
+        // 将当前 access token 加入黑名单:JWT 无状态,仅清 SecurityContext 后 token 在过期前仍可用,
         // 登出形同虚设。加入黑名单后,JwtAuthenticationFilter 会拒绝该 token 的后续请求。
         String bearerToken = httpRequest.getHeader("Authorization");
         if (StringUtils.hasText(bearerToken) && bearerToken.startsWith("Bearer ")) {
             String token = bearerToken.substring(7);
             long expMillis = jwtUtils.getExpirationMillis(token);
             tokenBlacklist.add(token, expMillis);
+        }
+        // S-007 修复:同步吊销前端传来的 refresh token。
+        // 原 logout 仅吊销 access token,refresh token 仍有效(7天),攻击者若已窃取 refresh token,
+        // 可在 access token 黑名单过期后用 refresh 换取新 access token,绕过登出。
+        // 前端在登出时应主动将本地存储的 refreshToken 通过 body 传入,后端一并吊销。
+        if (logoutRequest != null && StringUtils.hasText(logoutRequest.getRefreshToken())) {
+            String refreshToken = logoutRequest.getRefreshToken().startsWith("Bearer ")
+                    ? logoutRequest.getRefreshToken().substring(7)
+                    : logoutRequest.getRefreshToken();
+            // 仅对合法可解析的 refresh token 入黑名单;非法 token 忽略即可
+            try {
+                Claims claims = jwtUtils.validateToken(refreshToken);
+                if ("refresh".equals(claims.get("type"))) {
+                    long refreshExpMillis = jwtUtils.getExpirationMillis(refreshToken);
+                    tokenBlacklist.add(refreshToken, refreshExpMillis);
+                    log.info("登出时同步吊销 refresh token,用户: {}", claims.getSubject());
+                }
+            } catch (Exception e) {
+                // refresh token 已过期或非法,无需吊销
+                log.debug("登出时 refresh token 已无效,无需吊销: {}", e.getMessage());
+            }
         }
         SecurityContextHolder.clearContext();
         return Result.success("登出成功", null);

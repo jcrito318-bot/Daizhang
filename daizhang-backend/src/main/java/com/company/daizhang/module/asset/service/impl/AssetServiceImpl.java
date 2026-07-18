@@ -98,6 +98,8 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createCategory(AssetCategoryCreateRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         // 检查分类编码是否已存在
         LambdaQueryWrapper<AssetCategory> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(AssetCategory::getAccountSetId, request.getAccountSetId())
@@ -208,6 +210,8 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createAsset(FixedAssetCreateRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         // 检查资产编码是否已存在
         LambdaQueryWrapper<FixedAsset> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(FixedAsset::getAccountSetId, request.getAccountSetId())
@@ -576,6 +580,8 @@ public class AssetServiceImpl extends ServiceImpl<FixedAssetMapper, FixedAsset> 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void calculateDepreciation(DepreciationRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         // 查询需计提折旧的资产:在用(0)和闲置(1)均需折旧,已处置/报废(2)不再折旧。
         // 会计准则中闲置固定资产通常仍需计提折旧(直到报废或处置)。
         LambdaQueryWrapper<FixedAsset> wrapper = new LambdaQueryWrapper<>();

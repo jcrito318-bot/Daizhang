@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
@@ -47,6 +48,7 @@ public class ExchangeRateController {
 
     @Operation(summary = "创建汇率")
     @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> create(@Valid @RequestBody ExchangeRateRequest request) {
         exchangeRateService.createRate(request);
         return Result.success();
@@ -54,6 +56,7 @@ public class ExchangeRateController {
 
     @Operation(summary = "更新汇率")
     @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody ExchangeRateRequest request) {
         exchangeRateService.updateRate(id, request);
         return Result.success();
@@ -61,6 +64,7 @@ public class ExchangeRateController {
 
     @Operation(summary = "删除汇率")
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<Void> delete(@PathVariable Long id) {
         exchangeRateService.deleteRate(id);
         return Result.success();

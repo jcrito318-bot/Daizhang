@@ -49,6 +49,7 @@ public class InventoryController {
     @Operation(summary = "修改商品")
     @PutMapping("/item")
     @OperationLog("修改商品")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> updateItem(@Valid @RequestBody InventoryItemUpdateRequest request) {
         inventoryService.updateItem(request);
         return Result.success();
@@ -57,6 +58,7 @@ public class InventoryController {
     @Operation(summary = "删除商品")
     @DeleteMapping("/item/{id}")
     @OperationLog("删除商品")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> deleteItem(@PathVariable Long id) {
         inventoryService.deleteItem(id);
         return Result.success();
@@ -97,6 +99,7 @@ public class InventoryController {
     @Operation(summary = "修改入库单")
     @PutMapping("/in")
     @OperationLog("修改入库单")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> updateIn(@Valid @RequestBody InventoryInUpdateRequest request) {
         inventoryService.updateIn(request);
         return Result.success();
@@ -105,6 +108,7 @@ public class InventoryController {
     @Operation(summary = "删除入库单")
     @DeleteMapping("/in/{id}")
     @OperationLog("删除入库单")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> deleteIn(@PathVariable Long id) {
         inventoryService.deleteIn(id);
         return Result.success();
@@ -113,6 +117,7 @@ public class InventoryController {
     @Operation(summary = "审核入库单")
     @PostMapping("/in/audit/{id}")
     @OperationLog("审核入库单")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> auditIn(@PathVariable Long id) {
         inventoryService.auditIn(id);
         return Result.success();
@@ -141,6 +146,7 @@ public class InventoryController {
     @Operation(summary = "修改出库单")
     @PutMapping("/out")
     @OperationLog("修改出库单")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> updateOut(@Valid @RequestBody InventoryOutUpdateRequest request) {
         inventoryService.updateOut(request);
         return Result.success();
@@ -149,6 +155,7 @@ public class InventoryController {
     @Operation(summary = "删除出库单")
     @DeleteMapping("/out/{id}")
     @OperationLog("删除出库单")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> deleteOut(@PathVariable Long id) {
         inventoryService.deleteOut(id);
         return Result.success();
@@ -157,6 +164,7 @@ public class InventoryController {
     @Operation(summary = "审核出库单")
     @PostMapping("/out/audit/{id}")
     @OperationLog("审核出库单")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> auditOut(@PathVariable Long id) {
         inventoryService.auditOut(id);
         return Result.success();

@@ -44,6 +44,7 @@ public class SalaryController {
 
     @Operation(summary = "创建员工")
     @PostMapping("/employee")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> createEmployee(@Valid @RequestBody EmployeeCreateRequest request) {
         salaryService.createEmployee(request);
         return Result.success();
@@ -51,6 +52,7 @@ public class SalaryController {
 
     @Operation(summary = "更新员工")
     @PutMapping("/employee/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> updateEmployee(@PathVariable Long id, @Valid @RequestBody EmployeeUpdateRequest request) {
         salaryService.updateEmployee(id, request);
         return Result.success();
@@ -58,6 +60,7 @@ public class SalaryController {
 
     @Operation(summary = "删除员工")
     @DeleteMapping("/employee/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> deleteEmployee(@PathVariable Long id) {
         salaryService.deleteEmployee(id);
         return Result.success();
@@ -81,6 +84,7 @@ public class SalaryController {
 
     @Operation(summary = "创建薪资项目")
     @PostMapping("/item")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> createSalaryItem(@Valid @RequestBody SalaryItemCreateRequest request) {
         salaryService.createSalaryItem(request);
         return Result.success();
@@ -88,6 +92,7 @@ public class SalaryController {
 
     @Operation(summary = "更新薪资项目")
     @PutMapping("/item/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> updateSalaryItem(@PathVariable Long id, @Valid @RequestBody SalaryItemUpdateRequest request) {
         salaryService.updateSalaryItem(id, request);
         return Result.success();
@@ -95,6 +100,7 @@ public class SalaryController {
 
     @Operation(summary = "删除薪资项目")
     @DeleteMapping("/item/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> deleteSalaryItem(@PathVariable Long id) {
         salaryService.deleteSalaryItem(id);
         return Result.success();
@@ -118,6 +124,7 @@ public class SalaryController {
 
     @Operation(summary = "创建薪资表")
     @PostMapping("/sheet")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> createSalarySheet(@Valid @RequestBody SalarySheetCreateRequest request) {
         salaryService.createSalarySheet(request);
         return Result.success();
@@ -125,6 +132,7 @@ public class SalaryController {
 
     @Operation(summary = "更新薪资表")
     @PutMapping("/sheet/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> updateSalarySheet(@PathVariable Long id, @Valid @RequestBody SalarySheetUpdateRequest request) {
         salaryService.updateSalarySheet(id, request);
         return Result.success();
@@ -132,6 +140,7 @@ public class SalaryController {
 
     @Operation(summary = "删除薪资表")
     @DeleteMapping("/sheet/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> deleteSalarySheet(@PathVariable Long id) {
         salaryService.deleteSalarySheet(id);
         return Result.success();
@@ -139,6 +148,7 @@ public class SalaryController {
 
     @Operation(summary = "确认薪资表")
     @PostMapping("/sheet/{id}/confirm")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> confirmSalarySheet(@PathVariable Long id) {
         salaryService.confirmSalarySheet(id);
         return Result.success();
@@ -146,6 +156,7 @@ public class SalaryController {
 
     @Operation(summary = "发放薪资")
     @PostMapping("/sheet/{id}/pay")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> paySalarySheet(@PathVariable Long id) {
         salaryService.paySalarySheet(id);
         return Result.success();
@@ -155,6 +166,7 @@ public class SalaryController {
 
     @Operation(summary = "批量计算薪资")
     @PostMapping("/calculate")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> calculateSalary(@Valid @RequestBody SalaryCalculateRequest request) {
         salaryService.calculateSalary(request);
         return Result.success();
@@ -162,6 +174,7 @@ public class SalaryController {
 
     @Operation(summary = "生成薪资凭证")
     @PostMapping("/voucher/generate")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> generateSalaryVoucher(@Valid @RequestBody SalaryVoucherGenerateRequest request) {
         salaryService.generateSalaryVoucher(request);
         return Result.success();

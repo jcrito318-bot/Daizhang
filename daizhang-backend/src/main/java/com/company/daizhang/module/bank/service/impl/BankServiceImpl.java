@@ -71,6 +71,8 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Integer importBankTransactions(BankTransactionImportRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限,防止跨账套导入银行流水
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         // 校验银行账号归属:bankAccount 必须属于该账套,否则可向他账套的银行账号导入流水
         Long bankAccountCount = bankAccountMapper.selectCount(new LambdaQueryWrapper<BankAccount>()
                 .eq(BankAccount::getAccountSetId, request.getAccountSetId())
@@ -183,6 +185,8 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Integer autoMatch(AutoMatchRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限,防止跨账套执行自动匹配
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         // 查询该月份未匹配的银行流水
         LambdaQueryWrapper<BankTransaction> txWrapper = new LambdaQueryWrapper<>();
         txWrapper.eq(BankTransaction::getAccountSetId, request.getAccountSetId())
@@ -272,6 +276,8 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void manualMatch(ManualMatchRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限,防止跨账套执行手动匹配
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         // 验证凭证是否存在
         Voucher voucher = voucherMapper.selectById(request.getVoucherId());
         if (voucher == null) {
@@ -373,6 +379,8 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
     @Override
     @Transactional(rollbackFor = Exception.class)
     public BankReconciliationVO generateReconciliation(ReconciliationGenerateRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限,防止跨账套生成对账单
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         // 检查是否已存在对账单
         LambdaQueryWrapper<BankReconciliation> existWrapper = new LambdaQueryWrapper<>();
         existWrapper.eq(BankReconciliation::getAccountSetId, request.getAccountSetId())

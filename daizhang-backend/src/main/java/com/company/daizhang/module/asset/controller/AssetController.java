@@ -52,6 +52,7 @@ public class AssetController {
 
     @Operation(summary = "创建资产分类")
     @PostMapping("/category")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> createCategory(@Valid @RequestBody AssetCategoryCreateRequest request) {
         assetService.createCategory(request);
         return Result.success();
@@ -59,6 +60,7 @@ public class AssetController {
 
     @Operation(summary = "更新资产分类")
     @PutMapping("/category/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> updateCategory(@PathVariable Long id, @Valid @RequestBody AssetCategoryUpdateRequest request) {
         assetService.updateCategory(id, request);
         return Result.success();
@@ -66,6 +68,7 @@ public class AssetController {
 
     @Operation(summary = "删除资产分类")
     @DeleteMapping("/category/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> deleteCategory(@PathVariable Long id) {
         assetService.deleteCategory(id);
         return Result.success();
@@ -89,6 +92,7 @@ public class AssetController {
 
     @Operation(summary = "创建固定资产")
     @PostMapping
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> createAsset(@Valid @RequestBody FixedAssetCreateRequest request) {
         assetService.createAsset(request);
         return Result.success();
@@ -96,6 +100,7 @@ public class AssetController {
 
     @Operation(summary = "更新固定资产")
     @PutMapping("/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> updateAsset(@PathVariable Long id, @Valid @RequestBody FixedAssetUpdateRequest request) {
         assetService.updateAsset(id, request);
         return Result.success();
@@ -103,6 +108,7 @@ public class AssetController {
 
     @Operation(summary = "删除固定资产")
     @DeleteMapping("/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> deleteAsset(@PathVariable Long id) {
         assetService.deleteAsset(id);
         return Result.success();
@@ -110,6 +116,7 @@ public class AssetController {
 
     @Operation(summary = "变更资产状态")
     @PostMapping("/change-status")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> changeAssetStatus(@Valid @RequestBody AssetStatusChangeRequest request) {
         assetService.changeAssetStatus(request);
         return Result.success();
@@ -143,6 +150,7 @@ public class AssetController {
 
     @Operation(summary = "计提折旧")
     @PostMapping("/depreciation/calculate")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> calculateDepreciation(@Valid @RequestBody DepreciationRequest request) {
         assetService.calculateDepreciation(request);
         return Result.success();
@@ -150,6 +158,7 @@ public class AssetController {
 
     @Operation(summary = "生成折旧凭证")
     @PostMapping("/depreciation/{id}/voucher")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> generateDepreciationVoucher(@PathVariable Long id) {
         assetService.generateDepreciationVoucher(id);
         return Result.success();
@@ -157,6 +166,7 @@ public class AssetController {
 
     @Operation(summary = "批量生成折旧凭证")
     @PostMapping("/depreciation/batch-voucher")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> batchGenerateDepreciationVoucher(@Valid @RequestBody DepreciationRequest request) {
         assetService.batchGenerateDepreciationVoucher(request);
         return Result.success();

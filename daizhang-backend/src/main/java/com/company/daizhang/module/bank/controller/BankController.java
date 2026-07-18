@@ -35,6 +35,7 @@ public class BankController {
 
     @Operation(summary = "导入银行流水")
     @PostMapping("/transaction/import")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Integer> importTransactions(@Valid @RequestBody BankTransactionImportRequest request) {
         Integer count = bankService.importBankTransactions(request);
         return Result.success("成功导入" + count + "条银行流水", count);
@@ -63,6 +64,7 @@ public class BankController {
 
     @Operation(summary = "自动匹配")
     @PostMapping("/match/auto")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Integer> autoMatch(@Valid @RequestBody AutoMatchRequest request) {
         Integer count = bankService.autoMatch(request);
         return Result.success("自动匹配完成，共匹配" + count + "条", count);
@@ -70,6 +72,7 @@ public class BankController {
 
     @Operation(summary = "手动匹配")
     @PostMapping("/match/manual")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> manualMatch(@Valid @RequestBody ManualMatchRequest request) {
         bankService.manualMatch(request);
         return Result.success();
@@ -77,6 +80,7 @@ public class BankController {
 
     @Operation(summary = "取消匹配")
     @PostMapping("/match/cancel/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> cancelMatch(@PathVariable Long id) {
         bankService.cancelMatch(id);
         return Result.success();
@@ -84,6 +88,7 @@ public class BankController {
 
     @Operation(summary = "生成对账单")
     @PostMapping("/reconciliation/generate")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<BankReconciliationVO> generateReconciliation(@Valid @RequestBody ReconciliationGenerateRequest request) {
         BankReconciliationVO vo = bankService.generateReconciliation(request);
         return Result.success(vo);
@@ -140,6 +145,7 @@ public class BankController {
 
     @Operation(summary = "未达账项生成凭证")
     @PostMapping("/unmatched-items/{transactionId}/generate-voucher")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Long> generateVoucherFromUnmatched(@PathVariable Long transactionId) {
         Long voucherId = bankService.generateVoucherFromUnmatched(transactionId);
         return Result.success(voucherId);

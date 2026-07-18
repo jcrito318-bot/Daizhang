@@ -91,6 +91,9 @@ public class DocumentServiceImpl extends ServiceImpl<DocumentMapper, Document> i
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createDocument(DocumentCreateRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限,防止越权向他人账套写入票据
+        accountSetAccessService.checkOwner(request.getAccountSetId());
+
         // 发票号唯一性校验:同账套下invoiceCode+invoiceNumber不可重复,否则重复入账/重复抵扣
         if (StrUtil.isNotBlank(request.getInvoiceCode()) && StrUtil.isNotBlank(request.getInvoiceNumber())) {
             LambdaQueryWrapper<Document> dupWrapper = new LambdaQueryWrapper<>();
