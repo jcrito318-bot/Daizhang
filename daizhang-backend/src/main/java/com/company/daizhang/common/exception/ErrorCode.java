@@ -117,7 +117,12 @@ public enum ErrorCode {
     LEDGER_SUBJECT_ID_BLANK(5006, "科目ID不能为空"),
 
     // 并发控制相关 6001-6099
-    CONCURRENT_UPDATE_FAILED(6001, "数据已被修改，请刷新后重试");
+    CONCURRENT_UPDATE_FAILED(6001, "数据已被修改，请刷新后重试"),
+
+    // AI/OCR 相关 7001-7099
+    AI_OCR_PARSE_ERROR(7001, "OCR识别结果解析失败"),
+    AI_OCR_FIELD_PARSE_ERROR(7002, "OCR字段解析失败"),
+    AI_NOT_ENABLED(7003, "AI功能未启用");
 
     private final Integer code;
     private final String message;
