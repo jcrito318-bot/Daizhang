@@ -47,7 +47,7 @@ public class SysUserController {
     @Operation(summary = "分页查询用户")
     @GetMapping("/page")
     @PreAuthorize("hasRole('ADMIN')")
-    public Result<PageResult<UserVO>> page(UserQueryRequest request) {
+    public Result<PageResult<UserVO>> page(@Valid UserQueryRequest request) {
         PageResult<UserVO> page = userService.pageUsers(request);
         return Result.success(page);
     }

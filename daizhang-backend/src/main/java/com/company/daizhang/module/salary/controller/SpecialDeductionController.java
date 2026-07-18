@@ -37,7 +37,7 @@ public class SpecialDeductionController {
 
     @Operation(summary = "分页查询专项附加扣除")
     @GetMapping("/page")
-    public Result<PageResult<SpecialDeductionVO>> page(SpecialDeductionQueryRequest request) {
+    public Result<PageResult<SpecialDeductionVO>> page(@Valid SpecialDeductionQueryRequest request) {
         PageResult<SpecialDeductionVO> page = specialDeductionService.pageDeductions(request);
         return Result.success(page);
     }

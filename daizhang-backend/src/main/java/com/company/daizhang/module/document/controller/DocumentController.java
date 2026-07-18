@@ -28,7 +28,7 @@ public class DocumentController {
 
     @Operation(summary = "分页查询票据")
     @GetMapping("/page")
-    public Result<PageResult<DocumentVO>> page(DocumentQueryRequest request) {
+    public Result<PageResult<DocumentVO>> page(@Valid DocumentQueryRequest request) {
         PageResult<DocumentVO> page = documentService.pageDocuments(request);
         return Result.success(page);
     }

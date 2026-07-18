@@ -28,7 +28,7 @@ public class PaymentController {
 
     @Operation(summary = "分页查询收款记录")
     @GetMapping("/page")
-    public Result<PageResult<PaymentVO>> page(PaymentQueryRequest request) {
+    public Result<PageResult<PaymentVO>> page(@Valid PaymentQueryRequest request) {
         PageResult<PaymentVO> page = paymentService.pagePayments(request);
         return Result.success(page);
     }

@@ -29,7 +29,7 @@ public class ContractController {
 
     @Operation(summary = "分页查询合同")
     @GetMapping("/page")
-    public Result<PageResult<ContractVO>> page(ContractQueryRequest request) {
+    public Result<PageResult<ContractVO>> page(@Valid ContractQueryRequest request) {
         PageResult<ContractVO> page = contractService.pageContracts(request);
         return Result.success(page);
     }

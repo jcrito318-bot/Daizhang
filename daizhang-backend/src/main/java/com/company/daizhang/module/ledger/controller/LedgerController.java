@@ -20,6 +20,7 @@ import com.company.daizhang.module.ledger.vo.SubjectBalanceVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -49,35 +50,35 @@ public class LedgerController {
 
     @Operation(summary = "明细账")
     @GetMapping("/detail")
-    public Result<PageResult<DetailLedgerVO>> detailLedger(LedgerQueryRequest request) {
+    public Result<PageResult<DetailLedgerVO>> detailLedger(@Valid LedgerQueryRequest request) {
         PageResult<DetailLedgerVO> result = ledgerService.detailLedger(request);
         return Result.success(result);
     }
 
     @Operation(summary = "总账")
     @GetMapping("/general")
-    public Result<List<GeneralLedgerVO>> generalLedger(LedgerQueryRequest request) {
+    public Result<List<GeneralLedgerVO>> generalLedger(@Valid LedgerQueryRequest request) {
         List<GeneralLedgerVO> result = ledgerService.generalLedger(request);
         return Result.success(result);
     }
 
     @Operation(summary = "科目余额表")
     @GetMapping("/subject-balance")
-    public Result<List<SubjectBalanceVO>> subjectBalance(SubjectBalanceQueryRequest request) {
+    public Result<List<SubjectBalanceVO>> subjectBalance(@Valid SubjectBalanceQueryRequest request) {
         List<SubjectBalanceVO> result = ledgerService.subjectBalance(request);
         return Result.success(result);
     }
 
     @Operation(summary = "现金日记账")
     @GetMapping("/cash-journal")
-    public Result<PageResult<CashJournalVO>> cashJournal(LedgerQueryRequest request) {
+    public Result<PageResult<CashJournalVO>> cashJournal(@Valid LedgerQueryRequest request) {
         PageResult<CashJournalVO> result = ledgerService.cashJournal(request);
         return Result.success(result);
     }
 
     @Operation(summary = "银行日记账")
     @GetMapping("/bank-journal")
-    public Result<PageResult<CashJournalVO>> bankJournal(LedgerQueryRequest request) {
+    public Result<PageResult<CashJournalVO>> bankJournal(@Valid LedgerQueryRequest request) {
         PageResult<CashJournalVO> result = ledgerService.bankJournal(request);
         return Result.success(result);
     }

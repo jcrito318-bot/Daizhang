@@ -26,7 +26,7 @@ public class OpportunityController {
 
     @Operation(summary = "分页查询商机")
     @GetMapping("/page")
-    public Result<PageResult<OpportunityVO>> page(OpportunityQueryRequest request) {
+    public Result<PageResult<OpportunityVO>> page(@Valid OpportunityQueryRequest request) {
         PageResult<OpportunityVO> page = opportunityService.pageOpportunities(request);
         return Result.success(page);
     }

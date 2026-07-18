@@ -32,7 +32,7 @@ public class SysRoleController {
     @Operation(summary = "分页查询角色")
     @GetMapping("/page")
     @PreAuthorize("hasRole('ADMIN')")
-    public Result<PageResult<RoleVO>> page(RoleQueryRequest request) {
+    public Result<PageResult<RoleVO>> page(@Valid RoleQueryRequest request) {
         PageResult<RoleVO> page = roleService.pageRoles(request);
         return Result.success(page);
     }

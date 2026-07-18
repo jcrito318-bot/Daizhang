@@ -26,7 +26,7 @@ public class IndustryCommerceServiceController {
 
     @Operation(summary = "分页查询工商服务")
     @GetMapping("/page")
-    public Result<PageResult<IndustryCommerceServiceVO>> page(IndustryCommerceServiceQueryRequest request) {
+    public Result<PageResult<IndustryCommerceServiceVO>> page(@Valid IndustryCommerceServiceQueryRequest request) {
         PageResult<IndustryCommerceServiceVO> page = industryCommerceServiceService.pageServices(request);
         return Result.success(page);
     }

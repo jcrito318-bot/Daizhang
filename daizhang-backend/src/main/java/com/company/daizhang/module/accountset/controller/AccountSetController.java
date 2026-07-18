@@ -28,7 +28,7 @@ public class AccountSetController {
     
     @Operation(summary = "分页查询账套")
     @GetMapping("/page")
-    public Result<PageResult<AccountSetVO>> page(AccountSetQueryRequest request) {
+    public Result<PageResult<AccountSetVO>> page(@Valid AccountSetQueryRequest request) {
         PageResult<AccountSetVO> page = accountSetService.pageAccountSets(request);
         return Result.success(page);
     }

@@ -31,7 +31,7 @@ public class CustomerController {
 
     @Operation(summary = "分页查询客户")
     @GetMapping("/page")
-    public Result<PageResult<CustomerVO>> page(CustomerQueryRequest request) {
+    public Result<PageResult<CustomerVO>> page(@Valid CustomerQueryRequest request) {
         PageResult<CustomerVO> page = customerService.pageCustomers(request);
         return Result.success(page);
     }

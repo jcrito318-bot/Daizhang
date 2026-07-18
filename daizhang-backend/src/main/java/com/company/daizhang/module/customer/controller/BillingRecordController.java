@@ -28,7 +28,7 @@ public class BillingRecordController {
 
     @Operation(summary = "分页查询开票记录")
     @GetMapping("/page")
-    public Result<PageResult<BillingRecordVO>> page(BillingRecordQueryRequest request) {
+    public Result<PageResult<BillingRecordVO>> page(@Valid BillingRecordQueryRequest request) {
         PageResult<BillingRecordVO> page = billingRecordService.pageBillingRecords(request);
         return Result.success(page);
     }

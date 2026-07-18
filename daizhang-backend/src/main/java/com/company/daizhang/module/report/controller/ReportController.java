@@ -15,6 +15,7 @@ import com.company.daizhang.module.report.vo.YearOnYearVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -41,21 +42,21 @@ public class ReportController {
 
     @Operation(summary = "资产负债表")
     @GetMapping("/balance-sheet")
-    public Result<BalanceSheetVO> balanceSheet(ReportQueryRequest request) {
+    public Result<BalanceSheetVO> balanceSheet(@Valid ReportQueryRequest request) {
         BalanceSheetVO result = reportService.balanceSheet(request);
         return Result.success(result);
     }
 
     @Operation(summary = "利润表")
     @GetMapping("/income-statement")
-    public Result<IncomeStatementVO> incomeStatement(ReportQueryRequest request) {
+    public Result<IncomeStatementVO> incomeStatement(@Valid ReportQueryRequest request) {
         IncomeStatementVO result = reportService.incomeStatement(request);
         return Result.success(result);
     }
 
     @Operation(summary = "科目余额表")
     @GetMapping("/subject-balance-table")
-    public Result<SubjectBalanceTableVO> subjectBalanceTable(ReportQueryRequest request) {
+    public Result<SubjectBalanceTableVO> subjectBalanceTable(@Valid ReportQueryRequest request) {
         SubjectBalanceTableVO result = reportService.subjectBalanceTable(request);
         return Result.success(result);
     }

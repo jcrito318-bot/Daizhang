@@ -39,7 +39,7 @@ public class BankAccountController {
     @Operation(summary = "分页查询银行账户")
     @GetMapping("/page")
     @RequireAccountSetAccess
-    public Result<PageResult<BankAccountVO>> page(BankAccountQueryRequest request) {
+    public Result<PageResult<BankAccountVO>> page(@Valid BankAccountQueryRequest request) {
         PageResult<BankAccountVO> page = bankAccountService.pageBankAccounts(request);
         return Result.success(page);
     }

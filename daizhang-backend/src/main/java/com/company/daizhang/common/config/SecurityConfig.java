@@ -69,13 +69,13 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
-                                "/auth/**",
-                                "/doc.html/**",
-                                "/swagger-resources/**",
-                                "/v3/api-docs/**"
+                                "/auth/**"
                         ).permitAll()
-                        // 移除 /druid/** 和 /h2-console/** 的 permitAll:
-                        // H2控制台/Druid监控台含敏感信息且可执行SQL,未认证暴露会导致数据库被未授权访问
+                        // B-021 修复:不再 permitAll Knife4j/Springdoc 文档端点。
+                        // knife4j.enable=false 在 4.3.0 实测无法完全阻断 /doc.html 与 /v3/api-docs,
+                        // 必须在 Security 层兜底。即使是开发环境,要求 token 访问也是可接受的
+                        // (Knife4j UI 自带 Authorize 按钮可填入 JWT)。
+                        // H2控制台/Druid监控台同样不放开:含敏感信息且可执行SQL。
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

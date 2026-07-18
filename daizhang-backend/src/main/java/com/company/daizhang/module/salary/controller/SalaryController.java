@@ -30,7 +30,7 @@ public class SalaryController {
 
     @Operation(summary = "分页查询员工")
     @GetMapping("/employee/page")
-    public Result<PageResult<EmployeeVO>> pageEmployees(EmployeeQueryRequest request) {
+    public Result<PageResult<EmployeeVO>> pageEmployees(@Valid EmployeeQueryRequest request) {
         PageResult<EmployeeVO> page = salaryService.pageEmployees(request);
         return Result.success(page);
     }
@@ -67,7 +67,7 @@ public class SalaryController {
 
     @Operation(summary = "分页查询薪资项目")
     @GetMapping("/item/page")
-    public Result<PageResult<SalaryItemVO>> pageSalaryItems(SalaryItemQueryRequest request) {
+    public Result<PageResult<SalaryItemVO>> pageSalaryItems(@Valid SalaryItemQueryRequest request) {
         PageResult<SalaryItemVO> page = salaryService.pageSalaryItems(request);
         return Result.success(page);
     }
@@ -104,7 +104,7 @@ public class SalaryController {
 
     @Operation(summary = "分页查询薪资表")
     @GetMapping("/sheet/page")
-    public Result<PageResult<SalarySheetVO>> pageSalarySheets(SalarySheetQueryRequest request) {
+    public Result<PageResult<SalarySheetVO>> pageSalarySheets(@Valid SalarySheetQueryRequest request) {
         PageResult<SalarySheetVO> page = salaryService.pageSalarySheets(request);
         return Result.success(page);
     }

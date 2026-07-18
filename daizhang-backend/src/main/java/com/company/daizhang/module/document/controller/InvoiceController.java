@@ -33,7 +33,7 @@ public class InvoiceController {
 
     @Operation(summary = "分页查询进项发票")
     @GetMapping("/input/page")
-    public Result<PageResult<InputInvoiceVO>> pageInput(InvoiceQueryRequest request) {
+    public Result<PageResult<InputInvoiceVO>> pageInput(@Valid InvoiceQueryRequest request) {
         PageResult<InputInvoiceVO> page = invoiceService.pageInputInvoices(request);
         return Result.success(page);
     }
@@ -77,7 +77,7 @@ public class InvoiceController {
 
     @Operation(summary = "分页查询销项发票")
     @GetMapping("/output/page")
-    public Result<PageResult<OutputInvoiceVO>> pageOutput(InvoiceQueryRequest request) {
+    public Result<PageResult<OutputInvoiceVO>> pageOutput(@Valid InvoiceQueryRequest request) {
         PageResult<OutputInvoiceVO> page = invoiceService.pageOutputInvoices(request);
         return Result.success(page);
     }

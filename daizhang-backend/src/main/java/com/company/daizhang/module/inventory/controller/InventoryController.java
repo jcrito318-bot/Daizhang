@@ -28,7 +28,7 @@ public class InventoryController {
 
     @Operation(summary = "商品列表（分页）")
     @GetMapping("/item/page")
-    public Result<Page<InventoryItem>> itemPage(InventoryItemQueryRequest request) {
+    public Result<Page<InventoryItem>> itemPage(@Valid InventoryItemQueryRequest request) {
         return Result.success(inventoryService.getItemPage(request));
     }
 
@@ -64,19 +64,19 @@ public class InventoryController {
 
     @Operation(summary = "库存余额（分页）")
     @GetMapping("/stock/page")
-    public Result<Page<InventoryStock>> stockPage(InventoryStockQueryRequest request) {
+    public Result<Page<InventoryStock>> stockPage(@Valid InventoryStockQueryRequest request) {
         return Result.success(inventoryService.getStockPage(request));
     }
 
     @Operation(summary = "库存余额列表")
     @GetMapping("/stock/list")
-    public Result<List<InventoryStock>> stockList(InventoryStockQueryRequest request) {
+    public Result<List<InventoryStock>> stockList(@Valid InventoryStockQueryRequest request) {
         return Result.success(inventoryService.getStockList(request));
     }
 
     @Operation(summary = "入库单列表（分页）")
     @GetMapping("/in/page")
-    public Result<Page<InventoryIn>> inPage(InventoryInQueryRequest request) {
+    public Result<Page<InventoryIn>> inPage(@Valid InventoryInQueryRequest request) {
         return Result.success(inventoryService.getInPage(request));
     }
 
@@ -120,7 +120,7 @@ public class InventoryController {
 
     @Operation(summary = "出库单列表（分页）")
     @GetMapping("/out/page")
-    public Result<Page<InventoryOut>> outPage(InventoryOutQueryRequest request) {
+    public Result<Page<InventoryOut>> outPage(@Valid InventoryOutQueryRequest request) {
         return Result.success(inventoryService.getOutPage(request));
     }
 

@@ -27,7 +27,7 @@ public class AssetStocktakeController {
 
     @Operation(summary = "分页查询盘点单")
     @GetMapping("/page")
-    public Result<PageResult<AssetStocktakeVO>> pageStocktakes(AssetStocktakeQueryRequest request) {
+    public Result<PageResult<AssetStocktakeVO>> pageStocktakes(@Valid AssetStocktakeQueryRequest request) {
         PageResult<AssetStocktakeVO> page = assetStocktakeService.pageStocktakes(request);
         return Result.success(page);
     }

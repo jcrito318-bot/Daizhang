@@ -42,7 +42,7 @@ public class BankController {
 
     @Operation(summary = "分页查询银行流水")
     @GetMapping("/transaction/page")
-    public Result<PageResult<BankTransactionVO>> pageTransactions(BankTransactionQueryRequest request) {
+    public Result<PageResult<BankTransactionVO>> pageTransactions(@Valid BankTransactionQueryRequest request) {
         PageResult<BankTransactionVO> page = bankService.pageBankTransactions(request);
         return Result.success(page);
     }
@@ -98,7 +98,7 @@ public class BankController {
 
     @Operation(summary = "分页查询对账单")
     @GetMapping("/reconciliation/page")
-    public Result<PageResult<BankReconciliationVO>> pageReconciliations(BankTransactionQueryRequest request) {
+    public Result<PageResult<BankReconciliationVO>> pageReconciliations(@Valid BankTransactionQueryRequest request) {
         PageResult<BankReconciliationVO> page = bankService.pageReconciliations(request);
         return Result.success(page);
     }

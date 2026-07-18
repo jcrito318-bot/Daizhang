@@ -119,7 +119,7 @@ public class TaxController {
 
     @Operation(summary = "分页查询税务申报记录")
     @GetMapping("/declaration/page")
-    public Result<PageResult<TaxDeclarationVO>> pageDeclarations(TaxDeclarationQueryRequest request) {
+    public Result<PageResult<TaxDeclarationVO>> pageDeclarations(@Valid TaxDeclarationQueryRequest request) {
         PageResult<TaxDeclarationVO> page = taxDeclarationService.pageDeclarations(request);
         return Result.success(page);
     }
@@ -171,7 +171,7 @@ public class TaxController {
 
     @Operation(summary = "分页查询税务计算记录")
     @GetMapping("/calculation/page")
-    public Result<PageResult<TaxCalculationVO>> pageCalculations(TaxCalculationQueryRequest request) {
+    public Result<PageResult<TaxCalculationVO>> pageCalculations(@Valid TaxCalculationQueryRequest request) {
         PageResult<TaxCalculationVO> page = taxCalculationRecordService.pageCalculations(request);
         return Result.success(page);
     }

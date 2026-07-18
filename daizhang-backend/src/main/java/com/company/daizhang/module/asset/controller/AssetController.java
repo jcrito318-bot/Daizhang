@@ -30,7 +30,7 @@ public class AssetController {
 
     @Operation(summary = "分页查询资产分类")
     @GetMapping("/category/page")
-    public Result<PageResult<AssetCategoryVO>> pageCategories(AssetCategoryQueryRequest request) {
+    public Result<PageResult<AssetCategoryVO>> pageCategories(@Valid AssetCategoryQueryRequest request) {
         PageResult<AssetCategoryVO> page = assetService.pageCategories(request);
         return Result.success(page);
     }
@@ -75,7 +75,7 @@ public class AssetController {
 
     @Operation(summary = "分页查询固定资产")
     @GetMapping("/page")
-    public Result<PageResult<FixedAssetVO>> pageAssets(FixedAssetQueryRequest request) {
+    public Result<PageResult<FixedAssetVO>> pageAssets(@Valid FixedAssetQueryRequest request) {
         PageResult<FixedAssetVO> page = assetService.pageAssets(request);
         return Result.success(page);
     }
@@ -129,7 +129,7 @@ public class AssetController {
 
     @Operation(summary = "分页查询折旧记录")
     @GetMapping("/depreciation/page")
-    public Result<PageResult<DepreciationRecordVO>> pageDepreciationRecords(DepreciationRecordQueryRequest request) {
+    public Result<PageResult<DepreciationRecordVO>> pageDepreciationRecords(@Valid DepreciationRecordQueryRequest request) {
         PageResult<DepreciationRecordVO> page = assetService.pageDepreciationRecords(request);
         return Result.success(page);
     }
