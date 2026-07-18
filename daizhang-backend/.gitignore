@@ -21,6 +21,9 @@ data/daizhang.trace.db
 data/backup/
 data/*.bak.*
 
+# 用户上传的文件(运行时产物,不应入库)
+data/uploads/
+
 # 临时文件
 *.tmp
 *.bak
