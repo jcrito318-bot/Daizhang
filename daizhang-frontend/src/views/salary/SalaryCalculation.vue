@@ -36,7 +36,9 @@
 import { ref, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
 import { salaryApi } from '@/api/salary'
+import { useAppStore } from '@/stores/app'
 
+const appStore = useAppStore()
 const calculating = ref(false)
 
 const form = reactive({
@@ -49,11 +51,15 @@ const handleCalculate = async () => {
     ElMessage.warning('请选择年度和月份')
     return
   }
+  if (!appStore.currentAccountSetId) {
+    ElMessage.warning('请先在右上角选择账套')
+    return
+  }
 
   calculating.value = true
   try {
     await salaryApi.calculateSalary({
-      accountSetId: 1,
+      accountSetId: appStore.currentAccountSetId,
       year: Number(form.year),
       month: form.month
     })

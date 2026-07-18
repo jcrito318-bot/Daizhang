@@ -101,7 +101,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { roleApi, menuApi } from '@/api/system'
@@ -136,6 +136,8 @@ const menuDialogVisible = ref(false)
 const menuTreeRef = ref<any>(null)
 const menuTree = ref<SysMenuVO[]>([])
 const currentRoleId = ref(0)
+// 分配菜单对话框关闭后可能仍有未触发的 setTimeout,组件卸载时需清理
+let menuTreeTimer: ReturnType<typeof setTimeout> | null = null
 
 async function loadData() {
   loading.value = true
@@ -212,8 +214,14 @@ async function handleAssignMenus(row: SysRoleVO) {
     menuTree.value = treeRes.data
     const checkedMenuIds = menuIdsRes.data
     menuDialogVisible.value = true
-    setTimeout(() => {
+    // 清理旧的 timer,避免快速重复打开导致多个 setTimeout 堆积
+    if (menuTreeTimer) {
+      clearTimeout(menuTreeTimer)
+      menuTreeTimer = null
+    }
+    menuTreeTimer = setTimeout(() => {
       menuTreeRef.value?.setCheckedKeys(checkedMenuIds)
+      menuTreeTimer = null
     }, 100)
   } catch {
     // handled by interceptor
@@ -238,6 +246,14 @@ async function handleMenuSubmit() {
 
 onMounted(() => {
   loadData()
+})
+
+onBeforeUnmount(() => {
+  // 清理可能挂起的 timer,防止组件卸载后回调执行报错
+  if (menuTreeTimer) {
+    clearTimeout(menuTreeTimer)
+    menuTreeTimer = null
+  }
 })
 </script>
 

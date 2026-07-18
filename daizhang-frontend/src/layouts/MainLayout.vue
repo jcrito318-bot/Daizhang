@@ -132,7 +132,7 @@
           <el-menu-item index="/tax/calculation">税务计算</el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu index="system">
+        <el-sub-menu v-if="userStore.hasAnyRole(['ADMIN'])" index="system">
           <template #title>
             <el-icon><Setting /></el-icon>
             <span>系统管理</span>

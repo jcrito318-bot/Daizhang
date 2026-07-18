@@ -116,7 +116,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSubmit">确定</el-button>
+        <el-button type="primary" :loading="submitLoading" @click="handleSubmit">确定</el-button>
       </template>
     </el-dialog>
   </div>
@@ -128,13 +128,16 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { customerApi } from '@/api/customer'
+import { useAppStore } from '@/stores/app'
 
 const router = useRouter()
+const appStore = useAppStore()
 const loading = ref(false)
 const tableData = ref<any[]>([])
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
 const formRef = ref<FormInstance>()
+const submitLoading = ref(false)
 
 const searchForm = reactive({
   customerName: '',
@@ -237,32 +240,45 @@ const handleDelete = (row: any) => {
 }
 
 const handleSubmit = async () => {
-  await formRef.value?.validate()
-  if (form.id) {
-    await customerApi.update(form.id, {
-      customerName: form.customerName,
-      customerType: form.customerType,
-      contactPerson: form.contactPerson,
-      contactPhone: form.contactPhone,
-      email: form.email,
-      address: form.address,
-      remark: form.remark
-    })
-  } else {
-    await customerApi.create({
-      customerCode: form.customerCode,
-      customerName: form.customerName,
-      customerType: form.customerType,
-      contactPerson: form.contactPerson,
-      contactPhone: form.contactPhone,
-      email: form.email,
-      address: form.address,
-      remark: form.remark
-    })
+  const valid = await formRef.value?.validate().catch(() => false)
+  if (!valid) return
+  if (!appStore.currentAccountSetId) {
+    ElMessage.warning('请先在右上角选择账套')
+    return
   }
-  ElMessage.success('保存成功')
-  dialogVisible.value = false
-  loadData()
+  submitLoading.value = true
+  try {
+    if (form.id) {
+      await customerApi.update(form.id, {
+        customerName: form.customerName,
+        customerType: form.customerType,
+        contactPerson: form.contactPerson,
+        contactPhone: form.contactPhone,
+        email: form.email,
+        address: form.address,
+        remark: form.remark
+      })
+    } else {
+      await customerApi.create({
+        accountSetId: appStore.currentAccountSetId,
+        customerCode: form.customerCode,
+        customerName: form.customerName,
+        customerType: form.customerType,
+        contactPerson: form.contactPerson,
+        contactPhone: form.contactPhone,
+        email: form.email,
+        address: form.address,
+        remark: form.remark
+      })
+    }
+    ElMessage.success('保存成功')
+    dialogVisible.value = false
+    loadData()
+  } catch {
+    // handled by interceptor
+  } finally {
+    submitLoading.value = false
+  }
 }
 
 const resetForm = () => {

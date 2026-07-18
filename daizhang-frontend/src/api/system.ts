@@ -62,6 +62,24 @@ export const logApi = {
   }
 }
 
+// 系统配置 API:对应后端 SysConfigController(/system/config),
+// 用于 SystemSetting 页面的公司信息/系统参数持久化。
+// 设计为 key-value 形式:每项配置以 (configKey, configValue) 存储,更新时按 key 查找。
+export const settingApi = {
+  getValue(key: string): Promise<Result<string>> {
+    return request.get('/system/config/value', { params: { key } })
+  },
+  create(data: { configKey: string; configName: string; configValue: string; remark?: string }): Promise<Result<void>> {
+    return request.post('/system/config', data)
+  },
+  update(id: number, data: { configKey: string; configName: string; configValue: string; remark?: string }): Promise<Result<void>> {
+    return request.put(`/system/config/${id}`, data)
+  },
+  page(params: { configKey?: string; configName?: string; pageNum: number; pageSize: number }): Promise<Result<PageResult<{ id: number; configKey: string; configName: string; configValue: string; remark?: string }>>> {
+    return request.get('/system/config/page', { params })
+  }
+}
+
 export const dashboardApi = {
   // 后端端点为 GET /dashboard(返回 DashboardVO,含 summary 嵌套对象),
   // 前端 Dashboard 期望扁平的 DashboardStatsVO,此处做字段映射适配

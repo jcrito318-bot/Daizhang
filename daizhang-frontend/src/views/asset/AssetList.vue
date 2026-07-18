@@ -133,7 +133,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSubmit">确定</el-button>
+        <el-button type="primary" :loading="submitLoading" @click="handleSubmit">确定</el-button>
       </template>
     </el-dialog>
   </div>
@@ -144,13 +144,16 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { assetApi } from '@/api/asset'
+import { useAppStore } from '@/stores/app'
 
+const appStore = useAppStore()
 const loading = ref(false)
 const tableData = ref<any[]>([])
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
 const formRef = ref<FormInstance>()
 const categories = ref<any[]>([])
+const submitLoading = ref(false)
 
 const searchForm = reactive({
   assetName: '',
@@ -268,33 +271,45 @@ const handleDelete = (row: any) => {
 }
 
 const handleSubmit = async () => {
-  await formRef.value?.validate()
-  if (form.id) {
-    await assetApi.updateAsset(form.id, {
-      assetName: form.assetName,
-      categoryId: form.categoryId ?? undefined,
-      depreciationMethod: form.depreciationMethod,
-      usefulLife: form.usefulLife,
-      residualValue: form.residualValue,
-      remark: form.remark
-    })
-  } else {
-    await assetApi.createAsset({
-      accountSetId: 1,
-      assetCode: form.assetCode,
-      assetName: form.assetName,
-      categoryId: form.categoryId!,
-      purchaseDate: form.purchaseDate,
-      purchaseAmount: form.purchaseAmount,
-      depreciationMethod: form.depreciationMethod,
-      usefulLife: form.usefulLife,
-      residualValue: form.residualValue,
-      remark: form.remark
-    })
+  const valid = await formRef.value?.validate().catch(() => false)
+  if (!valid) return
+  if (!appStore.currentAccountSetId) {
+    ElMessage.warning('请先在右上角选择账套')
+    return
   }
-  ElMessage.success('保存成功')
-  dialogVisible.value = false
-  loadData()
+  submitLoading.value = true
+  try {
+    if (form.id) {
+      await assetApi.updateAsset(form.id, {
+        assetName: form.assetName,
+        categoryId: form.categoryId ?? undefined,
+        depreciationMethod: form.depreciationMethod,
+        usefulLife: form.usefulLife,
+        residualValue: form.residualValue,
+        remark: form.remark
+      })
+    } else {
+      await assetApi.createAsset({
+        accountSetId: appStore.currentAccountSetId,
+        assetCode: form.assetCode,
+        assetName: form.assetName,
+        categoryId: form.categoryId!,
+        purchaseDate: form.purchaseDate,
+        purchaseAmount: form.purchaseAmount,
+        depreciationMethod: form.depreciationMethod,
+        usefulLife: form.usefulLife,
+        residualValue: form.residualValue,
+        remark: form.remark
+      })
+    }
+    ElMessage.success('保存成功')
+    dialogVisible.value = false
+    loadData()
+  } catch {
+    // handled by interceptor
+  } finally {
+    submitLoading.value = false
+  }
 }
 
 const resetForm = () => {

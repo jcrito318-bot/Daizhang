@@ -13,6 +13,20 @@ const service: AxiosInstance = axios.create({
 let isRefreshing = false
 let pendingRequests: Array<(token: string) => void> = []
 
+// 跳转登录页:优先使用 vue-router(SPA 内跳转,保留 Pinia 状态),
+// 若 router 未初始化(早期模块加载阶段)则回退到 window.location。
+let routerInstance: { push: (path: string) => void } | null = null
+export function setRouter(r: { push: (path: string) => void }) {
+  routerInstance = r
+}
+function redirectToLogin() {
+  if (routerInstance) {
+    routerInstance.push('/login')
+  } else {
+    window.location.href = '/login'
+  }
+}
+
 service.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     // 通过 Pinia store 读取内存中的 access token,不再读 localStorage。
@@ -35,7 +49,7 @@ service.interceptors.response.use(
       ElMessage.error(res.message || '请求失败')
       if (res.code === 401) {
         // 业务层 401:access token 已失效,刷新页面后由 initializeAuth 尝试静默恢复
-        window.location.href = '/login'
+        redirectToLogin()
       }
       return Promise.reject(new Error(res.message || '请求失败'))
     }
@@ -76,7 +90,7 @@ service.interceptors.response.use(
           // 刷新失败:清空挂起队列并跳转登录
           pendingRequests = []
           ElMessage.error('登录已过期，请重新登录')
-          window.location.href = '/login'
+          redirectToLogin()
           return Promise.reject(error)
         } finally {
           isRefreshing = false

@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 
+// 路由 meta.roles 约定:未设置表示所有登录用户可访问;设置后只允许列出的角色(ADMIN 隐式通过)
 const routes: RouteRecordRaw[] = [
   {
     path: '/login',
@@ -85,25 +86,25 @@ const routes: RouteRecordRaw[] = [
         path: 'system/user',
         name: 'UserList',
         component: () => import('@/views/system/user/UserList.vue'),
-        meta: { title: '用户管理' }
+        meta: { title: '用户管理', roles: ['ADMIN'] }
       },
       {
         path: 'system/role',
         name: 'RoleList',
         component: () => import('@/views/system/role/RoleList.vue'),
-        meta: { title: '角色管理' }
+        meta: { title: '角色管理', roles: ['ADMIN'] }
       },
       {
         path: 'system/log',
         name: 'OperationLogList',
         component: () => import('@/views/system/log/OperationLogList.vue'),
-        meta: { title: '操作日志' }
+        meta: { title: '操作日志', roles: ['ADMIN'] }
       },
       {
         path: 'system/setting',
         name: 'SystemSetting',
         component: () => import('@/views/system/setting/SystemSetting.vue'),
-        meta: { title: '系统设置' }
+        meta: { title: '系统设置', roles: ['ADMIN'] }
       },
       {
         path: 'period',
@@ -231,11 +232,20 @@ router.beforeEach(async (to, _from, next) => {
     // 防 Open Redirect：拒绝以 // 开头的路径（会被浏览器解析为协议相对 URL 外跳）
     const redirectPath = to.fullPath.startsWith('//') ? '/dashboard' : to.fullPath
     next({ path: '/login', query: { redirect: redirectPath } })
-  } else if (to.path === '/login' && loggedIn) {
-    next({ path: '/dashboard' })
-  } else {
-    next()
+    return
   }
+  if (to.path === '/login' && loggedIn) {
+    next({ path: '/dashboard' })
+    return
+  }
+  // 角色级访问控制:meta.roles 限定可访问的角色,ADMIN 隐式放行
+  if (to.meta.roles && Array.isArray(to.meta.roles) && to.meta.roles.length > 0) {
+    if (!userStore.hasAnyRole(to.meta.roles as string[])) {
+      next({ path: '/dashboard' })
+      return
+    }
+  }
+  next()
 })
 
 export default router

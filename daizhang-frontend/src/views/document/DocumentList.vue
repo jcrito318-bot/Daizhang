@@ -240,8 +240,7 @@
           <div class="upload-section">
             <el-upload
               v-model:file-list="fileList"
-              action="/api/upload"
-              :headers="uploadHeaders"
+              :http-request="customUploadRequest"
               :on-success="handleUploadSuccess"
               :on-error="handleUploadError"
               :before-upload="beforeUpload"
@@ -342,22 +341,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { MagicStick } from '@element-plus/icons-vue'
-import type { FormInstance, FormRules, UploadProps } from 'element-plus'
+import type { FormInstance, FormRules, UploadProps, UploadRequestOptions } from 'element-plus'
 import { documentApi } from '@/api/document'
 import { voucherApi } from '@/api/voucher'
 import { aiApi } from '@/api/ai'
+import request from '@/utils/request'
 import { useAppStore } from '@/stores/app'
-import { useUserStore } from '@/stores/user'
 import type { DocumentVO, DocumentCreateRequest, DocumentQueryRequest } from '@/types/document'
 import type { VoucherVO, VoucherQueryRequest } from '@/types/voucher'
 
 const router = useRouter()
 const appStore = useAppStore()
-const userStore = useUserStore()
 
 const loading = ref(false)
 const total = ref(0)
@@ -411,9 +409,28 @@ const formRules: FormRules = {
   amount: [{ required: true, message: '请输入金额', trigger: 'blur' }]
 }
 
-const uploadHeaders = computed(() => ({
-  Authorization: `Bearer ${userStore.token || ''}`
-}))
+// F-010 修复:el-upload 不再使用 action+headers(会绕过 axios 拦截器,丢失 401 自动刷新/统一错误处理),
+// 改用 :http-request 接入 request 工具,所有上传请求统一走 axios 拦截器。
+// 后端 /upload 端点若不存在,需后续补充;此处保持原有 URL 与 payload 结构不变,仅切换到 axios 通道。
+const customUploadRequest = async (options: UploadRequestOptions) => {
+  const { file, onSuccess, onError } = options
+  const formData = new FormData()
+  formData.append('file', file)
+  try {
+    const res = await request.post('/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+    // Element Plus onSuccess 签名:(response, uploadFile?) => void
+    onSuccess?.(res)
+  } catch (err) {
+    // onError 期望 UploadAjaxError 形状,补齐 status/method/url 字段
+    const e = err as Error & { status?: number; method?: string; url?: string }
+    e.status = 0
+    e.method = 'POST'
+    e.url = '/upload'
+    onError?.(e as any)
+  }
+}
 
 // 关联凭证弹窗
 const linkDialogVisible = ref(false)

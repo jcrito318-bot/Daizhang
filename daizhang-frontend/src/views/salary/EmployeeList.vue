@@ -85,7 +85,7 @@
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSubmit">确定</el-button>
+        <el-button type="primary" :loading="submitLoading" @click="handleSubmit">确定</el-button>
       </template>
     </el-dialog>
   </div>
@@ -96,12 +96,15 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { salaryApi } from '@/api/salary'
+import { useAppStore } from '@/stores/app'
 
+const appStore = useAppStore()
 const loading = ref(false)
 const tableData = ref<any[]>([])
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
 const formRef = ref<FormInstance>()
+const submitLoading = ref(false)
 
 const searchForm = reactive({
   employeeName: '',
@@ -199,32 +202,44 @@ const handleDelete = (row: any) => {
 }
 
 const handleSubmit = async () => {
-  await formRef.value?.validate()
-  if (form.id) {
-    await salaryApi.updateEmployee(form.id, {
-      employeeCode: form.employeeCode,
-      employeeName: form.employeeName,
-      idCard: form.idCard,
-      phone: form.phone,
-      department: form.department,
-      position: form.position,
-      entryDate: form.entryDate
-    })
-  } else {
-    await salaryApi.createEmployee({
-      accountSetId: 1,
-      employeeCode: form.employeeCode,
-      employeeName: form.employeeName,
-      idCard: form.idCard,
-      phone: form.phone,
-      department: form.department,
-      position: form.position,
-      entryDate: form.entryDate
-    })
+  const valid = await formRef.value?.validate().catch(() => false)
+  if (!valid) return
+  if (!appStore.currentAccountSetId) {
+    ElMessage.warning('请先在右上角选择账套')
+    return
   }
-  ElMessage.success('保存成功')
-  dialogVisible.value = false
-  loadData()
+  submitLoading.value = true
+  try {
+    if (form.id) {
+      await salaryApi.updateEmployee(form.id, {
+        employeeCode: form.employeeCode,
+        employeeName: form.employeeName,
+        idCard: form.idCard,
+        phone: form.phone,
+        department: form.department,
+        position: form.position,
+        entryDate: form.entryDate
+      })
+    } else {
+      await salaryApi.createEmployee({
+        accountSetId: appStore.currentAccountSetId,
+        employeeCode: form.employeeCode,
+        employeeName: form.employeeName,
+        idCard: form.idCard,
+        phone: form.phone,
+        department: form.department,
+        position: form.position,
+        entryDate: form.entryDate
+      })
+    }
+    ElMessage.success('保存成功')
+    dialogVisible.value = false
+    loadData()
+  } catch {
+    // handled by interceptor
+  } finally {
+    submitLoading.value = false
+  }
 }
 
 const resetForm = () => {
