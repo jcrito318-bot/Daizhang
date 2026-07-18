@@ -71,6 +71,10 @@ export const useUserStore = defineStore('user', () => {
   async function logout() {
     try {
       await authApi.logout()
+    } catch {
+      // 后端 logout 失败(网络/服务不可达/401 等)不阻塞本地登出:
+      // 用户已明确表达登出意图,无论如何都要清空本地状态,避免 token 残留导致安全问题。
+      // 拦截器已对错误做了用户可见的提示,这里静默处理。
     } finally {
       token.value = ''
       userInfo.value = null

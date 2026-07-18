@@ -44,8 +44,13 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function setCurrentAccountSet(id: number | null) {
+    // NaN 视为 null:避免上游传入 NaN 时,内存中残留 NaN 破坏类型一致性
+    // (类型为 number | null,NaN 既非 null 也非有效数字,会导致后续比较失败)
+    if (id !== null && Number.isNaN(id)) {
+      id = null
+    }
     currentAccountSetId.value = id
-    if (id === null || Number.isNaN(id)) {
+    if (id === null) {
       localStorage.removeItem(CURRENT_ACCOUNT_SET_KEY)
     } else {
       localStorage.setItem(CURRENT_ACCOUNT_SET_KEY, String(id))
