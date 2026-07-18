@@ -12,6 +12,15 @@ export const useUserStore = defineStore('user', () => {
   const userInfo = ref<UserVO | null>(null)
 
   const isLoggedIn = computed(() => !!token.value)
+  // 角色编码数组(派生自 userInfo),用于路由守卫和菜单过滤
+  const roles = computed<string[]>(() => userInfo.value?.roles ?? [])
+
+  // 判断当前用户是否拥有任一指定角色(用于路由 meta.roles 和菜单可见性)
+  function hasAnyRole(requiredRoles: string[] | undefined): boolean {
+    if (!requiredRoles || requiredRoles.length === 0) return true
+    if (roles.value.includes('ADMIN')) return true  // ADMIN 隐式拥有所有权限
+    return requiredRoles.some(r => roles.value.includes(r))
+  }
 
   async function login(loginData: LoginRequest) {
     const res = await authApi.login(loginData)
@@ -73,6 +82,8 @@ export const useUserStore = defineStore('user', () => {
     token,
     userInfo,
     isLoggedIn,
+    roles,
+    hasAnyRole,
     login,
     getUserInfo,
     refreshToken,
