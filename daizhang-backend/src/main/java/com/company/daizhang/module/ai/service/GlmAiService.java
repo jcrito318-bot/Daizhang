@@ -46,7 +46,7 @@ public class GlmAiService {
      * @return 识别结果（JSON格式）
      */
     public String recognizeInvoice(MultipartFile imageFile) throws IOException {
-        return recognizeInvoice(imageFile.getBytes(), null);
+        return recognizeInvoice(imageFile.getBytes(), null, imageFile.getContentType());
     }
 
     /**
@@ -56,7 +56,7 @@ public class GlmAiService {
      * @return 识别结果（JSON格式）
      */
     public String recognizeInvoice(MultipartFile imageFile, Integer invoiceType) throws IOException {
-        return recognizeInvoice(imageFile.getBytes(), invoiceType);
+        return recognizeInvoice(imageFile.getBytes(), invoiceType, imageFile.getContentType());
     }
 
     /**
@@ -66,6 +66,18 @@ public class GlmAiService {
      * @return 识别结果（JSON格式）
      */
     public String recognizeInvoice(byte[] imageBytes, Integer invoiceType) throws IOException {
+        // 字节数组方式无法获取原始 MIME，按 jpeg 处理（GLM 视觉模型对常见图片格式兼容）
+        return recognizeInvoice(imageBytes, invoiceType, "image/jpeg");
+    }
+
+    /**
+     * 票据OCR识别（字节数组方式，带票据类型与 MIME）
+     * @param imageBytes 票据图片字节数组
+     * @param invoiceType 票据类型 1-增值税发票 2-普通发票 3-银行回单 4-其他
+     * @param contentType 图片 MIME 类型(如 image/jpeg、image/png、image/webp、application/pdf)
+     * @return 识别结果（JSON格式）
+     */
+    public String recognizeInvoice(byte[] imageBytes, Integer invoiceType, String contentType) throws IOException {
         if (!aiConfig.getEnabled()) {
             // 用业务异常替代 RuntimeException,便于 GlobalExceptionHandler 统一处理且不暴露堆栈
             throw new BusinessException(ErrorCode.AI_NOT_ENABLED, "AI功能未启用");
@@ -74,8 +86,12 @@ public class GlmAiService {
         // 将图片转换为Base64
         String base64Image = Base64.getEncoder().encodeToString(imageBytes);
 
+        // 规范化 MIME:取默认 jpeg,避免空值或非标准类型导致 data URL 构造异常
+        String mime = (contentType == null || contentType.trim().isEmpty())
+                ? "image/jpeg" : contentType.trim().toLowerCase();
+
         // 构建GLM API请求（根据票据类型使用不同的提示词）
-        Map<String, Object> request = buildOcrRequest(base64Image, invoiceType);
+        Map<String, Object> request = buildOcrRequest(base64Image, invoiceType, mime);
 
         // 调用GLM API
         String response = callGlmApi(request, aiConfig.getOcrModel());
@@ -95,28 +111,41 @@ public class GlmAiService {
      * @return 结构化JSON字符串
      */
     public String recognizeInvoiceAndParseResult(MultipartFile file) throws IOException {
-        String result = recognizeInvoice(file, null);
-        return cleanJsonResult(result);
+        return recognizeInvoice(file, null);
     }
 
     /**
-     * 清理GLM返回结果中的非JSON内容（如markdown代码块标记）
+     * 清理GLM返回结果中的非JSON内容（如markdown代码块标记、引导语等）
+     * 支持以下场景:
+     * 1. 纯代码块: "```json\n{...}\n```"
+     * 2. 代码块带引导语: "识别结果如下：\n```json\n{...}\n```\n"
+     * 3. 纯JSON: "{...}"
+     * 4. JSON带文字: "结果：{...}"
      */
     private String cleanJsonResult(String result) {
         if (result == null || result.isEmpty()) {
             return result;
         }
         String trimmed = result.trim();
-        // 去除markdown代码块标记 ```json ... ``` 或 ``` ... ```
-        if (trimmed.startsWith("```")) {
-            int firstNewline = trimmed.indexOf('\n');
+
+        // 1. 剥离 markdown 代码块标记(无论代码块是否位于开头)
+        // 匹配 ```json ... ``` 或 ``` ... ``` 中的内容
+        int codeBlockStart = trimmed.indexOf("```");
+        if (codeBlockStart >= 0) {
+            int firstNewline = trimmed.indexOf('\n', codeBlockStart);
             if (firstNewline > 0) {
-                trimmed = trimmed.substring(firstNewline + 1);
+                int codeBlockEnd = trimmed.indexOf("```", firstNewline);
+                if (codeBlockEnd > firstNewline) {
+                    trimmed = trimmed.substring(firstNewline + 1, codeBlockEnd).trim();
+                }
             }
-            if (trimmed.endsWith("```")) {
-                trimmed = trimmed.substring(0, trimmed.length() - 3);
-            }
-            trimmed = trimmed.trim();
+        }
+
+        // 2. 提取首个 { 到末尾 } 的 JSON 对象子串(兼容带引导语场景)
+        int firstBrace = trimmed.indexOf('{');
+        int lastBrace = trimmed.lastIndexOf('}');
+        if (firstBrace >= 0 && lastBrace > firstBrace) {
+            trimmed = trimmed.substring(firstBrace, lastBrace + 1);
         }
         return trimmed;
     }
@@ -162,20 +191,7 @@ public class GlmAiService {
         InetAddress[] addrs = InetAddress.getAllByName(host);
         InetAddress chosenIp = null;
         for (InetAddress addr : addrs) {
-            if (addr.isAnyLocalAddress()
-                    || addr.isLoopbackAddress()
-                    || addr.isSiteLocalAddress()
-                    || addr.isLinkLocalAddress()
-                    || addr.isMulticastAddress()) {
-                throw new IOException("禁止访问内网/保留地址");
-            }
-            // 显式拦截云元数据服务地址(169.254.169.254等链路本地,部分JVM实现未归入isLinkLocalAddress)
-            // 同时拦截IPv6链路本地 fe80::/10 与 ULA fc00::/7
-            String ip = addr.getHostAddress();
-            if (ip.startsWith("169.254.") || ip.startsWith("0.") || ip.startsWith("fe80")
-                    || ip.startsWith("FC") || ip.startsWith("FD") || ip.startsWith("fc") || ip.startsWith("fd")) {
-                throw new IOException("禁止访问保留地址段");
-            }
+            validateInetAddress(addr);
             if (chosenIp == null) {
                 chosenIp = addr;
             }
@@ -234,6 +250,66 @@ public class GlmAiService {
     }
 
     /**
+     * 校验 IP 地址是否为禁止访问的内网/保留地址
+     * - JDK 标准判定:anyLocal/loopback/siteLocal/linkLocal/multicast
+     * - 显式补充:云元数据 169.254/16、0/8、CGNAT 100.64/10、基准测试 198.18/15、保留 240/4
+     * - IPv6 链路本地 fe80::/10、ULA fc00::/7
+     * 注:getHostAddress() 返回的 IPv6 一律小写,无需检查大写前缀
+     */
+    private void validateInetAddress(InetAddress addr) throws IOException {
+        if (addr.isAnyLocalAddress()
+                || addr.isLoopbackAddress()
+                || addr.isSiteLocalAddress()
+                || addr.isLinkLocalAddress()
+                || addr.isMulticastAddress()) {
+            throw new IOException("禁止访问内网/保留地址");
+        }
+        // 去除 IPv6 zone id(如 fe80::1%eth0),并统一小写
+        String ip = addr.getHostAddress().toLowerCase();
+        int zoneIdx = ip.indexOf('%');
+        if (zoneIdx > 0) {
+            ip = ip.substring(0, zoneIdx);
+        }
+
+        // IPv4 点分十进制前缀校验
+        if (ip.startsWith("169.254.")        // 链路本地(含云元数据 169.254.169.254)
+                || ip.startsWith("0.")        // 0.0.0.0/8 本网络
+                || ip.startsWith("198.18")    // 基准测试 198.18.0.0/15 (RFC 2544)
+                || ip.startsWith("198.19")
+                || ip.startsWith("240.")      // 保留 240.0.0.0/4 (RFC 1112)
+                || ip.startsWith("241.")
+                || ip.startsWith("242.")
+                || ip.startsWith("243.")
+                || ip.startsWith("244.")
+                || ip.startsWith("245.")
+                || ip.startsWith("246.")
+                || ip.startsWith("247.")
+                || ip.startsWith("248.")
+                || ip.startsWith("249.")
+                || ip.startsWith("25.")
+                || ip.startsWith("255.")      // 广播 255.255.255.255
+                || ip.startsWith("fe80")      // IPv6 链路本地 fe80::/10
+                || ip.startsWith("fc")        // IPv6 ULA fc00::/7
+                || ip.startsWith("fd")) {     // IPv6 ULA fd00::/8
+            throw new IOException("禁止访问保留地址段");
+        }
+        // CGNAT 100.64.0.0/10 (100.64.0.0 ~ 100.127.255.255):按第一段+第二段数值精确判断
+        if (ip.startsWith("100.")) {
+            String[] parts = ip.split("\\.");
+            if (parts.length >= 2) {
+                try {
+                    int second = Integer.parseInt(parts[1]);
+                    if (second >= 64 && second <= 127) {
+                        throw new IOException("禁止访问保留地址段");
+                    }
+                } catch (NumberFormatException ignored) {
+                    // 非标准 IPv4,跳过
+                }
+            }
+        }
+    }
+
+    /**
      * 智能记账建议
      * @param description 业务描述
      * @param amount 金额
@@ -284,17 +360,9 @@ public class GlmAiService {
     }
 
     /**
-     * 将图片转换为Base64
-     */
-    private String convertToBase64(MultipartFile file) throws IOException {
-        byte[] bytes = file.getBytes();
-        return Base64.getEncoder().encodeToString(bytes);
-    }
-
-    /**
      * 构建OCR识别请求（自动识别票据类型）
      */
-    private Map<String, Object> buildOcrRequest(String base64Image, Integer invoiceType) {
+    private Map<String, Object> buildOcrRequest(String base64Image, Integer invoiceType, String contentType) {
         Map<String, Object> request = new HashMap<>();
 
         // 构建消息
@@ -312,11 +380,11 @@ public class GlmAiService {
         content[0].put("type", "text");
         content[0].put("text", prompt);
 
-        // 图片
+        // 图片:按实际上传文件 MIME 构造 data URL,避免对 png/webp/pdf 统一声明 jpeg 导致模型识别异常
         content[1] = new HashMap<>();
         content[1].put("type", "image_url");
         Map<String, String> imageUrl = new HashMap<>();
-        imageUrl.put("url", "data:image/jpeg;base64," + base64Image);
+        imageUrl.put("url", "data:" + contentType + ";base64," + base64Image);
         content[1].put("image_url", imageUrl);
 
         message.put("content", content);
@@ -427,8 +495,10 @@ public class GlmAiService {
             try (Response response = httpClient.newCall(httpRequest).execute()) {
                 if (!response.isSuccessful()) {
                     String errorBody = response.body() != null ? response.body().string() : "Unknown error";
+                    // 仅记录日志,不把 errorBody 放进异常 message,避免向客户端泄露 GLM 内部错误体
                     log.error("GLM API调用失败，状态码：{}，错误信息：{}", response.code(), errorBody);
-                    throw new RuntimeException("GLM API调用失败：" + response.code() + " - " + errorBody);
+                    throw new BusinessException(ErrorCode.AI_API_CALL_ERROR,
+                            "AI服务调用失败（HTTP " + response.code() + "），请稍后重试");
                 }
 
                 String responseBody = response.body() != null ? response.body().string() : "";
@@ -453,9 +523,11 @@ public class GlmAiService {
 
                 return responseBody;
             }
+        } catch (BusinessException e) {
+            throw e;
         } catch (IOException e) {
             log.error("GLM API调用异常", e);
-            throw new RuntimeException("GLM API调用异常：" + e.getMessage(), e);
+            throw new BusinessException(ErrorCode.AI_API_CALL_ERROR, "AI服务调用异常，请稍后重试");
         }
     }
 }

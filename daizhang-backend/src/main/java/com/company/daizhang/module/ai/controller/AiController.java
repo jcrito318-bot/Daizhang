@@ -2,6 +2,7 @@ package com.company.daizhang.module.ai.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.springframework.dao.DuplicateKeyException;
 import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
@@ -183,6 +184,10 @@ public class AiController {
         if (request.getDescription() == null || request.getDescription().isEmpty()) {
             return Result.error(400, "业务描述不能为空");
         }
+        // 限制输入长度,防止超长文本消耗 GLM token 配额/费用
+        if (request.getDescription().length() > MAX_INPUT_LENGTH) {
+            return Result.error(400, "业务描述过长(>" + MAX_INPUT_LENGTH + "字)，请精简后重试");
+        }
 
         if (request.getAmount() == null) {
             return Result.error(400, "金额不能为空");
@@ -213,6 +218,10 @@ public class AiController {
         String question = request.get("question");
         if (question == null || question.trim().isEmpty()) {
             return Result.error(400, "问题不能为空");
+        }
+        // 限制输入长度,防止超长文本消耗 GLM token 配额/费用
+        if (question.length() > MAX_QUESTION_LENGTH) {
+            return Result.error(400, "问题过长(>" + MAX_QUESTION_LENGTH + "字)，请精简后重试");
         }
 
         try {
@@ -262,7 +271,14 @@ public class AiController {
 
         // 4. 创建Document记录(走标准save路径,以便拿到id返回VO)
         Document document = buildDocument(accountSetId, ocrResult, parseResult);
-        documentService.save(document);
+        try {
+            documentService.save(document);
+        } catch (DuplicateKeyException e) {
+            // 并发兜底:依赖 DB 唯一索引(accountSet_id, invoice_code, invoice_number)拦截
+            // 上方 count 校验为快路径,这里捕获唯一键冲突防止并发竞态导致重复入账
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "发票号已存在（invoiceCode=" + invoiceCode + ", invoiceNumber=" + invoiceNumber + "），请勿重复录入");
+        }
         log.info("票据记录创建成功，id={}，documentNo={}", document.getId(), document.getDocumentNo());
 
         // 5. 创建InputInvoice记录(若识别到发票号码);失败则抛出异常,由 @Transactional 回滚已保存的 Document
@@ -312,7 +328,12 @@ public class AiController {
                     "不支持的文件类型，仅支持 jpg/jpeg/png/webp/pdf");
         }
         String contentType = file.getContentType();
-        if (contentType != null && !ALLOWED_IMAGE_MIMES.contains(contentType.toLowerCase())) {
+        // fail-closed:缺失 Content-Type 头时拒绝,避免仅依赖可伪造的扩展名判断
+        if (contentType == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
+                    "缺少文件Content-Type，无法识别文件类型");
+        }
+        if (!ALLOWED_IMAGE_MIMES.contains(contentType.toLowerCase())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(),
                     "不支持的文件MIME类型，仅支持 image/jpeg、image/png、image/webp、application/pdf");
         }
@@ -323,6 +344,12 @@ public class AiController {
      * 解码后约 14MB,与 MAX_OCR_FILE_SIZE(10MB) 相当但留有 base64 膨胀(4/3)余量
      */
     private static final int MAX_BASE64_LEN = 14 * 1024 * 1024;
+
+    /**
+     * AI 文本输入最大长度(字符数),防止超长文本消耗 GLM token 配额/费用
+     */
+    private static final int MAX_INPUT_LENGTH = 500;
+    private static final int MAX_QUESTION_LENGTH = 2000;
 
 
     /**
@@ -395,7 +422,8 @@ public class AiController {
         request.setAmount(parseAmount(parseResult, "amount", "金额", "不含税金额"));
         request.setTaxAmount(parseAmount(parseResult, "taxAmount", "税额"));
         request.setTotalAmount(parseAmount(parseResult, "totalAmount", "价税合计", "合计金额"));
-        request.setTaxRate(parseAmount(parseResult, "taxRate", "税率"));
+        // 税率使用专门的解析方法:"13%" 应解析为 0.13,而非 parseAmount 的 13
+        request.setTaxRate(parseRate(parseResult, "taxRate", "税率"));
 
         invoiceService.createInputInvoice(request);
         log.info("进项发票创建成功，发票号码：{}", invoiceNumber);
@@ -427,7 +455,7 @@ public class AiController {
     /**
      * 从Map中解析金额字段（支持多个可能的key）
      * 字段缺失返回null(可选字段);字段存在但格式错误抛业务异常(避免静默兜底为0产生垃圾数据)
-     * 同时支持去除千分位逗号、百分号、人民币符号等
+     * 支持去除千分位逗号、人民币符号等(不含百分号,百分号场景请使用 parseRate)
      */
     private BigDecimal parseAmount(Map<String, Object> map, String... keys) {
         String value = getStringField(map, keys);
@@ -435,14 +463,39 @@ public class AiController {
             return null;
         }
         try {
-            // 去除千分位逗号、百分号、人民币符号、首尾空白
-            String cleaned = value.replace(",", "").replace("￥", "").replace("¥", "")
-                    .replace("%", "").trim();
+            // 去除千分位逗号、人民币符号、首尾空白(不处理百分号,税率场景由 parseRate 处理)
+            String cleaned = value.replace(",", "").replace("￥", "").replace("¥", "").trim();
             return new BigDecimal(cleaned);
         } catch (NumberFormatException e) {
             log.warn("金额解析失败：{}", value);
             throw new BusinessException(ErrorCode.AI_OCR_FIELD_PARSE_ERROR.getCode(),
                     "金额字段解析失败：" + value + "，请人工核对");
+        }
+    }
+
+    /**
+     * 从Map中解析税率字段
+     * 支持 "13%"、"13"、"0.13" 等形式:"13%" → 0.13,"0.13" → 0.13,"13" → 13(已是小数形式)
+     * 字段缺失返回null;格式错误抛业务异常
+     */
+    private BigDecimal parseRate(Map<String, Object> map, String... keys) {
+        String value = getStringField(map, keys);
+        if (value == null || value.isEmpty()) {
+            return null;
+        }
+        try {
+            String cleaned = value.replace(",", "").replace("￥", "").replace("¥", "").trim();
+            boolean isPercent = cleaned.endsWith("%");
+            if (isPercent) {
+                cleaned = cleaned.substring(0, cleaned.length() - 1).trim();
+            }
+            BigDecimal rate = new BigDecimal(cleaned);
+            // "13%" 形式按百分号语义转换为 0.13;"0.13" 无百分号保持原值
+            return isPercent ? rate.divide(new BigDecimal("100")) : rate;
+        } catch (NumberFormatException e) {
+            log.warn("税率解析失败：{}", value);
+            throw new BusinessException(ErrorCode.AI_OCR_FIELD_PARSE_ERROR.getCode(),
+                    "税率字段解析失败：" + value + "，请人工核对");
         }
     }
 
