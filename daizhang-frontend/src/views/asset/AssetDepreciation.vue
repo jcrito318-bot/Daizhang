@@ -92,10 +92,17 @@ const formatAmount = (amount: number) => {
   return amount ? `¥${amount.toFixed(2)}` : '¥0.00'
 }
 
+// BUG-05 修复:折旧记录查询需要 accountSetId 隔离,避免 IDOR
 const loadData = async () => {
+  if (!appStore.currentAccountSetId) {
+    tableData.value = []
+    pagination.total = 0
+    return
+  }
   loading.value = true
   try {
     const res = await assetApi.getDepreciationRecordPage({
+      accountSetId: appStore.currentAccountSetId,
       pageNum: pagination.pageNum,
       pageSize: pagination.pageSize,
       year: searchForm.year ? Number(searchForm.year) : undefined,

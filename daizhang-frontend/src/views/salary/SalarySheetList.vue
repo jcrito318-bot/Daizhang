@@ -77,7 +77,9 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { salaryApi } from '@/api/salary'
+import { useAppStore } from '@/stores/app'
 
+const appStore = useAppStore()
 const loading = ref(false)
 const tableData = ref<any[]>([])
 
@@ -96,10 +98,19 @@ const formatAmount = (amount: number) => {
   return amount ? `¥${amount.toFixed(2)}` : '¥0.00'
 }
 
+// BUG-05 修复:后端 SalarySheetQueryRequest 包含 accountSetId 字段,前端必须传入,
+// 否则后端会按 mybatis-plus eq(null) 忽略该条件,可能返回所有账套数据(IDOR 风险)。
 const loadData = async () => {
+  // 未选择账套时不发起查询,避免越权返回所有账套数据
+  if (!appStore.currentAccountSetId) {
+    tableData.value = []
+    pagination.total = 0
+    return
+  }
   loading.value = true
   try {
     const res = await salaryApi.getSalarySheetPage({
+      accountSetId: appStore.currentAccountSetId,
       pageNum: pagination.pageNum,
       pageSize: pagination.pageSize,
       year: searchForm.year ? Number(searchForm.year) : undefined,

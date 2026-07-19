@@ -191,10 +191,18 @@ const formatAmount = (amount: number) => {
   return amount ? `¥${amount.toFixed(2)}` : '¥0.00'
 }
 
+// BUG-05 修复:后端 FixedAssetQueryRequest 包含 accountSetId 字段,前端必须传入,
+// 否则后端 mybatis-plus eq(null) 会忽略该条件,返回所有账套的资产数据(IDOR 风险)。
 const loadData = async () => {
+  if (!appStore.currentAccountSetId) {
+    tableData.value = []
+    pagination.total = 0
+    return
+  }
   loading.value = true
   try {
     const res = await assetApi.getAssetPage({
+      accountSetId: appStore.currentAccountSetId,
       pageNum: pagination.pageNum,
       pageSize: pagination.pageSize,
       ...searchForm
@@ -209,8 +217,17 @@ const loadData = async () => {
 }
 
 const loadCategories = async () => {
+  if (!appStore.currentAccountSetId) {
+    categories.value = []
+    return
+  }
   try {
-    const res = await assetApi.getCategoryPage({ pageNum: 1, pageSize: 100 })
+    // BUG-05 修复:资产分类查询同样需要 accountSetId 隔离
+    const res = await assetApi.getCategoryPage({
+      accountSetId: appStore.currentAccountSetId,
+      pageNum: 1,
+      pageSize: 100
+    })
     categories.value = res.data.list
   } catch (error) {
     console.error(error)

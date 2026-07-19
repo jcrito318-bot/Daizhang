@@ -134,10 +134,17 @@ const rules: FormRules = {
   idCard: [{ required: true, message: '请输入身份证号', trigger: 'blur' }]
 }
 
+// BUG-05 修复:员工查询需要 accountSetId 隔离,避免 IDOR
 const loadData = async () => {
+  if (!appStore.currentAccountSetId) {
+    tableData.value = []
+    pagination.total = 0
+    return
+  }
   loading.value = true
   try {
     const res = await salaryApi.getEmployeePage({
+      accountSetId: appStore.currentAccountSetId,
       pageNum: pagination.pageNum,
       pageSize: pagination.pageSize,
       ...searchForm

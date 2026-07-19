@@ -412,6 +412,10 @@ const formRules: FormRules = {
 
 // F-010 修复:el-upload 不再使用 action+headers(会绕过 axios 拦截器,丢失 401 自动刷新/统一错误处理),
 // 改用 :http-request 接入 request 工具,调用后端 /document/upload 端点。
+// BUG-02 修复:统一 fileUrl 赋值入口在 handleUploadSuccess 中完成,避免双重赋值且类型不一致。
+//   - 之前:customUploadRequest 内 form.fileUrl = res.data.fileUrl,然后 onSuccess(res)
+//          handleUploadSuccess 又 form.fileUrl = response.data(对象,而非 data.fileUrl 字符串)
+//   - 现在:customUploadRequest 只负责发起请求并转发 onSuccess/onError,fileUrl 由 handleUploadSuccess 统一处理。
 const customUploadRequest = async (options: UploadRequestOptions) => {
   const { file, onSuccess, onError } = options
   const formData = new FormData()
@@ -420,11 +424,8 @@ const customUploadRequest = async (options: UploadRequestOptions) => {
     const res = await request.post('/document/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
-    // 上传成功后将 fileUrl 回填到表单
-    if (res?.data?.fileUrl) {
-      form.fileUrl = res.data.fileUrl
-    }
     // Element Plus onSuccess 签名:(response, uploadFile?) => void
+    // fileUrl 的赋值统一交给 handleUploadSuccess,这里不直接操作 form.fileUrl
     onSuccess?.(res)
   } catch (err) {
     // onError 期望 UploadAjaxError 形状,补齐 status/method/url 字段
@@ -652,9 +653,12 @@ const beforeUpload: UploadProps['beforeUpload'] = (rawFile) => {
   return true
 }
 
+// BUG-02 修复:后端 /document/upload 返回 Result<{fileUrl:string}>,即 response.data 形状为 { fileUrl: string }。
+// 之前错误地用 response.data(对象)直接赋值给 form.fileUrl(应为字符串)。
+// 现在统一访问 response.data.fileUrl,确保类型一致。
 const handleUploadSuccess: UploadProps['onSuccess'] = (response) => {
-  if (response.code === 200) {
-    form.fileUrl = response.data
+  if (response.code === 200 && response.data?.fileUrl) {
+    form.fileUrl = response.data.fileUrl
     ElMessage.success('上传成功')
   } else {
     ElMessage.error(response.message || '上传失败')

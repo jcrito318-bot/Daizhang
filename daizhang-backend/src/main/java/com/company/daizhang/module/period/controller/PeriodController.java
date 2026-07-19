@@ -28,6 +28,9 @@ public class PeriodController {
 
     @Operation(summary = "试算平衡")
     @GetMapping("/trial-balance")
+    // BUG-后端 修复:trialBalance 缺失 @RequireAccountSetAccess 注解导致 IDOR 风险。
+    // 攻击者可传入未授权的 accountSetId 越权获取其他账套的试算平衡数据(科目余额)。
+    @RequireAccountSetAccess
     public Result<TrialBalanceResultVO> trialBalance(@Valid TrialBalanceRequest request) {
         TrialBalanceResultVO result = periodService.trialBalance(request);
         return Result.success(result);

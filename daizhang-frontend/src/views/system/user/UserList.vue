@@ -143,8 +143,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ref, reactive, onMounted, h } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { userApi } from '@/api/system'
 import type { SysUserVO } from '@/types/system'
@@ -266,8 +266,32 @@ async function handleEditSubmit() {
 
 async function handleResetPassword(row: SysUserVO) {
   try {
-    await userApi.resetPassword(row.id, '123456')
-    ElMessage.success('密码已重置为 123456')
+    // 安全修复(BUG-01):移除硬编码弱密码 '123456'。
+    // 改为前端生成 8 位随机密码(混淆字符集避免 0/O、1/I 等易混淆字符),
+    // 重置成功后弹窗明示新密码,提示管理员转告用户首次登录后修改。
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
+    let newPassword = ''
+    for (let i = 0; i < 8; i++) {
+      newPassword += chars[Math.floor(Math.random() * chars.length)]
+    }
+    await userApi.resetPassword(row.id, newPassword)
+    // 使用 VNode 渲染避免 dangerouslyUseHTMLString 带来的 XSS 风险
+    ElMessageBox.alert(
+      h('div', null, [
+        h('p', { style: 'margin: 0 0 10px 0;' }, `用户 ${row.username} 的密码已重置为：`),
+        h(
+          'p',
+          {
+            style:
+              'font-size: 18px; font-weight: bold; color: #409EFF; padding: 10px; background: #f5f7fa; border-radius: 4px; margin: 0 0 10px 0; letter-spacing: 1px;'
+          },
+          newPassword
+        ),
+        h('p', { style: 'color: #909399; font-size: 12px; margin: 0;' }, '请妥善保存并告知用户首次登录后修改。')
+      ]),
+      '密码重置成功',
+      { type: 'success', confirmButtonText: '我已知晓' }
+    )
   } catch {
     // handled by interceptor
   }

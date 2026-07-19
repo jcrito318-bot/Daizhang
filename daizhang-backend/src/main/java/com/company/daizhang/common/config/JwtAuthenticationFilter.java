@@ -1,6 +1,7 @@
 package com.company.daizhang.common.config;
 
 import com.company.daizhang.common.utils.JwtUtils;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -10,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -50,6 +52,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 // (JWT 无状态,否则登出后 token 在过期前仍可正常访问所有受保护接口)
                 log.warn("token 已登出(在黑名单中),访问被拒绝");
             } else {
+                // BUG-后端 修复:缩小 catch 范围,仅捕获 JWT 解析异常和用户加载异常。
+                // 原 catch (Exception e) 会吞噬 NullPointerException 等运行时异常,
+                // 隐藏真实的代码缺陷,导致问题难以定位。
+                // 修复后:
+                //   - JwtException(签名错误/格式错误/过期等):token 无效,清空 SecurityContext 让后续 AuthenticationEntryPoint 处理
+                //   - UsernameNotFoundException:用户已被物理删除,token 仍有效,同样清空让 EntryPoint 处理
+                //   - 其他 RuntimeException:不捕获,向上抛出由 Spring 容器统一处理(避免掩盖代码缺陷)
                 try {
                     String username = jwtUtils.getUsername(token);
                     UserDetails userDetails = userDetailsService.loadUserByUsername(username);
@@ -64,8 +73,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                         SecurityContextHolder.getContext().setAuthentication(authentication);
                     }
-                } catch (Exception e) {
-                    log.error("JWT认证失败: {}", e.getMessage());
+                } catch (JwtException e) {
+                    // JWT 解析失败(签名错误、格式错误、过期等):token 无效,清空 SecurityContext 让后续 EntryPoint 处理
+                    log.warn("JWT 解析失败,token 无效: {} - {}", e.getClass().getSimpleName(), e.getMessage());
+                    SecurityContextHolder.clearContext();
+                } catch (UsernameNotFoundException e) {
+                    // 用户已被物理删除:token 仍有效但用户不存在,清空让 EntryPoint 处理
+                    log.warn("token 携带的用户不存在(可能已被删除): {}", e.getMessage());
+                    SecurityContextHolder.clearContext();
                 }
             }
         }

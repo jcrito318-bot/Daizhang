@@ -52,7 +52,7 @@
         <span>总账</span>
       </template>
 
-      <el-table :data="tableData" v-loading="loading" border stripe>
+      <el-table :data="tableData" v-loading="loading" border stripe empty-text="暂无总账数据,可调整查询条件后重试">
         <el-table-column prop="subjectCode" label="科目编码" width="120" />
         <el-table-column prop="subjectName" label="科目名称" width="160" />
         <el-table-column prop="beginDebit" label="期初借方" width="140" align="right">
@@ -111,11 +111,18 @@ import type { SubjectVO } from '@/types/subject'
 
 const appStore = useAppStore()
 const loading = ref(false)
-const total = ref(0)
-const tableData = ref<GeneralLedgerVO[]>([])
+const allData = ref<GeneralLedgerVO[]>([])
 const subjectTree = ref<SubjectVO[]>([])
 const startMonth = ref(1)
 const endMonth = ref(12)
+
+// BUG-04 修复:后端 /ledger/general 返回 Result<List<GeneralLedgerVO>>(全量数组,非 PageResult),
+// 因此分页只能在客户端切片实现。total 取数组长度,tableData 取当前页切片。
+const tableData = computed(() => {
+  const start = (queryForm.pageNum - 1) * queryForm.pageSize
+  return allData.value.slice(start, start + queryForm.pageSize)
+})
+const total = computed(() => allData.value.length)
 
 const flatSubjects = computed(() => {
   const result: SubjectVO[] = []
@@ -155,8 +162,12 @@ async function loadData() {
   try {
     const params = { ...queryForm, startMonth: startMonth.value, endMonth: endMonth.value }
     const res = await ledgerApi.getGeneralLedger(params)
-    tableData.value = res.data
-    total.value = res.data.length
+    // 后端返回 List 而非 PageResult,直接赋值给 allData,分页由 computed 处理
+    allData.value = res.data || []
+    // 如果当前页超出范围(如数据减少),回到第 1 页
+    if ((queryForm.pageNum - 1) * queryForm.pageSize >= allData.value.length && queryForm.pageNum > 1) {
+      queryForm.pageNum = 1
+    }
   } catch {
     // handled by interceptor
   } finally {

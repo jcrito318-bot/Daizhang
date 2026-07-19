@@ -35,6 +35,13 @@ record_bug() {
     BUG_COUNT=$((BUG_COUNT+1))
 }
 
+# 从 RESP_BODY 中提取业务码(code 字段)。
+# 后端约定:即使业务失败也返回 HTTP 200,body 中 code 字段标识业务结果(200=成功,401=认证失败等)。
+# 因此对于"登录失败/SQL注入拦截"这类断言,必须检查 body 中的 code,而不是 HTTP 状态码。
+extract_code() {
+    echo "$RESP_BODY" | python3 -c "import sys,json;d=json.load(sys.stdin);print(d.get('code',''))" 2>/dev/null
+}
+
 echo "================================================"
 echo "  代账系统接口测试套件 - Phase 4"
 echo "  时间: $(date '+%Y-%m-%d %H:%M:%S')"
@@ -65,7 +72,18 @@ REFRESH=$(echo "$RESP_BODY" | python3 -c "import sys,json;d=json.load(sys.stdin)
 RESP_BODY=$(curl -s -w "\n__HTTP_CODE__:%{http_code}" -X POST "$BASE/auth/login" -H "Content-Type: application/json" -d '{"username":"admin","password":"wrongpass"}')
 HTTP=$(echo "$RESP_BODY" | grep -o '__HTTP_CODE__:[0-9]*' | cut -d: -f2)
 RESP_BODY=$(echo "$RESP_BODY" | sed 's/__HTTP_CODE__:[0-9]*$//')
-run_test "T1.4" "错误密码登录应失败(401)" "$HTTP" "401"
+BIZ_CODE=$(extract_code)
+# 后端约定:登录失败返回 HTTP 200 + body code:401,而不是 HTTP 401。
+# 因此这里断言业务码为 401,而非 HTTP 状态码。
+if [ "$BIZ_CODE" = "401" ]; then
+    echo -e "${G}[T1.4] PASS${N} 错误密码登录业务码返回 401(HTTP $HTTP, code:$BIZ_CODE)"
+    PASS_COUNT=$((PASS_COUNT+1))
+    echo "[T1.4] PASS | 错误密码登录业务码返回 401 | HTTP=$HTTP code=$BIZ_CODE | body: ${RESP_BODY:0:200}" >> $LOG
+else
+    echo -e "${R}[T1.4] FAIL${N} 错误密码登录应返回 code:401,实际 HTTP $HTTP code:$BIZ_CODE body: ${RESP_BODY:0:120}"
+    FAIL_COUNT=$((FAIL_COUNT+1))
+    echo "[T1.4] FAIL | 错误密码登录 | HTTP=$HTTP code=$BIZ_CODE | body: ${RESP_BODY:0:200}" >> $LOG
+fi
 
 RESP_BODY=$(curl -s -w "\n__HTTP_CODE__:%{http_code}" -X POST "$BASE/auth/login" -H "Content-Type: application/json" -d '{"username":"","password":"x"}')
 HTTP=$(echo "$RESP_BODY" | grep -o '__HTTP_CODE__:[0-9]*' | cut -d: -f2)
@@ -154,13 +172,19 @@ fi
 RESP_BODY=$(curl -s -w "\n__HTTP_CODE__:%{http_code}" -X POST "$BASE/auth/login" -H "Content-Type: application/json" -d '{"username":"admin OR 1=1","password":"x"}')
 HTTP=$(echo "$RESP_BODY" | grep -o '__HTTP_CODE__:[0-9]*' | cut -d: -f2)
 RESP_BODY=$(echo "$RESP_BODY" | sed 's/__HTTP_CODE__:[0-9]*$//')
-if [ "$HTTP" = "401" ] || [ "$HTTP" = "400" ]; then
-    echo -e "${G}[T4.4] PASS${N} SQL 注入登录被拒(HTTP $HTTP)"
+BIZ_CODE=$(extract_code)
+# SQL 注入防御:MyBatis-Plus LambdaQueryWrapper.eq() 使用参数化查询,
+# "admin OR 1=1" 作为完整字符串字面量匹配,无法注入。
+# 后端约定:认证失败返回 HTTP 200 + body code:401。
+if [ "$BIZ_CODE" = "401" ] || [ "$BIZ_CODE" = "400" ]; then
+    echo -e "${G}[T4.4] PASS${N} SQL 注入登录被拒(HTTP $HTTP, code:$BIZ_CODE)"
     PASS_COUNT=$((PASS_COUNT+1))
+    echo "[T4.4] PASS | SQL 注入登录被拒 | HTTP=$HTTP code=$BIZ_CODE | body: ${RESP_BODY:0:200}" >> $LOG
 else
-    echo -e "${R}[T4.4] FAIL${N} SQL 注入应被拒,实际 HTTP $HTTP"
+    echo -e "${R}[T4.4] FAIL${N} SQL 注入应被拒,实际 HTTP $HTTP code:$BIZ_CODE body: ${RESP_BODY:0:120}"
     FAIL_COUNT=$((FAIL_COUNT+1))
     record_bug "T4.4" "致命" "security" "SQL 注入登录未拦截"
+    echo "[T4.4] FAIL | SQL 注入登录 | HTTP=$HTTP code=$BIZ_CODE | body: ${RESP_BODY:0:200}" >> $LOG
 fi
 
 RESP_BODY=$(curl -s -w "\n__HTTP_CODE__:%{http_code}" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -X POST "$BASE/inventory/item" -d '{"accountSetId":1,"itemCode":"XSS01","itemName":"<script>alert(1)</script>","unitPrice":10}')

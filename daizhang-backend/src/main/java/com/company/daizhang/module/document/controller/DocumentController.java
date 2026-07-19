@@ -114,6 +114,11 @@ public class DocumentController {
     /**
      * 票据附件上传:不绑定具体票据,仅返回文件 URL,由前端在创建票据时回填 fileUrl 字段。
      * 复用 FileValidationUtil 的安全校验(扩展名白名单 + Magic Number + 防路径穿越 + 大小限制)。
+     *
+     * 安全修复:
+     * 1. 路径拼接:使用 java.nio.file.Paths 安全拼接,避免 uploadPath 末尾缺失分隔符导致路径错误。
+     * 2. 信息泄露:不再返回 destFile.getAbsolutePath(),改为返回相对路径(/uploads/document/xxx.pdf),
+     *    防止攻击者通过 fileUrl 探测服务器绝对路径(目录结构、用户名等敏感信息)。
      */
     @Operation(summary = "上传票据附件")
     @PostMapping("/upload")
@@ -126,10 +131,13 @@ public class DocumentController {
             extension = originalFilename.substring(originalFilename.lastIndexOf("."));
         }
         String newFileName = UUID.randomUUID().toString().replace("-", "") + extension;
-        String dirPath = uploadPath + "document/";
-        File dir = new File(dirPath);
+
+        // 安全修复(BUG-后端):用 Paths.get 安全拼接路径,避免 uploadPath 末尾无分隔符时
+        // 拼成 "./data/uploadsdocument/" 这种错误目录(原 uploadPath + "document/" 实现的缺陷)。
+        java.nio.file.Path uploadDir = java.nio.file.Paths.get(uploadPath, "document");
+        File dir = uploadDir.toFile();
         if (!dir.exists() && !dir.mkdirs()) {
-            throw new com.company.daizhang.common.exception.BusinessException("创建上传目录失败：" + dirPath);
+            throw new com.company.daizhang.common.exception.BusinessException("创建上传目录失败：" + dir.getPath());
         }
         File destFile = new File(dir, newFileName);
         try {
@@ -139,7 +147,11 @@ public class DocumentController {
         }
         Map<String, String> result = new HashMap<>();
         result.put("fileName", originalFilename);
-        result.put("fileUrl", destFile.getAbsolutePath());
+        // 安全修复(BUG-后端):fileUrl 不再返回 destFile.getAbsolutePath(),
+        // 改为返回相对路径 "/uploads/document/{filename}",前端通过此相对 URL 访问文件,
+        // 避免泄露服务器绝对路径(目录结构、用户名等)。
+        // 注:前端创建票据时直接保存此相对路径作为 fileUrl 字段值。
+        result.put("fileUrl", "/uploads/document/" + newFileName);
         result.put("fileSize", String.valueOf(file.getSize()));
         return Result.success(result);
     }
