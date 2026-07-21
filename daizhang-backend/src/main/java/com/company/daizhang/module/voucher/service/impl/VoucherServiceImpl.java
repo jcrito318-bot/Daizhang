@@ -489,6 +489,14 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                 errors.add("凭证" + voucher.getVoucherNo() + " 无访问权限:" + e.getMessage());
                 continue;
             }
+            // BV-07 修复:批量审核同 auditVoucher,须校验期间未结账,避免对已结账期间内的凭证执行状态变更(0→1)
+            try {
+                checkPeriodNotClosed(checkPeriodExists(voucher.getAccountSetId(), voucher.getYear(), voucher.getMonth()));
+            } catch (BusinessException e) {
+                failedIds.add(id);
+                errors.add("凭证" + voucher.getVoucherNo() + " 期间已结账:" + e.getMessage());
+                continue;
+            }
             if (voucher.getStatus() != null && voucher.getStatus() != 0) {
                 failedIds.add(id);
                 errors.add("凭证" + voucher.getVoucherNo() + " 非未审核状态，不能审核");
@@ -549,6 +557,14 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
             } catch (BusinessException e) {
                 failedIds.add(id);
                 errors.add("凭证" + voucher.getVoucherNo() + " 无访问权限:" + e.getMessage());
+                continue;
+            }
+            // BV-07 修复:批量反审核同 unauditVoucher,须校验期间未结账,避免对已结账期间内的凭证执行状态变更(1→0)
+            try {
+                checkPeriodNotClosed(checkPeriodExists(voucher.getAccountSetId(), voucher.getYear(), voucher.getMonth()));
+            } catch (BusinessException e) {
+                failedIds.add(id);
+                errors.add("凭证" + voucher.getVoucherNo() + " 期间已结账:" + e.getMessage());
                 continue;
             }
             // 只有已审核且未过账的凭证才能反审核

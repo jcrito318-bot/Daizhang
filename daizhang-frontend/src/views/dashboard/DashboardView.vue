@@ -140,7 +140,9 @@ function goToVoucherList() {
 async function loadStats() {
   loading.value = true
   try {
-    const res = await dashboardApi.stats(appStore.currentAccountSetId || undefined)
+    // BF-13 修复:dashboardApi.stats 已移除误导的 accountSetId 参数
+    // (后端 DashboardController.getDashboard 是全局运营看板,跨账套汇总,不接收 accountSetId)
+    const res = await dashboardApi.stats()
     Object.assign(stats, res.data)
   } catch {
     // handled by interceptor

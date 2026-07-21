@@ -184,6 +184,29 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    public void deleteTransaction(Long id) {
+        // BV-01 修复:原 BankController.deleteTransaction 直接调 removeById(id),
+        // 绕过了 IDOR/已匹配/已生成凭证 等所有业务校验,任何已认证用户传入任意 ID 即可删除他人账套流水。
+        BankTransaction transaction = this.getById(id);
+        if (transaction == null) {
+            throw new BusinessException("银行流水不存在");
+        }
+        // 1. IDOR:校验当前用户对该流水所属账套的所有者权限(删除属写操作,需 OWNER 级)
+        accountSetAccessService.checkOwner(transaction.getAccountSetId());
+        // 2. 已匹配流水不可删,避免产生孤儿对账记录(对账单未达账项数已扣除,删除会破坏账实一致)
+        if (transaction.getMatchedStatus() != null && transaction.getMatchedStatus() == 1) {
+            throw new BusinessException("该流水已匹配,请先取消匹配再删除");
+        }
+        // 3. 已生成凭证的流水不可删,避免产生孤儿凭证引用
+        if (transaction.getVoucherId() != null) {
+            throw new BusinessException("该流水已生成凭证,请先删除关联凭证后再删除流水");
+        }
+        this.removeById(id);
+        log.info("删除银行流水成功,id={},accountSetId={}", id, transaction.getAccountSetId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
     public Integer autoMatch(AutoMatchRequest request) {
         // IDOR治理:校验当前用户对该账套的所有者权限,防止跨账套执行自动匹配
         accountSetAccessService.checkOwner(request.getAccountSetId());

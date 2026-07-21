@@ -584,13 +584,21 @@ async function handleBatchDelete() {
     cancelButtonText: '取消',
     type: 'warning'
   })
-  try {
-    await Promise.all(selectedIds.value.map(id => documentApi.delete(id)))
-    ElMessage.success('批量删除成功')
-    loadData()
-  } catch {
-    // handled by interceptor
+  // BF-14 修复:原 Promise.all 在部分失败时整个 catch 块吞掉错误,
+  // 仍提示"批量删除成功",用户无法感知失败项。
+  // 改用 Promise.allSettled 统计 fulfilled/rejected,给出准确反馈。
+  const results = await Promise.allSettled(selectedIds.value.map(id => documentApi.delete(id)))
+  const succeeded = results.filter(r => r.status === 'fulfilled').length
+  const failed = results.length - succeeded
+  if (failed === 0) {
+    ElMessage.success(`批量删除成功,共 ${succeeded} 条`)
+  } else if (succeeded === 0) {
+    ElMessage.error(`批量删除失败,共 ${failed} 条`)
+  } else {
+    // 部分成功:明确告知用户,避免误以为全部成功
+    ElMessage.warning(`成功 ${succeeded} 条,失败 ${failed} 条,请检查列表后重试失败项`)
   }
+  loadData()
 }
 
 function resetForm() {

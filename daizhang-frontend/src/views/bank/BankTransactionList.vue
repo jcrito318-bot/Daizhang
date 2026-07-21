@@ -313,11 +313,28 @@ function readFile(file: File): Promise<any> {
 
 function parseExcelData(data: any[]): BankTransactionItem[] {
   const transactions: BankTransactionItem[] = []
-  
-  for (const row of data) {
+  // BF-15 修复:原 transactionType: row['交易类型'] === '收入' ? 1 : 2,
+  // Excel 中任何非"收入"值(空、错别字"收入 "、英文"income")都会被判定为支出,导入后数据错乱。
+  // 改为显式映射表,未匹配的行收集到错误列表,不静默赋值。
+  const typeMap: Record<string, number> = {
+    '收入': 1,
+    '支出': 2,
+    '转入': 1,
+    '转出': 2
+  }
+  const skippedRows: number[] = []
+
+  data.forEach((row, idx) => {
+    const rawType = String(row['交易类型'] ?? '').trim()
+    const mapped = typeMap[rawType]
+    if (mapped === undefined) {
+      // 交易类型未识别:收集行号(Excel 行号从 1 开始,跳过表头 +1)
+      skippedRows.push(idx + 2)
+      return
+    }
     const item: BankTransactionItem = {
       transactionDate: row['交易日期'] || row['日期'] || '',
-      transactionType: row['交易类型'] === '收入' ? 1 : 2,
+      transactionType: mapped,
       amount: parseFloat(row['交易金额'] || row['金额'] || '0'),
       balance: row['余额'] ? parseFloat(row['余额']) : undefined,
       counterparty: row['对方单位'] || row['对方'] || '',
@@ -325,12 +342,16 @@ function parseExcelData(data: any[]): BankTransactionItem[] {
       transactionNo: row['交易流水号'] || row['流水号'] || '',
       remark: row['备注'] || ''
     }
-    
+
     if (item.transactionDate && item.amount) {
       transactions.push(item)
     }
+  })
+
+  if (skippedRows.length > 0) {
+    ElMessage.warning(`第 ${skippedRows.join(', ')} 行交易类型未识别(应为"收入"或"支出"),已跳过`)
   }
-  
+
   return transactions
 }
 

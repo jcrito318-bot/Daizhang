@@ -88,10 +88,13 @@ public class VoucherAttachmentServiceImpl implements VoucherAttachmentService {
         }
 
         // 保存附件记录到数据库
+        // (BV-04 修复:存相对路径而非 destFile.getAbsolutePath(),避免泄露服务器绝对路径给 VIEWER 等只读用户)
         VoucherAttachment attachment = new VoucherAttachment();
         attachment.setVoucherId(voucherId);
         attachment.setFileName(originalFilename);
-        attachment.setFilePath(destFile.getAbsolutePath());
+        // 相对路径形如 "/uploads/voucher/{voucherId}/{newFileName}",删除时拼回绝对路径
+        String relativePath = "/uploads/voucher/" + voucherId + "/" + newFileName;
+        attachment.setFilePath(relativePath);
         attachment.setFileSize(file.getSize());
         attachment.setFileType(file.getContentType());
         voucherAttachmentMapper.insert(attachment);
@@ -111,15 +114,49 @@ public class VoucherAttachmentServiceImpl implements VoucherAttachmentService {
         Long accountSetId = getVoucherAccountSetId(attachment.getVoucherId());
         accountSetAccessService.checkOwner(accountSetId);
 
-        // 删除物理文件
-        File file = new File(attachment.getFilePath());
-        if (file.exists() && !file.delete()) {
-            log.warn("删除附件文件失败：{}", attachment.getFilePath());
+        // 删除物理文件:从相对路径拼回绝对路径
+        // (BV-04 修复:DB 中存的是相对路径 /uploads/voucher/...,删除时拼回 uploadPath + voucher/{voucherId}/{fileName})
+        File file = resolveAbsoluteFile(attachment.getFilePath());
+        try {
+            if (file.exists() && !file.delete()) {
+                log.warn("删除附件文件失败：{}", attachment.getFilePath());
+            }
+        } catch (SecurityException e) {
+            // 无文件系统权限时不应阻塞 DB 记录清理,记录错误后继续
+            log.error("删除附件文件时抛 SecurityException：{}", attachment.getFilePath(), e);
         }
 
         // 逻辑删除数据库记录
         voucherAttachmentMapper.deleteById(id);
         log.info("凭证附件删除成功，id={}", id);
+    }
+
+    /**
+     * 将数据库中存储的相对路径(形如 "/uploads/voucher/{voucherId}/{fileName}")
+     * 拼接为服务器文件系统绝对路径。
+     * <p>
+     * 兼容历史数据:若 filePath 已是绝对路径(修复前遗留),则直接返回。
+     * 防止路径遍历:校验最终路径仍在 uploadPath 之下。
+     */
+    private File resolveAbsoluteFile(String filePath) {
+        if (filePath == null || filePath.isEmpty()) {
+            throw new BusinessException("附件路径为空");
+        }
+        java.nio.file.Path resolved;
+        if (filePath.startsWith("/uploads/") || filePath.startsWith("uploads/")) {
+            // 相对路径:剥离前导 "/uploads/" 或 "uploads/",与 uploadPath 拼接
+            String relativePart = filePath.replaceFirst("^/?uploads/", "");
+            resolved = java.nio.file.Paths.get(uploadPath, relativePart).normalize();
+        } else {
+            // 兼容历史数据(已是绝对路径)
+            resolved = java.nio.file.Paths.get(filePath).normalize();
+        }
+        // 防路径遍历:校验最终路径仍位于 uploadPath 之下
+        java.nio.file.Path base = java.nio.file.Paths.get(uploadPath).normalize();
+        if (!resolved.startsWith(base)) {
+            throw new BusinessException("附件路径非法,疑似路径遍历攻击");
+        }
+        return resolved.toFile();
     }
 
     /**

@@ -57,8 +57,11 @@ public class BankController {
 
     @Operation(summary = "删除银行流水")
     @DeleteMapping("/transaction/{id}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> deleteTransaction(@PathVariable Long id) {
-        bankService.removeById(id);
+        // BV-01 修复:原直接调 bankService.removeById(id) 绕过所有 IDOR/已匹配/已生成凭证校验,
+        // 改为调用自定义 deleteTransaction,补充 IDOR 治理与业务一致性校验。
+        bankService.deleteTransaction(id);
         return Result.success();
     }
 

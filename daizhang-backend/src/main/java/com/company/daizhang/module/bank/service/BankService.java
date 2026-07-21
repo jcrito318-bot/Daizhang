@@ -32,6 +32,18 @@ public interface BankService extends IService<BankTransaction> {
     BankTransactionVO getTransactionById(Long id);
 
     /**
+     * 删除银行流水
+     * <p>
+     * BV-01 修复:覆盖 ServiceImpl#removeById 的默认实现,补充以下校验:
+     * 1. IDOR:校验当前用户对该流水所属账套的所有者权限
+     * 2. 已匹配流水(matchedStatus==1)不可删,避免产生孤儿对账记录
+     * 3. 已生成凭证(voucherId!=null)不可删,避免产生孤儿凭证
+     *
+     * @param id 银行流水ID
+     */
+    void deleteTransaction(Long id);
+
+    /**
      * 自动匹配
      */
     Integer autoMatch(AutoMatchRequest request);

@@ -82,8 +82,12 @@ export const settingApi = {
 
 export const dashboardApi = {
   // 后端端点为 GET /dashboard(返回 DashboardVO,含 summary 嵌套对象),
-  // 前端 Dashboard 期望扁平的 DashboardStatsVO,此处做字段映射适配
-  async stats(accountSetId?: number): Promise<Result<DashboardStatsVO>> {
+  // 前端 Dashboard 期望扁平的 DashboardStatsVO,此处做字段映射适配。
+  // BF-13 修复:后端 DashboardController.getDashboard 是代账公司全局运营看板,
+  // 跨账套汇总(代账公司需看自己所有账套的待办/统计),不接收 accountSetId 参数。
+  // 原函数签名声明了 accountSetId 参数但完全忽略它,误导调用方以为做了账套隔离,
+  // 此处移除误导的参数。
+  async stats(): Promise<Result<DashboardStatsVO>> {
     const res = await request.get('/dashboard')
     const vo = res.data as any
     const summary = vo?.summary || {}

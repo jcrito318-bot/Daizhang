@@ -251,7 +251,14 @@ function isPdf(url: string): boolean {
 }
 
 function openFile(url: string) {
-  window.open(url, '_blank')
+  // BF-01 修复:校验 URL 协议白名单,防止 javascript:/data: 等协议在新窗口执行任意脚本(XSS)。
+  // 仅允许 http/https 协议;非 http(s) URL 不打开并提示用户。
+  if (!url || !/^https?:\/\//i.test(url)) {
+    ElMessage.error('文件 URL 非法,无法打开')
+    return
+  }
+  // noopener 防止新窗口通过 window.opener 引用操纵原窗口;noreferrer 不泄露 Referer
+  window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 function handleBack() {

@@ -177,11 +177,14 @@ public class AccountSetServiceImpl extends ServiceImpl<AccountSetMapper, Account
         if (accountSet == null) {
             throw new BusinessException(ErrorCode.ACCOUNT_SET_NOT_FOUND);
         }
-        // IDOR治理:校验当前用户对该账套的访问权
-        accountSetAccessService.checkAccess(id);
+        // IDOR治理:更新账套元数据须所有者权限
+        // (BV-05 修复:原 checkAccess 允许 VIEWER 只读用户修改账套元数据,违反最小权限原则,
+        //  与 enable/disable/delete/init 等其他写操作保持一致改用 checkOwner)
+        accountSetAccessService.checkOwner(id);
 
-        // 排除status:账套启用/停用须走专用方法(含业务校验),不可通过通用更新绕过
-        BeanUtil.copyProperties(request, accountSet, "status");
+        // 排除 status:账套启用/停用须走专用方法(含业务校验),不可通过通用更新绕过
+        // 排除 code:账套编码应不可变,避免唯一索引冲突与外部引用断裂
+        BeanUtil.copyProperties(request, accountSet, "status", "code");
         this.updateById(accountSet);
 
         log.info("更新账套成功，账套ID: {}", id);

@@ -85,6 +85,9 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createInputInvoice(InputInvoiceRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限,防止向他账套创建进项发票
+        // (BV-02 修复:与 update/delete/authenticate 保持一致,创建时也需 checkOwner)
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         // 校验发票号码唯一
         checkInputInvoiceNumberDuplicate(request.getAccountSetId(), request.getInvoiceNumber(), null);
 
@@ -193,6 +196,9 @@ public class InvoiceServiceImpl implements InvoiceService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createOutputInvoice(OutputInvoiceRequest request) {
+        // IDOR治理:校验当前用户对该账套的所有者权限,防止向他账套创建销项发票
+        // (BV-03 修复:销项发票涉及应纳税额计算,越权创建会扭曲 VAT 申报数据)
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         // 校验发票号码唯一
         checkOutputInvoiceNumberDuplicate(request.getAccountSetId(), request.getInvoiceNumber(), null);
 
