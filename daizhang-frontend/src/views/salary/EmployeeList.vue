@@ -97,10 +97,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { salaryApi } from '@/api/salary'
 import { useAppStore } from '@/stores/app'
+import type { EmployeeVO } from '@/types/salary'
 
 const appStore = useAppStore()
 const loading = ref(false)
-const tableData = ref<any[]>([])
+const tableData = ref<EmployeeVO[]>([])
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
 const formRef = ref<FormInstance>()
@@ -183,7 +184,7 @@ const handleAdd = () => {
   dialogVisible.value = true
 }
 
-const handleEdit = (row: any) => {
+const handleEdit = (row: EmployeeVO) => {
   dialogTitle.value = '编辑员工'
   Object.assign(form, {
     id: row.id,
@@ -198,7 +199,7 @@ const handleEdit = (row: any) => {
   dialogVisible.value = true
 }
 
-const handleDelete = (row: any) => {
+const handleDelete = (row: EmployeeVO) => {
   ElMessageBox.confirm('确定要删除该员工吗？', '提示', {
     type: 'warning'
   }).then(async () => {

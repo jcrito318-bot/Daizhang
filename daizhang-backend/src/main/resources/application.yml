@@ -88,6 +88,21 @@ jwt:
   expiration: 7200
   refresh-expiration: 604800  # 7天(秒)
 
+# Token 黑名单实现配置(BV-06 修复)
+# - memory: 默认,基于 ConcurrentHashMap,适用于单实例部署(本项目默认)
+# - redis: 集群部署适用,跨实例共享黑名单,需引入 spring-boot-starter-data-redis 依赖
+#           详见 RedisTokenBlacklist 类注释
+app:
+  token-blacklist:
+    type: ${TOKEN_BLACKLIST_TYPE:memory}
+  cookie:
+    # BF-02 修复:refresh token Cookie 配置
+    # max-age:与 refresh token 的 JWT 过期时间一致(默认 7 天 = 604800 秒)
+    refresh-token-max-age: ${REFRESH_TOKEN_COOKIE_MAX_AGE:604800}
+    # secure:生产环境(HTTPS)应设为 true,本地开发(http)可设为 false
+    # 浏览器对 localhost 会豁免 Secure,但显式关闭可避免开发环境的 Cookie 丢失问题
+    secure: ${COOKIE_SECURE:false}
+
 # Knife4j配置
 # B-021 修复:默认关闭,生产环境不暴露 API 文档。
 # 开发环境请通过环境变量 KNIFE4J_ENABLED=true 或激活 dev profile 启用。

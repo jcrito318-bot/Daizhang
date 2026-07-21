@@ -129,11 +129,13 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { customerApi } from '@/api/customer'
 import { useAppStore } from '@/stores/app'
+import type { CustomerVO } from '@/types/customer'
 
 const router = useRouter()
 const appStore = useAppStore()
 const loading = ref(false)
-const tableData = ref<any[]>([])
+// BF-06 修复:将 any[] 替换为 CustomerVO[],提供编译期类型保护
+const tableData = ref<CustomerVO[]>([])
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
 const formRef = ref<FormInstance>()
@@ -218,11 +220,11 @@ const handleAdd = () => {
   dialogVisible.value = true
 }
 
-const handleView = (row: any) => {
+const handleView = (row: CustomerVO) => {
   router.push(`/customer/${row.id}`)
 }
 
-const handleEdit = (row: any) => {
+const handleEdit = (row: CustomerVO) => {
   dialogTitle.value = '编辑客户'
   Object.assign(form, {
     id: row.id,
@@ -238,7 +240,7 @@ const handleEdit = (row: any) => {
   dialogVisible.value = true
 }
 
-const handleDelete = (row: any) => {
+const handleDelete = (row: CustomerVO) => {
   ElMessageBox.confirm('确定要删除该客户吗？', '提示', { type: 'warning' }).then(async () => {
     await customerApi.delete(row.id)
     ElMessage.success('删除成功')

@@ -1,5 +1,6 @@
 import request from '@/utils/request'
 import type { Result } from '@/types/common'
+import type { PeriodVO } from '@/types/voucher'
 
 export interface TrialBalanceResultVO {
   items: { subjectCode: string; subjectName: string; debitBalance: number; creditBalance: number }[]
@@ -15,7 +16,7 @@ export interface ClosePeriodResultVO {
 }
 
 export const periodApi = {
-  listPeriods(accountSetId: number): Promise<Result<any[]>> {
+  listPeriods(accountSetId: number): Promise<Result<PeriodVO[]>> {
     return request.get('/accountset/period/list', { params: { accountSetId } })
   },
   initPeriods(accountSetId: number, year: number): Promise<Result<void>> {

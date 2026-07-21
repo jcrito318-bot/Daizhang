@@ -98,6 +98,8 @@ public class AmortizationServiceImpl implements AmortizationService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createAmortization(AmortizationRequest request) {
+        // IDOR 防护(纵深防御):校验当前用户对目标账套的所有者权限,防止跨账套越权创建
+        accountSetAccessService.checkOwner(request.getAccountSetId());
         // 校验总月数必须大于0,防止除零异常
         if (request.getTotalMonths() == null || request.getTotalMonths() <= 0) {
             throw new BusinessException(ErrorCode.PARAM_ERROR.getCode(), "总月数必须大于0");

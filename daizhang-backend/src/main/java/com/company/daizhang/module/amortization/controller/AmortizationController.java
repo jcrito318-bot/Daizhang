@@ -45,6 +45,8 @@ public class AmortizationController {
 
     @Operation(summary = "创建长期待摊费用")
     @PostMapping
+    // IDOR 防护(纵深防御):创建时强制校验账套所有者权限,防止跨账套越权创建
+    @RequireAccountSetAccess(RequireAccountSetAccess.AccessLevel.OWNER)
     public Result<Void> create(@Valid @RequestBody AmortizationRequest request) {
         amortizationService.createAmortization(request);
         return Result.success();
@@ -52,6 +54,8 @@ public class AmortizationController {
 
     @Operation(summary = "更新长期待摊费用")
     @PutMapping("/{id}")
+    // IDOR 防护(纵深防御):更新时按 id 解析账套并校验所有者权限(required=false 因 id 非账套参数)
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody AmortizationRequest request) {
         amortizationService.updateAmortization(id, request);
         return Result.success();
@@ -59,6 +63,8 @@ public class AmortizationController {
 
     @Operation(summary = "删除长期待摊费用")
     @DeleteMapping("/{id}")
+    // IDOR 防护(纵深防御):删除时按 id 解析账套并校验所有者权限(required=false 因 id 非账套参数)
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> delete(@PathVariable Long id) {
         amortizationService.deleteAmortization(id);
         return Result.success();
@@ -66,6 +72,8 @@ public class AmortizationController {
 
     @Operation(summary = "执行月摊销")
     @PostMapping("/{id}/amortize")
+    // IDOR 防护(纵深防御):摊销时按 id 解析账套并校验所有者权限(required=false 因 id 非账套参数)
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> amortize(@PathVariable Long id,
                                  @RequestParam Integer year,
                                  @RequestParam Integer month) {
@@ -85,6 +93,8 @@ public class AmortizationController {
 
     @Operation(summary = "生成摊销凭证")
     @PostMapping("/{id}/voucher")
+    // IDOR 防护(纵深防御):生成凭证时按 id 解析账套并校验所有者权限(required=false 因 id 非账套参数)
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Long> generateAmortizationVoucher(@PathVariable Long id,
                                                      @RequestParam Integer year,
                                                      @RequestParam Integer month) {

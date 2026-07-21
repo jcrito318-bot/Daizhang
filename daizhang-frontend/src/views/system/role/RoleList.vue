@@ -104,6 +104,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
+import type ElTree from 'element-plus/es/components/tree'
 import { roleApi, menuApi } from '@/api/system'
 import type { SysRoleVO, SysMenuVO } from '@/types/system'
 
@@ -133,7 +134,7 @@ const formRules: FormRules = {
 
 // 分配菜单
 const menuDialogVisible = ref(false)
-const menuTreeRef = ref<any>(null)
+const menuTreeRef = ref<InstanceType<typeof ElTree> | null>(null)
 const menuTree = ref<SysMenuVO[]>([])
 const currentRoleId = ref(0)
 // 分配菜单对话框关闭后可能仍有未触发的 setTimeout,组件卸载时需清理
@@ -233,7 +234,7 @@ async function handleMenuSubmit() {
   try {
     const checkedKeys = menuTreeRef.value?.getCheckedKeys() || []
     const halfCheckedKeys = menuTreeRef.value?.getHalfCheckedKeys() || []
-    const menuIds = [...checkedKeys, ...halfCheckedKeys]
+    const menuIds = [...checkedKeys, ...halfCheckedKeys] as number[]
     await roleApi.assignMenus(currentRoleId.value, menuIds)
     ElMessage.success('分配成功')
     menuDialogVisible.value = false

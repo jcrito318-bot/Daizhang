@@ -1,5 +1,6 @@
 package com.company.daizhang.module.customer.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.customer.dto.PaymentCreateRequest;
@@ -56,6 +57,8 @@ public class PaymentController {
 
     @Operation(summary = "创建收款记录")
     @PostMapping
+    // IDOR 防护(纵深防御):edge-level 预校验,Service 层仍保留 checkOwner 作为兜底
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> create(@Valid @RequestBody PaymentCreateRequest request) {
         paymentService.createPayment(request);
         return Result.success();
@@ -63,6 +66,8 @@ public class PaymentController {
 
     @Operation(summary = "更新收款记录")
     @PutMapping("/{id}")
+    // IDOR 防护(纵深防御):edge-level 预校验,Service 层仍保留 checkOwner 作为兜底
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody PaymentUpdateRequest request) {
         paymentService.updatePayment(id, request);
         return Result.success();
@@ -70,6 +75,8 @@ public class PaymentController {
 
     @Operation(summary = "删除收款记录")
     @DeleteMapping("/{id}")
+    // IDOR 防护(纵深防御):edge-level 预校验,Service 层仍保留 checkOwner 作为兜底
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> delete(@PathVariable Long id) {
         paymentService.deletePayment(id);
         return Result.success();

@@ -46,6 +46,8 @@ public class ServiceReportController {
 
     @Operation(summary = "创建服务报告")
     @PostMapping
+    // IDOR 防护(纵深防御):edge-level 预校验,Service 层仍保留 checkOwner 作为兜底
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> create(@Valid @RequestBody ServiceReportRequest request) {
         serviceReportService.createReport(request);
         return Result.success();
@@ -53,6 +55,8 @@ public class ServiceReportController {
 
     @Operation(summary = "更新服务报告")
     @PutMapping("/{id}")
+    // IDOR 防护(纵深防御):edge-level 预校验,Service 层仍保留 checkOwner 作为兜底
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody ServiceReportRequest request) {
         serviceReportService.updateReport(id, request);
         return Result.success();
@@ -60,6 +64,8 @@ public class ServiceReportController {
 
     @Operation(summary = "删除服务报告")
     @DeleteMapping("/{id}")
+    // IDOR 防护(纵深防御):edge-level 预校验,Service 层仍保留 checkOwner 作为兜底
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> delete(@PathVariable Long id) {
         serviceReportService.deleteReport(id);
         return Result.success();
@@ -67,6 +73,8 @@ public class ServiceReportController {
 
     @Operation(summary = "发布服务报告")
     @PostMapping("/{id}/publish")
+    // IDOR 防护(纵深防御):edge-level 预校验,Service 层仍保留 checkOwner 作为兜底
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> publish(@PathVariable Long id) {
         serviceReportService.publishReport(id);
         return Result.success();

@@ -346,7 +346,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { MagicStick } from '@element-plus/icons-vue'
-import type { FormInstance, FormRules, UploadProps, UploadRequestOptions } from 'element-plus'
+import type { FormInstance, FormRules, UploadProps, UploadRequestOptions, UploadUserFile } from 'element-plus'
 import { documentApi } from '@/api/document'
 import { voucherApi } from '@/api/voucher'
 import { aiApi } from '@/api/ai'
@@ -385,7 +385,7 @@ const isEdit = ref(false)
 const editId = ref<number>(0)
 const submitLoading = ref(false)
 const formRef = ref<FormInstance>()
-const fileList = ref<any[]>([])
+const fileList = ref<UploadUserFile[]>([])
 
 const form = reactive<DocumentCreateRequest>({
   accountSetId: appStore.currentAccountSetId || 0,
@@ -433,7 +433,7 @@ const customUploadRequest = async (options: UploadRequestOptions) => {
     e.status = 0
     e.method = 'POST'
     e.url = '/document/upload'
-    onError?.(e as any)
+    onError?.(e as Error & { status: number; method: string; url: string })
   }
 }
 
@@ -744,19 +744,19 @@ async function handleAiRecognize() {
     // 从已上传的文件 URL 提取路径后调用 OCR 识别
     // 传递票据类型参数（如果已选择）
     const res = await aiApi.recognizeInvoiceByUrl(form.fileUrl, form.documentType)
-    const content = (res.data as any) || {}
+    const content = (res.data as Record<string, unknown>) || {}
 
     // 将识别结果回填到表单
-    form.documentNo = content.invoice_number || content.invoiceNumber || ''
-    form.invoiceCode = content.invoice_code || content.invoiceCode || ''
-    form.invoiceNumber = content.invoice_number || content.invoiceNumber || ''
-    form.sellerName = content.seller_name || content.seller || content.sellerName || ''
-    form.buyerName = content.buyer_name || content.buyer || content.buyerName || ''
-    form.documentDate = content.date || content.invoice_date || content.documentDate || form.documentDate
+    form.documentNo = (content.invoice_number as string) || (content.invoiceNumber as string) || ''
+    form.invoiceCode = (content.invoice_code as string) || (content.invoiceCode as string) || ''
+    form.invoiceNumber = (content.invoice_number as string) || (content.invoiceNumber as string) || ''
+    form.sellerName = (content.seller_name as string) || (content.seller as string) || (content.sellerName as string) || ''
+    form.buyerName = (content.buyer_name as string) || (content.buyer as string) || (content.buyerName as string) || ''
+    form.documentDate = (content.date as string) || (content.invoice_date as string) || (content.documentDate as string) || form.documentDate
 
     // 金额字段做数值转换
-    const parseAmount = (v: any): number => {
-      const n = typeof v === 'string' ? parseFloat(v) : Number(v)
+    const parseAmount = (v: unknown): number => {
+      const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : 0
       return isNaN(n) ? 0 : n
     }
     form.amount = parseAmount(content.amount)
@@ -768,9 +768,9 @@ async function handleAiRecognize() {
 
     aiRecognizeResult.value = true
     ElMessage.success('AI 识别成功，已自动填充表单')
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('AI 识别失败', e)
-    ElMessage.error(e?.message || 'AI 识别失败，请稍后重试')
+    ElMessage.error(e instanceof Error ? e.message : 'AI 识别失败，请稍后重试')
   } finally {
     aiRecognizing.value = false
   }

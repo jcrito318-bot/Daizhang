@@ -1,5 +1,6 @@
 package com.company.daizhang.module.customer.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.customer.dto.ContractCreateRequest;
@@ -50,6 +51,8 @@ public class ContractController {
 
     @Operation(summary = "创建合同")
     @PostMapping
+    // IDOR 防护(纵深防御):edge-level 预校验,Service 层仍保留 checkOwner 作为兜底
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> create(@Valid @RequestBody ContractCreateRequest request) {
         contractService.createContract(request);
         return Result.success();
@@ -57,6 +60,8 @@ public class ContractController {
 
     @Operation(summary = "更新合同")
     @PutMapping("/{id}")
+    // IDOR 防护(纵深防御):edge-level 预校验,Service 层仍保留 checkOwner 作为兜底
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> update(@PathVariable Long id, @Valid @RequestBody ContractUpdateRequest request) {
         contractService.updateContract(id, request);
         return Result.success();
@@ -85,6 +90,8 @@ public class ContractController {
 
     @Operation(summary = "删除合同")
     @DeleteMapping("/{id}")
+    // IDOR 防护(纵深防御):edge-level 预校验,Service 层仍保留 checkOwner 作为兜底
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> delete(@PathVariable Long id) {
         contractService.deleteContract(id);
         return Result.success();

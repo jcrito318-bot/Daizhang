@@ -78,10 +78,11 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { salaryApi } from '@/api/salary'
 import { useAppStore } from '@/stores/app'
+import type { SalarySheetVO } from '@/types/salary'
 
 const appStore = useAppStore()
 const loading = ref(false)
-const tableData = ref<any[]>([])
+const tableData = ref<SalarySheetVO[]>([])
 
 const searchForm = reactive({
   year: '' as string | null,
@@ -148,7 +149,7 @@ const handleAdd = () => {
   ElMessage.info('新增工资表功能开发中')
 }
 
-const handleConfirm = (row: any) => {
+const handleConfirm = (row: SalarySheetVO) => {
   ElMessageBox.confirm('确定要确认该工资表吗？', '提示', {
     type: 'warning'
   }).then(async () => {
@@ -158,7 +159,7 @@ const handleConfirm = (row: any) => {
   })
 }
 
-const handleDelete = (row: any) => {
+const handleDelete = (row: SalarySheetVO) => {
   ElMessageBox.confirm('确定要删除该工资表吗？', '提示', {
     type: 'warning'
   }).then(async () => {

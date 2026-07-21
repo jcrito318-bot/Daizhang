@@ -145,14 +145,15 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { assetApi } from '@/api/asset'
 import { useAppStore } from '@/stores/app'
+import type { FixedAssetVO, AssetCategoryVO } from '@/types/asset'
 
 const appStore = useAppStore()
 const loading = ref(false)
-const tableData = ref<any[]>([])
+const tableData = ref<FixedAssetVO[]>([])
 const dialogVisible = ref(false)
 const dialogTitle = ref('')
 const formRef = ref<FormInstance>()
-const categories = ref<any[]>([])
+const categories = ref<AssetCategoryVO[]>([])
 const submitLoading = ref(false)
 
 const searchForm = reactive({
@@ -261,7 +262,7 @@ const handleAdd = () => {
   dialogVisible.value = true
 }
 
-const handleEdit = (row: any) => {
+const handleEdit = (row: FixedAssetVO) => {
   dialogTitle.value = '编辑资产'
   Object.assign(form, {
     id: row.id,
@@ -279,7 +280,7 @@ const handleEdit = (row: any) => {
   dialogVisible.value = true
 }
 
-const handleDelete = (row: any) => {
+const handleDelete = (row: FixedAssetVO) => {
   ElMessageBox.confirm('确定要删除该资产吗？', '提示', { type: 'warning' }).then(async () => {
     await assetApi.deleteAsset(row.id)
     ElMessage.success('删除成功')

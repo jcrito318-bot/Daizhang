@@ -216,7 +216,7 @@ public class TaxServiceImpl implements TaxService {
             return out.toByteArray();
         } catch (IOException e) {
             log.error("导出申报表失败", e);
-            throw new BusinessException("导出申报表失败: " + e.getMessage());
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR.getCode(), "导出申报表失败，请稍后重试");
         }
     }
 

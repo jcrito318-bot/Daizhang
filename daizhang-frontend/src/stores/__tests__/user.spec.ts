@@ -40,10 +40,14 @@ const mockLoginResponse: LoginResponse = {
  * 覆盖:
  * - 状态计算属性(isLoggedIn, roles)
  * - hasAnyRole: 角色判断(含 ADMIN 隐式放行)
- * - login: 写入 token/userInfo,持久化 refreshToken
- * - logout: 清空状态,移除 refreshToken
- * - refreshToken: 成功/失败两条路径
+ * - login: 写入 token/userInfo(BF-02 后 refresh token 由 HttpOnly Cookie 管理,前端不处理)
+ * - logout: 清空状态(不操作 localStorage)
+ * - refreshToken: 成功/失败两条路径(无参,依赖浏览器自动携带 Cookie)
  * - initializeAuth: 启动时调用 refreshToken
+ *
+ * BF-02 修复后:refresh token 由后端通过 HttpOnly + Secure + SameSite=Strict Cookie
+ * 下发,JS 无法通过 document.cookie 读取。前端不再存储/读取 refresh token,
+ * 刷新时由浏览器自动携带 Cookie (axios withCredentials: true)。
  */
 describe('useUserStore', () => {
   beforeEach(() => {
@@ -129,7 +133,7 @@ describe('useUserStore', () => {
       expect(store.roles).toEqual(['ADMIN'])
     })
 
-    it('登录后 refreshToken 应持久化到 localStorage(不持久化 access token)', async () => {
+    it('BF-02 修复后登录不应将 refreshToken 写入 localStorage(改由 HttpOnly Cookie 管理)', async () => {
       ;(authApi.login as any).mockResolvedValue({
         code: 200,
         message: 'ok',
@@ -138,7 +142,8 @@ describe('useUserStore', () => {
       })
       const store = useUserStore()
       await store.login({ username: 'admin', password: '123456' })
-      expect(localStorage.getItem('refreshToken')).toBe('fake-refresh-token')
+      // refresh token 不应出现在 localStorage 中(由后端 Set-Cookie HttpOnly 下发)
+      expect(localStorage.getItem('refreshToken')).toBeNull()
     })
 
     it('登录失败(authApi 抛错)应向上抛出', async () => {
@@ -148,33 +153,18 @@ describe('useUserStore', () => {
       expect(store.token).toBe('')
       expect(store.userInfo).toBeNull()
     })
-
-    it('响应不含 refreshToken 时不应写入 localStorage', async () => {
-      ;(authApi.login as any).mockResolvedValue({
-        code: 200,
-        message: 'ok',
-        data: { ...mockLoginResponse, refreshToken: '' },
-        timestamp: Date.now()
-      })
-      const store = useUserStore()
-      await store.login({ username: 'admin', password: '123456' })
-      // 仅在 refreshToken 为 truthy 时才写入;空字符串走 if 假分支
-      expect(localStorage.getItem('refreshToken')).toBeNull()
-    })
   })
 
   describe('logout - 登出', () => {
-    it('登出应清空 token 和 userInfo,并移除 refreshToken', async () => {
+    it('登出应清空 token 和 userInfo', async () => {
       ;(authApi.logout as any).mockResolvedValue({ code: 200, message: 'ok', data: null, timestamp: 0 })
       const store = useUserStore()
       store.token = 'token'
       store.userInfo = mockUser
-      localStorage.setItem('refreshToken', 'rft')
       await store.logout()
       expect(store.token).toBe('')
       expect(store.userInfo).toBeNull()
       expect(store.isLoggedIn).toBe(false)
-      expect(localStorage.getItem('refreshToken')).toBeNull()
     })
 
     it('后端 logout 接口失败时也应清空本地状态(finally 块)', async () => {
@@ -182,25 +172,15 @@ describe('useUserStore', () => {
       const store = useUserStore()
       store.token = 'token'
       store.userInfo = mockUser
-      localStorage.setItem('refreshToken', 'rft')
       // logout 内部 catch -> finally,不抛错
       await store.logout()
       expect(store.token).toBe('')
       expect(store.userInfo).toBeNull()
-      expect(localStorage.getItem('refreshToken')).toBeNull()
     })
   })
 
   describe('refreshToken - 刷新 access token', () => {
-    it('localStorage 无 refreshToken 时返回 false', async () => {
-      const store = useUserStore()
-      const result = await store.refreshToken()
-      expect(result).toBe(false)
-      expect(authApi.refresh).not.toHaveBeenCalled()
-    })
-
-    it('刷新成功应更新 token 并返回 true', async () => {
-      localStorage.setItem('refreshToken', 'old-refresh')
+    it('刷新成功应更新 token 并返回 true(BF-02: 无参,依赖浏览器自动携带 Cookie)', async () => {
       ;(authApi.refresh as any).mockResolvedValue({
         code: 200,
         message: 'ok',
@@ -215,23 +195,26 @@ describe('useUserStore', () => {
       const result = await store.refreshToken()
       expect(result).toBe(true)
       expect(store.token).toBe('new-access-token')
-      expect(localStorage.getItem('refreshToken')).toBe('new-refresh-token')
+      // refresh token 由后端 Set-Cookie 轮换,前端不应在 localStorage 中处理
+      expect(localStorage.getItem('refreshToken')).toBeNull()
+      // refresh API 应以无参形式调用(浏览器自动携带 Cookie)
+      expect(authApi.refresh).toHaveBeenCalledWith()
     })
 
-    it('刷新失败应清除 refreshToken 并返回 false', async () => {
-      localStorage.setItem('refreshToken', 'invalid-refresh')
+    it('刷新失败应清除登录态并返回 false', async () => {
       ;(authApi.refresh as any).mockRejectedValue(new Error('refresh token 失效'))
       const store = useUserStore()
       store.token = 'old-token'
+      store.userInfo = mockUser
       const result = await store.refreshToken()
       expect(result).toBe(false)
       expect(store.token).toBe('')
       expect(store.userInfo).toBeNull()
-      expect(localStorage.getItem('refreshToken')).toBeNull()
     })
+  })
 
-    it('initializeAuth 应调用 refreshToken', async () => {
-      localStorage.setItem('refreshToken', 'rft')
+  describe('initializeAuth - 应用启动时静默刷新', () => {
+    it('应调用 refreshToken(BF-02: 无条件调用,由浏览器决定是否携带 Cookie)', async () => {
       ;(authApi.refresh as any).mockResolvedValue({
         code: 200,
         message: 'ok',
@@ -240,7 +223,8 @@ describe('useUserStore', () => {
       })
       const store = useUserStore()
       await store.initializeAuth()
-      expect(authApi.refresh).toHaveBeenCalledWith('rft')
+      // 无参调用 refresh,浏览器自动携带 HttpOnly Cookie
+      expect(authApi.refresh).toHaveBeenCalledWith()
       expect(store.token).toBe('token')
     })
   })

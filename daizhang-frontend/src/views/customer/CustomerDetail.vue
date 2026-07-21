@@ -61,12 +61,13 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { customerApi, contractApi } from '@/api/customer'
+import type { CustomerVO, ContractVO } from '@/types/customer'
 
 const route = useRoute()
 const router = useRouter()
 const loading = ref(false)
-const customer = ref<any>(null)
-const contracts = ref<any[]>([])
+const customer = ref<CustomerVO | null>(null)
+const contracts = ref<ContractVO[]>([])
 
 const formatAmount = (amount: number) => {
   return amount ? `¥${amount.toFixed(2)}` : '¥0.00'

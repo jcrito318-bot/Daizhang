@@ -284,8 +284,8 @@ async function handleImport() {
     ElMessage.success(`成功导入 ${res.data} 条记录`)
     importDialogVisible.value = false
     loadData()
-  } catch (error: any) {
-    ElMessage.error(error.message || '导入失败')
+  } catch (error: unknown) {
+    ElMessage.error((error instanceof Error ? error.message : String(error)) || '导入失败')
   } finally {
     importLoading.value = false
   }
@@ -311,7 +311,8 @@ function readFile(file: File): Promise<any> {
   })
 }
 
-function parseExcelData(data: any[]): BankTransactionItem[] {
+function parseExcelData(data: BankTransactionItem[]): BankTransactionItem[] {
+  const rows = data as unknown as Record<string, string>[]
   const transactions: BankTransactionItem[] = []
   // BF-15 修复:原 transactionType: row['交易类型'] === '收入' ? 1 : 2,
   // Excel 中任何非"收入"值(空、错别字"收入 "、英文"income")都会被判定为支出,导入后数据错乱。
@@ -324,7 +325,7 @@ function parseExcelData(data: any[]): BankTransactionItem[] {
   }
   const skippedRows: number[] = []
 
-  data.forEach((row, idx) => {
+  rows.forEach((row, idx) => {
     const rawType = String(row['交易类型'] ?? '').trim()
     const mapped = typeMap[rawType]
     if (mapped === undefined) {

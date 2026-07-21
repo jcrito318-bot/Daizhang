@@ -1,5 +1,6 @@
 package com.company.daizhang.module.customer.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.customer.dto.CustomerCreateRequest;
@@ -52,6 +53,8 @@ public class CustomerController {
 
     @Operation(summary = "创建客户")
     @PostMapping
+    // IDOR 防护(纵深防御):edge-level 预校验,Service 层仍保留 checkOwner 作为兜底
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> create(@Valid @RequestBody CustomerCreateRequest request) {
         customerService.createCustomer(request);
         return Result.success();

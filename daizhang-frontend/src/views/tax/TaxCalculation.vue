@@ -230,7 +230,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { FormInstance, FormRules } from 'element-plus'
+import type { FormInstance, FormRules, TableColumnCtx } from 'element-plus'
 import { taxApi } from '@/api/tax'
 import { useAppStore } from '@/stores/app'
 import type { TaxCalculationVO, TaxCalculationCreateRequest, TaxCalculationUpdateRequest, TaxCalculationQueryRequest } from '@/types/tax'
@@ -308,7 +308,7 @@ function calcTaxAmount() {
   }
 }
 
-function getSummary({ columns, data }: { columns: any[], data: TaxCalculationVO[] }) {
+function getSummary({ columns, data }: { columns: TableColumnCtx<TaxCalculationVO>[], data: TaxCalculationVO[] }) {
   const sums: string[] = []
   columns.forEach((column, index) => {
     if (index === 0) {

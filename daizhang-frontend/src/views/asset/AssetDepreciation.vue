@@ -71,10 +71,11 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { assetApi } from '@/api/asset'
 import { useAppStore } from '@/stores/app'
+import type { DepreciationRecordVO } from '@/types/asset'
 
 const appStore = useAppStore()
 const loading = ref(false)
-const tableData = ref<any[]>([])
+const tableData = ref<DepreciationRecordVO[]>([])
 const calculating = ref(false)
 
 const searchForm = reactive({

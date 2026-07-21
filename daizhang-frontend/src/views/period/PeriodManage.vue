@@ -134,13 +134,14 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAppStore } from '@/stores/app'
 import { periodApi } from '@/api/period'
 import type { TrialBalanceResultVO } from '@/api/period'
+import type { PeriodVO } from '@/types/voucher'
 
 const appStore = useAppStore()
 
 const loading = ref(false)
 const trialBalanceLoading = ref(false)
-const periodList = ref<any[]>([])
-const selectedPeriod = ref<any>(null)
+const periodList = ref<PeriodVO[]>([])
+const selectedPeriod = ref<PeriodVO | null>(null)
 
 const queryForm = reactive({
   accountSetId: appStore.currentAccountSetId || 0,
@@ -211,11 +212,11 @@ async function handleInitPeriods() {
   }
 }
 
-function handleSelectPeriod(row: any) {
+function handleSelectPeriod(row: PeriodVO) {
   selectedPeriod.value = row
 }
 
-async function handleClosePeriod(row: any) {
+async function handleClosePeriod(row: PeriodVO) {
   await ElMessageBox.confirm(
     `确定要结转${row.month}月吗？结转后将关闭该期间。`,
     '提示',
@@ -238,7 +239,7 @@ async function handleClosePeriod(row: any) {
   }
 }
 
-async function handleReopenPeriod(row: any) {
+async function handleReopenPeriod(row: PeriodVO) {
   await ElMessageBox.confirm(
     `确定要反结转${row.month}月吗？`,
     '提示',
@@ -257,7 +258,7 @@ async function handleReopenPeriod(row: any) {
   }
 }
 
-async function handleCarryForward(row: any) {
+async function handleCarryForward(row: PeriodVO) {
   await ElMessageBox.confirm(
     `确定要进行${queryForm.year}年年末结转吗？这将生成结转凭证。`,
     '提示',

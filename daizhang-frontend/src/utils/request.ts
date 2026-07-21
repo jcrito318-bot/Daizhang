@@ -6,7 +6,11 @@ import { useUserStore } from '@/stores/user'
 
 const service: AxiosInstance = axios.create({
   baseURL: '/api',
-  timeout: 30000
+  timeout: 30000,
+  // BF-02 修复:启用 withCredentials,使浏览器跨域请求自动携带 HttpOnly refresh token Cookie。
+  // 后端 /auth/refresh 通过 Cookie 读取 refresh token,不再依赖 Authorization header。
+  // 要求后端 CORS 配置 allowCredentials(true) 且 allowedOriginPatterns 不能为 "*"。
+  withCredentials: true
 })
 
 // 401 静默刷新:并发 401 共享同一次 refresh 尝试

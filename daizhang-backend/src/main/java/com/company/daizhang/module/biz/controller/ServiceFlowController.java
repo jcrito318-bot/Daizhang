@@ -87,6 +87,8 @@ public class ServiceFlowController {
 
     @Operation(summary = "创建任务")
     @PostMapping("/task")
+    // IDOR 防护(纵深防御):edge-level 预校验,Service 层仍保留 checkOwner 作为兜底
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> createTask(@Valid @RequestBody ServiceTaskRequest request) {
         ServiceTask entity = new ServiceTask();
         BeanUtil.copyProperties(request, entity);
@@ -96,6 +98,8 @@ public class ServiceFlowController {
 
     @Operation(summary = "更新任务")
     @PutMapping("/task/{id}")
+    // IDOR 防护(纵深防御):edge-level 预校验,Service 层仍保留 checkOwner 作为兜底
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> updateTask(@PathVariable Long id, @Valid @RequestBody ServiceTaskRequest request) {
         ServiceTask entity = new ServiceTask();
         BeanUtil.copyProperties(request, entity);
@@ -106,6 +110,8 @@ public class ServiceFlowController {
 
     @Operation(summary = "分配任务")
     @PostMapping("/task/{id}/assign")
+    // IDOR 防护(纵深防御):edge-level 预校验,Service 层仍保留 checkOwner 作为兜底
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> assignTask(@PathVariable Long id,
                                    @RequestParam Long assigneeId,
                                    @RequestParam String assigneeName) {
@@ -115,6 +121,8 @@ public class ServiceFlowController {
 
     @Operation(summary = "完成任务")
     @PostMapping("/task/{id}/complete")
+    // IDOR 防护(纵深防御):edge-level 预校验,Service 层仍保留 checkOwner 作为兜底
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> completeTask(@PathVariable Long id) {
         serviceFlowService.completeTask(id);
         return Result.success();
@@ -122,6 +130,8 @@ public class ServiceFlowController {
 
     @Operation(summary = "删除任务")
     @DeleteMapping("/task/{id}")
+    // IDOR 防护(纵深防御):edge-level 预校验,Service 层仍保留 checkOwner 作为兜底
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<Void> deleteTask(@PathVariable Long id) {
         serviceFlowService.deleteTask(id);
         return Result.success();

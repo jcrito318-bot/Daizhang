@@ -78,3 +78,17 @@ export interface VoucherWordVO {
   sortOrder: number
   status: number
 }
+
+export interface PeriodVO {
+  id: number
+  accountSetId: number
+  year: number
+  month: number
+  status: number
+  startDate: string
+  endDate: string
+  createBy: number
+  createTime: string
+  updateBy: number
+  updateTime: string
+}
