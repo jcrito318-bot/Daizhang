@@ -1,6 +1,7 @@
 import request from '@/utils/request'
+import { withSensitive } from '@/utils/request'
 import type { Result, PageResult } from '@/types/common'
-import type { SysUserVO, UserCreateRequest, UserUpdateRequest, SysRoleVO, RoleCreateRequest, SysMenuVO, SysOperationLogVO, DashboardStatsVO } from '@/types/system'
+import type { SysUserVO, UserCreateRequest, UserUpdateRequest, SysRoleVO, RoleCreateRequest, SysMenuVO, SysOperationLogVO, DashboardStatsVO, BackupRecordVO } from '@/types/system'
 
 export const userApi = {
   page(params: { username?: string; realName?: string; status?: number; pageNum: number; pageSize: number }): Promise<Result<PageResult<SysUserVO>>> {
@@ -12,8 +13,12 @@ export const userApi = {
   update(id: number, data: UserUpdateRequest): Promise<Result<void>> {
     return request.put(`/system/user/${id}`, data)
   },
+  /**
+   * 删除用户(敏感操作,后端 @SensitiveOperation 标注)
+   * 调用方应先通过 ElMessageBox.confirm 二次确认,确认后调用本方法。
+   */
   delete(id: number): Promise<Result<void>> {
-    return request.delete(`/system/user/${id}`)
+    return request.delete(`/system/user/${id}`, withSensitive())
   },
   resetPassword(id: number, newPassword: string): Promise<Result<void>> {
     return request.put(`/system/user/${id}/password`, null, { params: { newPassword } })
@@ -103,5 +108,52 @@ export const dashboardApi = {
       cashBalance: 0
     } as DashboardStatsVO
     return res as unknown as Result<DashboardStatsVO>
+  }
+}
+
+/**
+ * 数据备份 API (P3.3)
+ * 对应后端 BackupController(/system/backup)
+ * - create: 异步触发备份,立即返回 backupId
+ * - page: 分页查询备份记录
+ * - download: 下载备份文件(浏览器直接请求,不走 axios)
+ * - restore: 恢复备份(敏感操作,需二次确认)
+ * - delete: 删除备份(敏感操作,需二次确认)
+ */
+export const backupApi = {
+  /** 创建备份(异步执行,返回 backupId) */
+  create(data?: { backupType?: string; remark?: string }): Promise<Result<number>> {
+    return request.post('/system/backup', data ?? {})
+  },
+  /** 分页查询备份记录 */
+  page(params: {
+    backupType?: string
+    status?: string
+    triggerType?: string
+    pageNum: number
+    pageSize: number
+  }): Promise<Result<PageResult<BackupRecordVO>>> {
+    return request.get('/system/backup/page', { params })
+  },
+  /**
+   * 恢复备份(敏感操作,后端 @SensitiveOperation 标注)
+   * 调用方应先通过 ElMessageBox.confirm 二次确认,确认后调用本方法。
+   */
+  restore(id: number, confirm: boolean): Promise<Result<void>> {
+    return request.post(`/system/backup/${id}/restore`, { backupId: id, confirm }, withSensitive())
+  },
+  /**
+   * 删除备份(敏感操作,后端 @SensitiveOperation 标注)
+   * 调用方应先通过 ElMessageBox.confirm 二次确认,确认后调用本方法。
+   */
+  delete(id: number): Promise<Result<void>> {
+    return request.delete(`/system/backup/${id}`, withSensitive())
+  },
+  /**
+   * 下载备份文件的 URL(浏览器直接打开即可下载,需带 token 通过 fetch 处理)。
+   * 返回完整相对路径,调用方可拼接 baseURL 后用 window.open 或 a 标签下载。
+   */
+  downloadUrl(id: number): string {
+    return `/api/system/backup/${id}/download`
   }
 }

@@ -25,6 +25,14 @@
           <template #title>首页</template>
         </el-menu-item>
 
+        <el-menu-item
+          v-if="userStore.hasAnyRole(['ADMIN', 'ACCOUNTANT'])"
+          index="/batch"
+        >
+          <el-icon><Operation /></el-icon>
+          <template #title>批量操作</template>
+        </el-menu-item>
+
         <el-sub-menu index="account">
           <template #title>
             <el-icon><Wallet /></el-icon>
@@ -48,6 +56,7 @@
           </template>
           <el-menu-item index="/voucher">凭证列表</el-menu-item>
           <el-menu-item index="/voucher/create">新增凭证</el-menu-item>
+          <el-menu-item index="/voucher/template">凭证模板</el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu index="ledger">
@@ -67,6 +76,7 @@
           </template>
           <el-menu-item index="/report/balance-sheet">资产负债表</el-menu-item>
           <el-menu-item index="/report/income-statement">利润表</el-menu-item>
+          <el-menu-item index="/report/cash-flow">现金流量表</el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu index="period">
@@ -75,6 +85,12 @@
             <span>会计期间</span>
           </template>
           <el-menu-item index="/period">期间管理</el-menu-item>
+          <el-menu-item
+            v-if="userStore.hasAnyRole(['ADMIN', 'ACCOUNTANT'])"
+            index="/period/close-wizard"
+          >
+            期末结账向导
+          </el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu index="bank">
@@ -161,19 +177,89 @@
           </el-breadcrumb>
         </div>
         <div class="header-right">
-          <el-select
-            v-model="appStore.currentAccountSetId"
-            placeholder="请选择账套"
-            class="account-set-select"
-            @change="handleAccountSetChange"
+          <el-dropdown
+            ref="accountSetDropdownRef"
+            trigger="click"
+            :hide-on-click="false"
+            popper-class="account-set-dropdown-popper"
+            class="account-set-dropdown"
           >
-            <el-option
-              v-for="item in appStore.accountSetList"
-              :key="item.id"
-              :label="item.name"
-              :value="item.id"
-            />
-          </el-select>
+            <span class="account-set-trigger">
+              <el-icon class="trigger-icon"><Wallet /></el-icon>
+              <span class="current-name">{{ currentAccountSetName }}</span>
+              <el-icon class="arrow-icon"><ArrowDown /></el-icon>
+            </span>
+            <template #dropdown>
+              <div class="account-set-panel">
+                <div class="search-wrap" @click.stop>
+                  <el-input
+                    v-model="searchKeyword"
+                    placeholder="搜索账套名称"
+                    prefix-icon="Search"
+                    clearable
+                    size="small"
+                  />
+                </div>
+                <div class="groups-scroll">
+                  <!-- 收藏 -->
+                  <template v-if="favoriteAccountSets.length">
+                    <div class="group-title">⭐ 收藏</div>
+                    <div
+                      v-for="item in favoriteAccountSets"
+                      :key="`fav-${item.id}`"
+                      class="acct-item"
+                      :class="{ 'is-current': item.id === appStore.currentAccountSetId }"
+                      @click="selectAccountSet(item.id)"
+                    >
+                      <span class="acct-name" :title="item.name">{{ item.name }}</span>
+                      <el-icon class="star-icon starred" @click.stop="toggleFav(item.id)"><StarFilled /></el-icon>
+                    </div>
+                  </template>
+                  <!-- 最近访问 -->
+                  <template v-if="recentAccountSetsView.length">
+                    <div class="group-title">🕒 最近访问</div>
+                    <div
+                      v-for="item in recentAccountSetsView"
+                      :key="`recent-${item.id}`"
+                      class="acct-item"
+                      :class="{ 'is-current': item.id === appStore.currentAccountSetId }"
+                      @click="selectAccountSet(item.id)"
+                    >
+                      <span class="acct-name" :title="item.name">{{ item.name }}</span>
+                      <el-icon
+                        class="star-icon"
+                        :class="{ starred: appStore.isFavorite(item.id) }"
+                        @click.stop="toggleFav(item.id)"
+                      >
+                        <StarFilled v-if="appStore.isFavorite(item.id)" />
+                        <Star v-else />
+                      </el-icon>
+                    </div>
+                  </template>
+                  <!-- 全部账套 -->
+                  <div class="group-title">📋 全部账套</div>
+                  <div
+                    v-for="item in allAccountSetsView"
+                    :key="`all-${item.id}`"
+                    class="acct-item"
+                    :class="{ 'is-current': item.id === appStore.currentAccountSetId }"
+                    @click="selectAccountSet(item.id)"
+                  >
+                    <span class="acct-name" :title="item.name">{{ item.name }}</span>
+                    <el-icon
+                      class="star-icon"
+                      :class="{ starred: appStore.isFavorite(item.id) }"
+                      @click.stop="toggleFav(item.id)"
+                    >
+                      <StarFilled v-if="appStore.isFavorite(item.id)" />
+                      <Star v-else />
+                    </el-icon>
+                  </div>
+                  <div v-if="!allAccountSetsView.length" class="empty-tip">无匹配账套</div>
+                </div>
+              </div>
+            </template>
+          </el-dropdown>
           <el-dropdown trigger="click" @command="handleCommand">
             <span class="user-dropdown">
               <el-icon><UserFilled /></el-icon>
@@ -202,6 +288,7 @@ import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
+import type { DropdownInstance } from 'element-plus'
 
 const route = useRoute()
 const router = useRouter()
@@ -248,8 +335,53 @@ function closeMobileSidebar() {
   }
 }
 
-function handleAccountSetChange(id: number) {
+// ===== 账套切换器优化:收藏置顶 + 最近访问 + 搜索 =====
+const accountSetDropdownRef = ref<DropdownInstance>()
+const searchKeyword = ref('')
+
+const currentAccountSetName = computed(() => {
+  const id = appStore.currentAccountSetId
+  if (id == null) return '请选择账套'
+  return appStore.accountSetList.find(a => a.id === id)?.name ?? '请选择账套'
+})
+
+/** 按关键词过滤账套(空关键词返回原列表) */
+function filterByKeyword<T extends { name: string }>(list: T[]): T[] {
+  const kw = searchKeyword.value.trim().toLowerCase()
+  if (!kw) return list
+  return list.filter(a => a.name.toLowerCase().includes(kw))
+}
+
+/** 收藏区:当前用户收藏且仍存在的账套 */
+const favoriteAccountSets = computed(() => {
+  const list = appStore.accountSetList.filter(a => appStore.favorites.includes(a.id))
+  return filterByKeyword(list)
+})
+
+/** 最近访问区:仅展示仍存在于账套列表中的项 */
+const recentAccountSetsView = computed(() => {
+  const list = appStore.recentAccountSets.filter(r =>
+    appStore.accountSetList.some(a => a.id === r.id)
+  )
+  return filterByKeyword(list)
+})
+
+/** 全部账套区:按名称排序 */
+const allAccountSetsView = computed(() => {
+  const list = [...appStore.accountSetList].sort((a, b) =>
+    a.name.localeCompare(b.name, 'zh-CN')
+  )
+  return filterByKeyword(list)
+})
+
+function selectAccountSet(id: number) {
   appStore.setCurrentAccountSet(id)
+  // 切换后自动关闭下拉
+  accountSetDropdownRef.value?.handleClose()
+}
+
+async function toggleFav(id: number) {
+  await appStore.toggleFavorite(id)
 }
 
 async function handleCommand(command: string) {
@@ -270,6 +402,8 @@ onMounted(async () => {
     }
     // 通过 store 加载账套列表(带缓存),避免每次进入页面重复请求
     await appStore.loadAccountSetList()
+    // 加载账套偏好(收藏 + 最近访问),失败不阻塞应用(内部已捕获)
+    await appStore.loadPreferences()
   } catch {
     // ignore
   }
@@ -384,9 +518,44 @@ watch(() => route.path, () => {
     display: flex;
     align-items: center;
 
-    .account-set-select {
-      width: 200px;
+    .account-set-dropdown {
       margin-right: 20px;
+    }
+
+    .account-set-trigger {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 32px;
+      padding: 0 12px;
+      border: 1px solid #dcdfe6;
+      border-radius: 4px;
+      background-color: #fff;
+      color: #303133;
+      font-size: 14px;
+      cursor: pointer;
+      max-width: 240px;
+      transition: border-color 0.2s;
+      outline: none;
+
+      &:hover {
+        border-color: #c0c4cc;
+      }
+
+      .trigger-icon {
+        color: #909399;
+      }
+
+      .current-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .arrow-icon {
+        color: #909399;
+        font-size: 12px;
+      }
     }
 
     .user-dropdown {
@@ -410,5 +579,91 @@ watch(() => route.path, () => {
 .main-content {
   background-color: #f0f2f5;
   overflow-y: auto;
+}
+</style>
+
+<!-- 账套切换器下拉面板样式(非 scoped:el-dropdown 弹层被 teleport 到 body) -->
+<style lang="scss">
+.account-set-dropdown-popper {
+  // 弹层最小宽度,保证搜索框与列表可读
+  min-width: 260px;
+  padding: 0;
+
+  .account-set-panel {
+    width: 260px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .search-wrap {
+    padding: 8px 10px 6px;
+    border-bottom: 1px solid #f0f0f0;
+    position: sticky;
+    top: 0;
+    background: #fff;
+    z-index: 1;
+  }
+
+  .groups-scroll {
+    max-height: 340px;
+    overflow-y: auto;
+    padding: 4px 0;
+  }
+
+  .group-title {
+    padding: 6px 14px;
+    font-size: 12px;
+    color: #909399;
+    line-height: 18px;
+    user-select: none;
+  }
+
+  .acct-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #303133;
+
+    &:hover {
+      background-color: #f5f7fa;
+    }
+
+    &.is-current {
+      color: #409eff;
+      background-color: #ecf5ff;
+    }
+
+    .acct-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+      margin-right: 8px;
+    }
+
+    .star-icon {
+      color: #c0c4cc;
+      font-size: 16px;
+      flex-shrink: 0;
+
+      &:hover {
+        color: #f7ba2a;
+      }
+
+      &.starred {
+        color: #f7ba2a;
+      }
+    }
+  }
+
+  .empty-tip {
+    padding: 16px;
+    text-align: center;
+    color: #c0c4cc;
+    font-size: 13px;
+  }
 }
 </style>

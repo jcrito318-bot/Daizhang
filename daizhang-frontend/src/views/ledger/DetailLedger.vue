@@ -92,6 +92,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { ledgerApi } from '@/api/ledger'
 import { subjectApi } from '@/api/subject'
 import { useAppStore } from '@/stores/app'
@@ -99,6 +100,7 @@ import type { DetailLedgerVO, LedgerQueryRequest } from '@/types/ledger'
 import type { SubjectVO } from '@/types/subject'
 
 const appStore = useAppStore()
+const route = useRoute()
 const loading = ref(false)
 const total = ref(0)
 const tableData = ref<DetailLedgerVO[]>([])
@@ -164,9 +166,50 @@ onMounted(async () => {
     if (list.length > 0 && !queryForm.accountSetId) {
       queryForm.accountSetId = appStore.currentAccountSetId || list[0].id
     }
+
+    // 支持从报表钻取弹窗"在明细账中查看"按钮携带的查询参数:
+    // ?accountSetId=xx&subjectCode=xx&year=xx&month=xx
+    const qAccountSetId = route.query.accountSetId as string | undefined
+    const qSubjectCode = route.query.subjectCode as string | undefined
+    const qYear = route.query.year as string | undefined
+    const qMonth = route.query.month as string | undefined
+    if (qAccountSetId) {
+      const parsed = parseInt(qAccountSetId, 10)
+      if (!Number.isNaN(parsed) && parsed > 0) {
+        queryForm.accountSetId = parsed
+      }
+    }
+    if (qYear) {
+      const parsed = parseInt(qYear, 10)
+      if (!Number.isNaN(parsed) && parsed >= 2000 && parsed <= 2100) {
+        queryForm.year = parsed
+      }
+    }
+    if (qMonth) {
+      const parsed = parseInt(qMonth, 10)
+      if (!Number.isNaN(parsed) && parsed >= 1 && parsed <= 12) {
+        // 钻取跳转指定单月,将起止月份都设为该月
+        startMonth.value = parsed
+        endMonth.value = parsed
+      }
+    }
+
     if (queryForm.accountSetId) {
       const subjectRes = await subjectApi.getTree(queryForm.accountSetId)
       subjectTree.value = subjectRes.data
+
+      // 如果携带了 subjectCode,在科目树中查找对应的 subjectId 并自动选中
+      if (qSubjectCode) {
+        const matched = flatSubjects.value.find(s => s.subjectCode === qSubjectCode)
+        if (matched) {
+          queryForm.subjectId = matched.id
+        }
+      }
+    }
+
+    // 若通过钻取跳转而来且已选中科目,自动加载数据
+    if (qSubjectCode && queryForm.subjectId) {
+      loadData()
     }
   } catch {
     // handled by interceptor

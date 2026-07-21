@@ -1,5 +1,6 @@
 package com.company.daizhang.module.accountset.controller;
 
+import com.company.daizhang.common.annotation.SensitiveOperation;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.accountset.dto.AccountSetCreateRequest;
@@ -77,6 +78,7 @@ public class AccountSetController {
 
     @Operation(summary = "删除账套")
     @DeleteMapping("/{id}")
+    @SensitiveOperation("删除账套")
     public Result<Void> delete(@PathVariable Long id) {
         accountSetService.deleteAccountSet(id);
         return Result.success();

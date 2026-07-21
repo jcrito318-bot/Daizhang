@@ -582,6 +582,27 @@ CREATE TABLE IF NOT EXISTS `bank_reconciliation` (
   KEY `idx_reconciled_date` (`reconciled_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='银行对账结果表';
 
+-- 银行匹配历史模式表(智能对账增强:记录同一交易对方历史匹配的金额范围与对应科目,用于智能匹配加分)
+CREATE TABLE IF NOT EXISTS `bank_match_history` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `account_set_id` BIGINT NOT NULL COMMENT '账套ID',
+  `counterparty` VARCHAR(200) NOT NULL COMMENT '交易对方',
+  `amount_range_min` DECIMAL(18,2) DEFAULT NULL COMMENT '金额范围最小值',
+  `amount_range_max` DECIMAL(18,2) DEFAULT NULL COMMENT '金额范围最大值',
+  `voucher_subject_code` VARCHAR(20) DEFAULT NULL COMMENT '对应凭证科目编码',
+  `match_count` INT NOT NULL DEFAULT 1 COMMENT '历史匹配次数',
+  `last_matched_at` DATETIME DEFAULT NULL COMMENT '最近匹配时间',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标志 0-未删除 1-已删除',
+  `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+  `create_by` BIGINT DEFAULT NULL COMMENT '创建人',
+  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` BIGINT DEFAULT NULL COMMENT '更新人',
+  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_account_counterparty` (`account_set_id`, `counterparty`),
+  KEY `idx_match_history_account_set_id` (`account_set_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='银行匹配历史模式表';
+
 -- 银行账户主数据表
 CREATE TABLE IF NOT EXISTS `bank_account` (
   `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
@@ -1818,3 +1839,135 @@ CREATE TABLE IF NOT EXISTS `inv_out_detail` (
   KEY `idx_inv_out_detail_out_id` (`out_id`),
   KEY `idx_inv_out_detail_item_id` (`item_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='出库单明细表';
+
+-- ============================================
+-- 18. 凭证模板 + 常用摘要库模块
+-- ============================================
+
+-- 凭证模板表
+CREATE TABLE IF NOT EXISTS `voucher_template` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `account_set_id` BIGINT NOT NULL COMMENT '账套ID',
+  `template_code` VARCHAR(50) NOT NULL COMMENT '模板编码',
+  `template_name` VARCHAR(100) NOT NULL COMMENT '模板名称',
+  `template_category` VARCHAR(50) DEFAULT NULL COMMENT '分类: 工资/折旧/社保/税金/结转/其他',
+  `summary` VARCHAR(200) DEFAULT NULL COMMENT '凭证摘要',
+  `detail_json` TEXT COMMENT '分录明细 JSON: [{subjectCode, subjectName, debitAmount, creditAmount, summary}]',
+  `remark` VARCHAR(500) DEFAULT NULL COMMENT '备注',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标志 0-未删除 1-已删除',
+  `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+  `create_by` BIGINT DEFAULT NULL COMMENT '创建人',
+  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` BIGINT DEFAULT NULL COMMENT '更新人',
+  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_account_template` (`account_set_id`, `template_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='凭证模板表';
+
+-- 常用摘要库
+CREATE TABLE IF NOT EXISTS `abstract_library` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `account_set_id` BIGINT NOT NULL COMMENT '账套ID',
+  `abstract_text` VARCHAR(200) NOT NULL COMMENT '摘要文本',
+  `abstract_category` VARCHAR(50) DEFAULT NULL COMMENT '分类: 工资/折旧/社保/税金/报销/采购/销售/其他',
+  `use_count` INT NOT NULL DEFAULT 1 COMMENT '使用次数(用于智能排序)',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标志 0-未删除 1-已删除',
+  `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+  `create_by` BIGINT DEFAULT NULL COMMENT '创建人',
+  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` BIGINT DEFAULT NULL COMMENT '更新人',
+  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  INDEX `idx_account_text` (`account_set_id`, `abstract_text`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='常用摘要库';
+
+-- ============================================
+-- AI 智能凭证识别相关表
+-- ============================================
+
+-- AI记账规则库(关键词->借贷科目映射,优先于AI调用,命中直接返回)
+CREATE TABLE IF NOT EXISTS `ai_accounting_rule` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `account_set_id` BIGINT NOT NULL DEFAULT 0 COMMENT '账套ID, 0=全局规则',
+  `keyword` VARCHAR(100) NOT NULL COMMENT '业务关键词,如 差旅费/办公费/工资',
+  `debit_subject_code` VARCHAR(20) NOT NULL COMMENT '借方科目编码',
+  `debit_subject_name` VARCHAR(100) DEFAULT NULL COMMENT '借方科目名称',
+  `credit_subject_code` VARCHAR(20) NOT NULL COMMENT '贷方科目编码',
+  `credit_subject_name` VARCHAR(100) DEFAULT NULL COMMENT '贷方科目名称',
+  `voucher_summary` VARCHAR(200) DEFAULT NULL COMMENT '建议摘要',
+  `priority` INT NOT NULL DEFAULT 100 COMMENT '优先级,数字越小越优先',
+  `hit_count` INT NOT NULL DEFAULT 0 COMMENT '命中次数(用于排序优化)',
+  `enabled` TINYINT NOT NULL DEFAULT 1 COMMENT '是否启用 0-禁用 1-启用',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标志 0-未删除 1-已删除',
+  `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+  `create_by` BIGINT DEFAULT NULL COMMENT '创建人',
+  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` BIGINT DEFAULT NULL COMMENT '更新人',
+  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  INDEX `idx_ai_rule_keyword` (`keyword`),
+  INDEX `idx_ai_rule_account` (`account_set_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='AI记账规则库';
+
+-- AI识别反馈记录(用户实际选择 vs AI建议,用于闭环学习)
+CREATE TABLE IF NOT EXISTS `ai_recognition_feedback` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `account_set_id` BIGINT NOT NULL COMMENT '账套ID',
+  `original_description` VARCHAR(500) NOT NULL COMMENT '原始业务描述',
+  `ai_suggested_debit_code` VARCHAR(20) DEFAULT NULL COMMENT 'AI建议借方科目编码',
+  `ai_suggested_credit_code` VARCHAR(20) DEFAULT NULL COMMENT 'AI建议贷方科目编码',
+  `actual_debit_code` VARCHAR(20) NOT NULL COMMENT '用户实际选择借方科目编码',
+  `actual_credit_code` VARCHAR(20) NOT NULL COMMENT '用户实际选择贷方科目编码',
+  `actual_summary` VARCHAR(200) DEFAULT NULL COMMENT '用户实际摘要',
+  `accepted` TINYINT NOT NULL DEFAULT 0 COMMENT '是否采纳AI建议 0-未采纳 1-部分采纳 2-完全采纳',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标志 0-未删除 1-已删除',
+  `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+  `create_by` BIGINT DEFAULT NULL COMMENT '创建人',
+  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` BIGINT DEFAULT NULL COMMENT '更新人',
+  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  INDEX `idx_ai_feedback_desc` (`original_description`),
+  INDEX `idx_ai_feedback_account` (`account_set_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='AI识别反馈记录';
+
+-- 用户账套偏好(收藏/最近访问/排序,用于顶部账套切换器记忆最近访问+收藏置顶)
+CREATE TABLE IF NOT EXISTS `user_account_set_preference` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `user_id` BIGINT NOT NULL COMMENT '用户ID',
+  `account_set_id` BIGINT NOT NULL COMMENT '账套ID',
+  `is_favorite` TINYINT NOT NULL DEFAULT 0 COMMENT '是否收藏 0-否 1-是',
+  `last_accessed_at` DATETIME DEFAULT NULL COMMENT '最近访问时间',
+  `access_count` INT NOT NULL DEFAULT 0 COMMENT '访问次数',
+  `sort_order` INT NOT NULL DEFAULT 0 COMMENT '排序',
+  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_account` (`user_id`, `account_set_id`),
+  INDEX `idx_user_pref` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='用户账套偏好';
+
+-- ============================================
+-- 36. 税负预警基准模块
+-- ============================================
+
+-- 行业税负率基准表
+CREATE TABLE IF NOT EXISTS `tax_benchmark` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `industry_code` VARCHAR(20) NOT NULL COMMENT '行业代码',
+  `industry_name` VARCHAR(100) NOT NULL COMMENT '行业名称',
+  `vat_benchmark_rate` DECIMAL(5,4) NOT NULL DEFAULT 0.0300 COMMENT '增值税税负率基准(0.0300 = 3.00%)',
+  `vat_warning_low` DECIMAL(5,4) NOT NULL DEFAULT 0.0200 COMMENT '增值税税负率下限预警',
+  `vat_warning_high` DECIMAL(5,4) NOT NULL DEFAULT 0.0450 COMMENT '增值税税负率上限预警',
+  `eit_benchmark_rate` DECIMAL(5,4) NOT NULL DEFAULT 0.0200 COMMENT '企业所得税税负率基准',
+  `eit_warning_low` DECIMAL(5,4) NOT NULL DEFAULT 0.0120 COMMENT '企业所得税税负率下限预警',
+  `eit_warning_high` DECIMAL(5,4) NOT NULL DEFAULT 0.0350 COMMENT '企业所得税税负率上限预警',
+  `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标志 0-未删除 1-已删除',
+  `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+  `create_by` BIGINT DEFAULT NULL COMMENT '创建人',
+  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_by` BIGINT DEFAULT NULL COMMENT '更新人',
+  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_industry_code` (`industry_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='行业税负率基准表';

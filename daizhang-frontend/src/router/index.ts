@@ -47,6 +47,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '新增凭证' }
       },
       {
+        path: 'voucher/template',
+        name: 'VoucherTemplate',
+        component: () => import('@/views/voucher/VoucherTemplateList.vue'),
+        meta: { title: '凭证模板', icon: 'Document', roles: ['ADMIN', 'ACCOUNTANT'] }
+      },
+      {
         path: 'voucher/:id',
         name: 'VoucherDetail',
         component: () => import('@/views/voucher/VoucherDetail.vue'),
@@ -83,6 +89,18 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '利润表' }
       },
       {
+        path: 'report/cash-flow',
+        name: 'CashFlowStatement',
+        component: () => import('@/views/report/CashFlowStatement.vue'),
+        meta: { title: '现金流量表' }
+      },
+      {
+        path: 'report/aging',
+        name: 'AgingAnalysis',
+        component: () => import('@/views/report/AgingAnalysis.vue'),
+        meta: { title: '账龄分析', icon: 'Timer' }
+      },
+      {
         path: 'system/user',
         name: 'UserList',
         component: () => import('@/views/system/user/UserList.vue'),
@@ -113,6 +131,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '会计期间管理' }
       },
       {
+        path: 'period/close-wizard',
+        name: 'PeriodCloseWizard',
+        component: () => import('@/views/period/PeriodCloseWizard.vue'),
+        meta: { title: '期末结账向导', icon: 'MagicStick', roles: ['ADMIN', 'ACCOUNTANT'] }
+      },
+      {
         path: 'tax/declaration',
         name: 'TaxDeclarationList',
         component: () => import('@/views/tax/TaxDeclarationList.vue'),
@@ -123,6 +147,12 @@ const routes: RouteRecordRaw[] = [
         name: 'TaxCalculation',
         component: () => import('@/views/tax/TaxCalculation.vue'),
         meta: { title: '税务计算' }
+      },
+      {
+        path: 'tax/warning',
+        name: 'TaxWarning',
+        component: () => import('@/views/tax/TaxWarningDashboard.vue'),
+        meta: { title: '税负预警', icon: 'WarningFilled' }
       },
       {
         path: 'document',
@@ -147,6 +177,12 @@ const routes: RouteRecordRaw[] = [
         name: 'BankReconciliation',
         component: () => import('@/views/bank/BankReconciliation.vue'),
         meta: { title: '银行对账' }
+      },
+      {
+        path: 'bank/smart-reconciliation',
+        name: 'SmartReconciliation',
+        component: () => import('@/views/bank/SmartReconciliation.vue'),
+        meta: { title: '智能对账', icon: 'Connection' }
       },
       {
         path: 'bank/balance-adjustment',
@@ -201,6 +237,12 @@ const routes: RouteRecordRaw[] = [
         name: 'CustomerDetail',
         component: () => import('@/views/customer/CustomerDetail.vue'),
         meta: { title: '客户详情' }
+      },
+      {
+        path: 'batch',
+        name: 'BatchOperation',
+        component: () => import('@/views/batch/BatchOperation.vue'),
+        meta: { title: '批量操作', icon: 'Operation', roles: ['ADMIN', 'ACCOUNTANT'] }
       }
     ]
   },

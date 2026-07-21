@@ -70,6 +70,17 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- Flyway 数据库迁移管理 (P3.1) -->
+        <!-- Spring Boot 3.2.1 自动管理版本;flyway-mysql 提供 MySQL/H2(MySQL模式) 方言支持 -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-mysql</artifactId>
+        </dependency>
+
         <!-- Druid -->
         <dependency>
             <groupId>com.alibaba</groupId>

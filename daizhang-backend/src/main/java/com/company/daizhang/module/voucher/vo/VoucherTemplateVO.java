@@ -16,22 +16,38 @@ public class VoucherTemplateVO {
 
     private Long accountSetId;
 
+    /**
+     * 模板编码
+     */
+    private String templateCode;
+
+    /**
+     * 模板名称
+     */
     private String templateName;
 
+    /**
+     * 模板分类: 工资/折旧/社保/税金/结转/其他
+     */
     private String templateCategory;
 
+    /**
+     * 凭证摘要
+     */
     private String summary;
 
-    private Long voucherWordId;
-
-    private Integer attachmentCount;
-
+    /**
+     * 备注
+     */
     private String remark;
 
     private Long createBy;
 
     private LocalDateTime createTime;
 
+    /**
+     * 分录明细列表(由 detail_json 字段反序列化得到)
+     */
     private List<VoucherTemplateDetailVO> details;
 
     /**
@@ -40,24 +56,29 @@ public class VoucherTemplateVO {
     @Data
     public static class VoucherTemplateDetailVO {
 
-        private Long id;
-
-        private Long templateId;
-
-        private Integer lineNo;
-
-        private String summary;
-
-        private Long subjectId;
-
+        /**
+         * 科目编码
+         */
         private String subjectCode;
 
+        /**
+         * 科目名称
+         */
         private String subjectName;
 
-        private BigDecimal debit;
+        /**
+         * 借方金额
+         */
+        private BigDecimal debitAmount;
 
-        private BigDecimal credit;
+        /**
+         * 贷方金额
+         */
+        private BigDecimal creditAmount;
 
-        private Integer sortOrder;
+        /**
+         * 摘要
+         */
+        private String summary;
     }
 }

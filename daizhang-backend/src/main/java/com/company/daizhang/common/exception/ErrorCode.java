@@ -67,6 +67,9 @@ public enum ErrorCode {
     VOUCHER_ALREADY_CANCELED(3023, "凭证已作废"),
     VOUCHER_TEMPLATE_NOT_FOUND(3031, "凭证模板不存在"),
     VOUCHER_TEMPLATE_DETAIL_EMPTY(3032, "凭证模板明细不能为空"),
+    VOUCHER_TEMPLATE_CODE_DUPLICATE(3033, "模板编码已存在"),
+    ABSTRACT_NOT_FOUND(3034, "常用摘要不存在"),
+    ABSTRACT_TEXT_BLANK(3035, "摘要文本不能为空"),
 
     // 票据相关 3101-3199
     DOCUMENT_NOT_FOUND(3101, "票据不存在"),

@@ -2,6 +2,7 @@ package com.company.daizhang.module.period.controller;
 
 import com.company.daizhang.common.annotation.OperationLog;
 import com.company.daizhang.common.annotation.RequireAccountSetAccess;
+import com.company.daizhang.common.annotation.SensitiveOperation;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.period.dto.TrialBalanceRequest;
 import com.company.daizhang.module.period.service.PeriodService;
@@ -40,6 +41,7 @@ public class PeriodController {
     @PostMapping("/close")
     @OperationLog("期末结账")
     @RequireAccountSetAccess
+    @SensitiveOperation("期末结账")
     public Result<ClosePeriodResultVO> close(@RequestParam Long accountSetId,
                                               @RequestParam int year,
                                               @RequestParam int month) {

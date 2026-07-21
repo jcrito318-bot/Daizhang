@@ -2,6 +2,7 @@ package com.company.daizhang.module.system.controller;
 
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.company.daizhang.common.annotation.SensitiveOperation;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.system.dto.UserCreateRequest;
@@ -79,6 +80,7 @@ public class SysUserController {
     @Operation(summary = "删除用户")
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
+    @SensitiveOperation("删除用户")
     public Result<Void> delete(@PathVariable Long id) {
         userService.deleteUser(id);
         return Result.success();

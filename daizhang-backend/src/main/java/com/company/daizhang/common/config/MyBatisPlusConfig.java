@@ -9,6 +9,10 @@ import org.springframework.context.annotation.Configuration;
 
 /**
  * MyBatis Plus配置
+ * <p>
+ * P4.1: 加密 TypeHandler {@code EncryptedStringTypeHandler} 通过自身 {@code @Component}
+ * 注入 Spring 容器,Spring 会调用其 {@code setEncryptor} 方法将 {@link com.company.daizhang.common.crypto.util.AesGcmEncryptor}
+ * 注入到静态字段,供 MyBatis-Plus 通过反射创建的 TypeHandler 实例使用。
  */
 @Configuration
 public class MyBatisPlusConfig {

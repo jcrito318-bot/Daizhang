@@ -38,14 +38,25 @@ spring:
         # 仅允许本机访问，防止远程未授权访问数据库控制台
         web-allow-others: false
 
-  # SQL 初始化 - 每次启动执行(schema用IF NOT EXISTS,data用MERGE INTO,均幂等)
-  # 注:Druid连接池会掩盖H2的嵌入式数据库检测,mode须用always而非embedded
+  # SQL 初始化 - 已由 Flyway 接管 (P3.1)
+  # 原有 schema-h2.sql / data-h2.sql 保留作为参考,但不再由 Spring SQL init 执行
+  # Flyway 迁移文件位于 classpath:db/migration/V*.sql
   sql:
     init:
-      mode: always
-      schema-locations: classpath:db/schema-h2.sql
-      data-locations: classpath:db/data-h2.sql
-      continue-on-error: false
+      mode: never
+
+  # Flyway 数据库迁移配置 (P3.1)
+  # - baseline-on-migrate: 已有数据库(无 flyway_schema_history 表)自动基线化,不报错
+  # - baseline-version: 基线版本号,0 表示从 V1 开始全部执行(空库场景)
+  # - validate-on-migrate: 宽松模式,允许已有 schema 与迁移文件不完全一致
+  # - out-of-order: 严格按版本号顺序执行,不允许乱序
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    baseline-version: 0
+    validate-on-migrate: false
+    out-of-order: false
 
   # Jackson配置
   jackson:
@@ -102,6 +113,35 @@ app:
     # secure:生产环境(HTTPS)应设为 true,本地开发(http)可设为 false
     # 浏览器对 localhost 会豁免 Secure,但显式关闭可避免开发环境的 Cookie 丢失问题
     secure: ${COOKIE_SECURE:false}
+  # 数据备份配置 (P3.3)
+  backup:
+    # 备份文件存储目录
+    directory: ${BACKUP_DIR:./backups}
+    # 是否启用定时自动备份
+    auto-enabled: ${BACKUP_AUTO_ENABLED:true}
+    # 定时备份 cron 表达式(默认每日凌晨 2 点)
+    cron: ${BACKUP_CRON:0 0 2 * * ?}
+    # 最多保留的备份份数(超出则清理最旧的)
+    max-keep: ${BACKUP_MAX_KEEP:30}
+  # P4.1 敏感字段 AES-GCM 加密配置
+  # secret-key:32 字节(256 位)的 base64 编码密钥,必须通过环境变量 CRYPTO_SECRET_KEY 注入
+  # 启动时若 enabled=true 且 secret-key 为空,启动失败
+  # 生成命令:openssl rand -base64 32
+  crypto:
+    enabled: ${CRYPTO_ENABLED:true}
+    secret-key: ${CRYPTO_SECRET_KEY:}
+  # P4.2 / P4.3 安全策略配置
+  security:
+    # 2FA 临时 token 有效期(秒),仅用于登录后 2FA 验证阶段
+    two-factor-temp-token-expiration: 300
+    # 登录锁定阈值(连续失败次数)
+    login-fail-threshold: ${LOGIN_FAIL_THRESHOLD:5}
+    # 锁定时长(分钟)
+    lock-duration-minutes: ${LOCK_DURATION_MINUTES:15}
+    # 密码过期天数(超过则强制改密,0 表示不强制)
+    password-expire-days: ${PASSWORD_EXPIRE_DAYS:90}
+    # 密码历史校验深度(不能与最近 N 次密码相同)
+    password-history-depth: ${PASSWORD_HISTORY_DEPTH:5}
 
 # Knife4j配置
 # B-021 修复:默认关闭,生产环境不暴露 API 文档。

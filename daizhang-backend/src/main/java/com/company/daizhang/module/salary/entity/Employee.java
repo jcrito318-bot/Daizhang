@@ -3,6 +3,8 @@ package com.company.daizhang.module.salary.entity;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.company.daizhang.common.BaseEntity;
+import com.company.daizhang.common.crypto.annotation.EncryptedField;
+import com.company.daizhang.common.crypto.mybatis.EncryptedStringTypeHandler;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -14,7 +16,7 @@ import java.time.LocalDate;
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
-@TableName("sal_employee")
+@TableName(value = "sal_employee", autoResultMap = true)
 public class Employee extends BaseEntity {
 
     /**
@@ -49,8 +51,10 @@ public class Employee extends BaseEntity {
     private String position;
 
     /**
-     * 身份证号
+     * 身份证号 (P4.1: AES-GCM 加密存储,读库自动解密)
      */
+    @TableField(typeHandler = EncryptedStringTypeHandler.class)
+    @EncryptedField("员工身份证号")
     private String idCard;
 
     /**
@@ -64,8 +68,10 @@ public class Employee extends BaseEntity {
     private String bankName;
 
     /**
-     * 银行账号
+     * 银行账号 (P4.1: AES-GCM 加密存储,读库自动解密)
      */
+    @TableField(typeHandler = EncryptedStringTypeHandler.class)
+    @EncryptedField("员工银行账号")
     private String bankAccount;
 
     /**

@@ -5,6 +5,9 @@
         <div class="card-header">
           <span>{{ isEdit ? '编辑凭证' : '新增凭证' }}</span>
           <div>
+            <el-button v-if="!isEdit" type="success" @click="handleOpenTemplateDialog">
+              <el-icon><DocumentCopy /></el-icon>从模板创建
+            </el-button>
             <el-button @click="handleBack">返回</el-button>
             <el-button type="primary" :loading="submitLoading" @click="handleSubmit">保存</el-button>
           </div>
@@ -60,7 +63,23 @@
         </el-table-column>
         <el-table-column label="摘要" min-width="200">
           <template #default="{ row }">
-            <el-input v-model="row.summary" placeholder="请输入摘要" :class="{ 'field-error': detailTouched && !row.summary }" @blur="markDetailTouched" />
+            <el-autocomplete
+              v-model="row.summary"
+              :fetch-suggestions="fetchAbstractSuggestions"
+              placeholder="请输入摘要(支持常用摘要搜索)"
+              :class="{ 'field-error': detailTouched && !row.summary }"
+              clearable
+              style="width: 100%"
+              @blur="markDetailTouched"
+              @select="(item: AbstractSuggestionItem) => handleAbstractSelect(row, item)"
+            >
+              <template #default="{ item }">
+                <div class="abstract-suggestion">
+                  <span class="abstract-text">{{ item.value }}</span>
+                  <span v-if="item.useCount > 0" class="abstract-count">使用 {{ item.useCount }} 次</span>
+                </div>
+              </template>
+            </el-autocomplete>
             <div v-if="detailTouched && !row.summary" class="inline-error">请输入摘要</div>
           </template>
         </el-table-column>
@@ -121,6 +140,39 @@
         </el-button>
       </div>
     </el-card>
+
+    <!-- 模板选择对话框 -->
+    <el-dialog
+      v-model="templateDialogVisible"
+      title="从模板创建"
+      width="720px"
+      :close-on-click-modal="false"
+    >
+      <el-table
+        :data="templateList"
+        v-loading="templateLoading"
+        border
+        stripe
+        highlight-current-row
+        @current-change="handleTemplateCurrentChange"
+      >
+        <el-table-column prop="templateCode" label="编码" width="140" />
+        <el-table-column prop="templateName" label="名称" min-width="180" />
+        <el-table-column label="分类" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.templateCategory" type="info">{{ row.templateCategory }}</el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="summary" label="摘要" min-width="200" show-overflow-tooltip />
+      </el-table>
+      <template #footer>
+        <el-button @click="templateDialogVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!selectedTemplateId" @click="handleApplyTemplate">
+          应用模板
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -128,11 +180,25 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { voucherApi } from '@/api/voucher'
+import { DocumentCopy, Plus } from '@element-plus/icons-vue'
+import { voucherApi, templateApi, abstractApi } from '@/api/voucher'
 import { subjectApi } from '@/api/subject'
 import { useAppStore } from '@/stores/app'
-import type { VoucherCreateRequest, VoucherDetailRequest, VoucherWordVO } from '@/types/voucher'
+import type {
+  VoucherCreateRequest,
+  VoucherDetailRequest,
+  VoucherWordVO,
+  VoucherTemplateVO,
+  AbstractLibraryVO
+} from '@/types/voucher'
 import type { SubjectVO } from '@/types/subject'
+
+/**
+ * el-autocomplete 摘要建议项(继承 AbstractLibraryVO 并附加 value 字段供 autocomplete 显示)
+ */
+interface AbstractSuggestionItem extends AbstractLibraryVO {
+  value: string
+}
 
 const route = useRoute()
 const router = useRouter()
@@ -148,6 +214,17 @@ const subjectTree = ref<SubjectVO[]>([])
 const detailTouched = ref(false)
 // 表单是否有未保存的改动(用于离开提示)
 const formDirty = ref(false)
+
+// 凭证模板选择对话框状态
+const templateDialogVisible = ref(false)
+const templateList = ref<VoucherTemplateVO[]>([])
+const templateLoading = ref(false)
+const selectedTemplateId = ref<number>(0)
+
+// 常用摘要追踪:记录"摘要文本 -> 摘要库ID"的映射,
+// 用于凭证保存时调用 incrementUse 累计使用次数。
+// key 为摘要文本,value 为摘要库 ID。手动输入(非从下拉选择)的摘要不会出现在此映射中。
+const abstractIdMap = new Map<string, number>()
 
 const flatSubjects = computed(() => {
   const result: SubjectVO[] = []
@@ -229,6 +306,162 @@ function handleRemoveRow(index: number) {
   form.details.splice(index, 1)
 }
 
+// ==================== 凭证模板 ====================
+
+/**
+ * 打开"从模板创建"对话框,加载当前账套的模板列表
+ */
+async function handleOpenTemplateDialog() {
+  const accountSetId = appStore.currentAccountSetId || 0
+  if (!accountSetId) {
+    ElMessage.warning('请先选择账套')
+    return
+  }
+  templateDialogVisible.value = true
+  selectedTemplateId.value = 0
+  templateLoading.value = true
+  try {
+    const res = await templateApi.getList(accountSetId)
+    templateList.value = res.data
+    if (templateList.value.length === 0) {
+      ElMessage.info('当前账套暂无凭证模板,请先在"凭证模板"页面创建')
+    }
+  } catch {
+    // handled by interceptor
+  } finally {
+    templateLoading.value = false
+  }
+}
+
+/**
+ * 模板列表行选中变化时记录选中ID
+ */
+function handleTemplateCurrentChange(row: VoucherTemplateVO | null) {
+  selectedTemplateId.value = row ? row.id : 0
+}
+
+/**
+ * 应用选中的模板:调用 apply 接口获取模板明细,
+ * 根据 subjectCode 在已加载的科目树中解析 subjectId,填充表单。
+ */
+async function handleApplyTemplate() {
+  if (!selectedTemplateId.value) {
+    ElMessage.warning('请先选择一个模板')
+    return
+  }
+  try {
+    const res = await templateApi.apply(selectedTemplateId.value)
+    const template = res.data
+    if (!template.details || template.details.length === 0) {
+      ElMessage.warning('该模板没有分录明细,无法应用')
+      return
+    }
+
+    // 根据 subjectCode 解析 subjectId(从已加载的科目树中查找)
+    const unresolvedCodes: string[] = []
+    const newDetails: VoucherDetailRequest[] = template.details.map((d, idx) => {
+      const subject = flatSubjects.value.find(s => s.subjectCode === d.subjectCode)
+      if (!subject) {
+        unresolvedCodes.push(d.subjectCode)
+      }
+      // 同步追踪摘要(若模板摘要与摘要库中某条文本一致,后续保存时会自动累计使用次数;
+      // 这里不做强匹配,以用户在 autocomplete 中的选择为准)
+      return {
+        lineNo: idx + 1,
+        summary: d.summary || template.summary || '',
+        subjectId: subject ? subject.id : 0,
+        debit: d.debitAmount || 0,
+        credit: d.creditAmount || 0
+      }
+    })
+
+    form.details = newDetails
+    // 若模板有摘要,同时填充到分录摘要(已在上方 map 中处理)
+    formDirty.value = true
+    templateDialogVisible.value = false
+
+    if (unresolvedCodes.length > 0) {
+      ElMessage.warning(`已应用模板,但以下科目编码在当前账套中不存在,请手动选择科目: ${unresolvedCodes.join(', ')}`)
+    } else {
+      ElMessage.success('已应用模板,请核对并补充日期、凭证字后保存')
+    }
+  } catch {
+    // handled by interceptor
+  }
+}
+
+/**
+ * 从 URL query 参数加载模板(由凭证模板页"应用"按钮跳转过来时携带 templateId)
+ */
+async function loadTemplateFromQuery(templateId: number) {
+  try {
+    const res = await templateApi.apply(templateId)
+    const template = res.data
+    if (!template.details || template.details.length === 0) {
+      ElMessage.warning('模板没有分录明细,无法应用')
+      return
+    }
+    const unresolvedCodes: string[] = []
+    // 等待科目树加载后再解析 subjectId(由调用方保证 subjectTree 已加载)
+    const newDetails: VoucherDetailRequest[] = template.details.map((d, idx) => {
+      const subject = flatSubjects.value.find(s => s.subjectCode === d.subjectCode)
+      if (!subject) {
+        unresolvedCodes.push(d.subjectCode)
+      }
+      return {
+        lineNo: idx + 1,
+        summary: d.summary || template.summary || '',
+        subjectId: subject ? subject.id : 0,
+        debit: d.debitAmount || 0,
+        credit: d.creditAmount || 0
+      }
+    })
+    form.details = newDetails
+    formDirty.value = true
+    if (unresolvedCodes.length > 0) {
+      ElMessage.warning(`已应用模板,但以下科目编码在当前账套中不存在,请手动选择科目: ${unresolvedCodes.join(', ')}`)
+    } else {
+      ElMessage.success('已应用模板,请核对并补充日期、凭证字后保存')
+    }
+  } catch {
+    // handled by interceptor
+  }
+}
+
+// ==================== 常用摘要库 ====================
+
+/**
+ * el-autocomplete fetch-suggestions 回调:模糊搜索常用摘要,按使用次数 DESC 排序
+ */
+async function fetchAbstractSuggestions(queryString: string, cb: (items: AbstractSuggestionItem[]) => void) {
+  const accountSetId = appStore.currentAccountSetId || 0
+  if (!accountSetId) {
+    cb([])
+    return
+  }
+  try {
+    const keyword = queryString || ''
+    const res = await abstractApi.search(accountSetId, keyword, 10)
+    const items: AbstractSuggestionItem[] = res.data.map(item => ({
+      ...item,
+      value: item.abstractText
+    }))
+    cb(items)
+  } catch {
+    cb([])
+  }
+}
+
+/**
+ * 用户从摘要下拉中选择一条时,记录摘要文本 -> 摘要库ID 的映射,
+ * 用于凭证保存时调用 incrementUse 累计使用次数
+ */
+function handleAbstractSelect(_row: VoucherDetailRequest, item: AbstractSuggestionItem) {
+  if (item.id) {
+    abstractIdMap.set(item.abstractText, item.id)
+  }
+}
+
 function handleBack() {
   router.push('/voucher')
 }
@@ -284,6 +517,23 @@ async function handleSubmit() {
         await voucherApi.create(submitData)
         ElMessage.success('创建成功')
       }
+
+      // 凭证保存成功后,对使用了摘要库的摘要累计使用次数(异步执行,不阻塞跳转)
+      // 仅对从下拉选择的摘要(存在于 abstractIdMap 中)调用 incrementUse,
+      // 同一摘要文本只计一次。
+      const usedAbstractIds = new Set<number>()
+      for (const detail of validDetails) {
+        const abstractId = abstractIdMap.get(detail.summary)
+        if (abstractId) {
+          usedAbstractIds.add(abstractId)
+        }
+      }
+      usedAbstractIds.forEach(id => {
+        abstractApi.incrementUse(id).catch(() => {
+          // 使用次数累计失败不影响主流程,静默忽略
+        })
+      })
+
       formDirty.value = false
       router.push('/voucher')
     } catch {
@@ -365,6 +615,13 @@ onMounted(async () => {
       // handled by interceptor
     }
   }
+
+  // 从 URL query 加载模板(由凭证模板页"应用"按钮跳转过来时携带 templateId)
+  // 必须在科目树加载完成后执行,以便根据 subjectCode 解析 subjectId
+  const templateId = route.query.templateId as string
+  if (templateId) {
+    await loadTemplateFromQuery(Number(templateId))
+  }
 })
 </script>
 
@@ -426,6 +683,23 @@ onMounted(async () => {
   .el-input__wrapper,
   .el-select__wrapper {
     box-shadow: 0 0 0 1px #f56c6c inset !important;
+  }
+}
+
+// 摘要下拉建议项样式
+.abstract-suggestion {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  .abstract-text {
+    flex: 1;
+  }
+
+  .abstract-count {
+    font-size: 12px;
+    color: #909399;
+    margin-left: 8px;
   }
 }
 </style>

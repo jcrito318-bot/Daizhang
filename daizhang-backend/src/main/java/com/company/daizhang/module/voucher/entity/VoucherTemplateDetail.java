@@ -1,44 +1,22 @@
 package com.company.daizhang.module.voucher.entity;
 
-import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableId;
-import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
 
 /**
- * 凭证模板明细实体
+ * 凭证模板明细 POJO
+ * <p>
+ * 不映射数据库表,作为 {@link VoucherTemplate#getDetailJson()} 字段的 JSON
+ * 序列化/反序列化目标类型。由 Service 层使用 Jackson 与 JSON 字符串互转。
+ * <p>
+ * JSON 字段对应: subjectCode / subjectName / debitAmount / creditAmount / summary
  */
 @Data
-@TableName("acc_voucher_template_detail")
 public class VoucherTemplateDetail implements Serializable {
 
     private static final long serialVersionUID = 1L;
-
-    @TableId(type = IdType.AUTO)
-    private Long id;
-
-    /**
-     * 模板ID
-     */
-    private Long templateId;
-
-    /**
-     * 行号
-     */
-    private Integer lineNo;
-
-    /**
-     * 摘要
-     */
-    private String summary;
-
-    /**
-     * 科目ID
-     */
-    private Long subjectId;
 
     /**
      * 科目编码
@@ -53,15 +31,15 @@ public class VoucherTemplateDetail implements Serializable {
     /**
      * 借方金额
      */
-    private BigDecimal debit;
+    private BigDecimal debitAmount;
 
     /**
      * 贷方金额
      */
-    private BigDecimal credit;
+    private BigDecimal creditAmount;
 
     /**
-     * 排序号
+     * 摘要
      */
-    private Integer sortOrder;
+    private String summary;
 }

@@ -1,6 +1,7 @@
 package com.company.daizhang.module.voucher.controller;
 
 import com.company.daizhang.common.annotation.RequireAccountSetAccess;
+import com.company.daizhang.common.annotation.SensitiveOperation;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.common.vo.ImportResultVO;
@@ -97,6 +98,7 @@ public class VoucherController {
     @Operation(summary = "批量审核凭证")
     @PostMapping("/batch-audit")
     @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
+    @SensitiveOperation("批量审核凭证")
     public Result<Integer> batchAudit(@RequestBody java.util.List<Long> ids) {
         int success = voucherService.batchAuditVoucher(ids);
         return Result.success(success);

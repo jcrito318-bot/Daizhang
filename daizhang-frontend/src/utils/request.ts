@@ -1,8 +1,33 @@
 import axios from 'axios'
-import type { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse } from 'axios'
+import type { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
 import type { Result } from '@/types/common'
 import { useUserStore } from '@/stores/user'
+
+/**
+ * 敏感操作二次确认请求头名称 (P3.4)。
+ * 后端 SensitiveOperationAspect 检查该头是否为 "true",否则拒绝执行。
+ */
+export const SENSITIVE_CONFIRM_HEADER = 'X-Confirm'
+
+/**
+ * 扩展 axios 请求配置,支持 `sensitive` 标记 (P3.4)。
+ *
+ * 调用方在发起敏感操作请求时,通过 `withSensitive()` 包装 config,
+ * 请求拦截器会自动注入 `X-Confirm: true` 头,后端切面据此放行。
+ *
+ * 这样设计的目的是:
+ * 1. 不破坏既有 API 契约(默认不带 sensitive 标记,行为不变)
+ * 2. 显式标记敏感操作,便于代码审查与审计
+ * 3. 前端 UI 层在调用前应通过 ElMessageBox.confirm 弹窗确认,
+ *    用户确认后再用 withSensitive() 发起请求
+ */
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    /** 标记该请求为敏感操作,拦截器会自动添加 X-Confirm: true 头 */
+    sensitive?: boolean
+  }
+}
 
 const service: AxiosInstance = axios.create({
   baseURL: '/api',
@@ -38,6 +63,12 @@ service.interceptors.request.use(
     const userStore = useUserStore()
     if (userStore.token && !config.headers.Authorization) {
       config.headers.Authorization = `Bearer ${userStore.token}`
+    }
+    // P3.4:敏感操作二次确认
+    // 调用方通过 withSensitive() 标记 config.sensitive=true,
+    // 拦截器自动注入 X-Confirm: true 头,后端 SensitiveOperationAspect 据此放行。
+    if (config.sensitive) {
+      config.headers[SENSITIVE_CONFIRM_HEADER] = 'true'
     }
     return config
   },
@@ -114,5 +145,30 @@ service.interceptors.response.use(
     return Promise.reject(error)
   }
 )
+
+/**
+ * 标记一个 axios 请求配置为敏感操作 (P3.4)。
+ *
+ * 用法:
+ * ```ts
+ * // 删除用户(敏感操作)
+ * request.delete(`/system/user/${id}`, withSensitive())
+ *
+ * // 带 params 的敏感操作
+ * request.post('/period/close', null, withSensitive({ params: { accountSetId, year, month } }))
+ *
+ * // 带 body 的敏感操作
+ * request.post(`/system/backup/${id}/restore`, withSensitive({ data: { backupId, confirm: true } }))
+ * ```
+ *
+ * 拦截器会检测 config.sensitive 并自动注入 `X-Confirm: true` 头,
+ * 后端 SensitiveOperationAspect 据此放行;未带该头的敏感操作请求会被后端拒绝(返回 400)。
+ *
+ * 调用方应在调用前通过 ElMessageBox.confirm 弹窗让用户二次确认,
+ * 用户确认后再用 withSensitive() 发起请求。
+ */
+export function withSensitive<T extends AxiosRequestConfig>(config?: T): T & { sensitive: true } {
+  return { ...(config as object), sensitive: true } as T & { sensitive: true }
+}
 
 export default service

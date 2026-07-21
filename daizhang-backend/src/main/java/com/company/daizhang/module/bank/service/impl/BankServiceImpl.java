@@ -23,6 +23,7 @@ import com.company.daizhang.module.bank.mapper.BankReconciliationMapper;
 import com.company.daizhang.module.bank.mapper.BankTransactionMapper;
 import com.company.daizhang.module.bank.service.BankService;
 import com.company.daizhang.module.bank.service.BankVoucherService;
+import com.company.daizhang.module.bank.service.SmartReconciliationService;
 import com.company.daizhang.module.bank.vo.BankReconciliationVO;
 import com.company.daizhang.module.bank.vo.BankTransactionVO;
 import com.company.daizhang.module.bank.vo.UnmatchedItemVO;
@@ -67,6 +68,11 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
     private final AccountSetAccessService accountSetAccessService;
     private final AccountPeriodMapper accountPeriodMapper;
     private final BankAccountMapper bankAccountMapper;
+    /**
+     * 智能对账增强服务:用于手动匹配后自动学习历史模式。
+     * 注:SmartReconciliationService 不反向依赖 BankService,无循环依赖。
+     */
+    private final SmartReconciliationService smartReconciliationService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -329,6 +335,9 @@ public class BankServiceImpl extends ServiceImpl<BankTransactionMapper, BankTran
             transaction.setMatchedStatus(1);
             transaction.setVoucherId(request.getVoucherId());
             this.updateById(transaction);
+            // 智能对账增强:每次手动匹配后自动学习历史模式(更新或插入 bank_match_history),
+            // 后续智能匹配时同对方+相似金额可获 25 分加分
+            smartReconciliationService.learnFromMatch(transaction.getId(), request.getVoucherId());
         }
     }
 

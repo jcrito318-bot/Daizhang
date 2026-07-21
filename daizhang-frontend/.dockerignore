@@ -1,0 +1,25 @@
+# 依赖与构建产物
+node_modules/
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 日志
+*.log
+
+# OS 文件
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# 测试相关 (不影响构建,减小上下文)
+src/**/__tests__/
+src/**/*.spec.ts
+src/**/*.bench.ts
+coverage/

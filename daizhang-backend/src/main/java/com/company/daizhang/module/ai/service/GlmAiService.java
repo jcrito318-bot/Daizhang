@@ -1,8 +1,15 @@
 package com.company.daizhang.module.ai.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.module.ai.config.AiConfig;
+import com.company.daizhang.module.ai.dto.AccountingSuggestionResponse;
+import com.company.daizhang.module.ai.entity.AiAccountingRule;
+import com.company.daizhang.module.ai.entity.AiRecognitionFeedback;
+import com.company.daizhang.module.ai.service.RecognitionFeedbackService;
+import com.company.daizhang.module.subject.entity.Subject;
+import com.company.daizhang.module.subject.service.SubjectService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -13,11 +20,13 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * GLM AI服务类
@@ -29,6 +38,18 @@ public class GlmAiService {
 
     private final AiConfig aiConfig;
     private final ObjectMapper objectMapper;
+    private final AccountingRuleService accountingRuleService;
+    private final RecognitionFeedbackService recognitionFeedbackService;
+    private final SubjectService subjectService;
+
+    /** 注入 prompt 的科目数量上限(避免 prompt 过长导致 token 超限/费用过高) */
+    private static final int MAX_SUBJECTS_IN_PROMPT = 100;
+    /** few-shot 示例数量 */
+    private static final int FEW_SHOT_EXAMPLES_COUNT = 5;
+    /** 建议来源:规则命中 */
+    private static final String SOURCE_RULE = "rule";
+    /** 建议来源:AI 推理 */
+    private static final String SOURCE_AI = "ai";
 
     private final OkHttpClient httpClient = new OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
@@ -334,6 +355,299 @@ public class GlmAiService {
 
         log.info("智能记账建议生成完成");
         return response;
+    }
+
+    /**
+     * 增强版智能记账建议(规则优先 + few-shot + 科目上下文)
+     * <p>
+     * 三级降级策略,确保既省钱又稳定:
+     * 1. 规则库匹配:命中直接返回(source=rule, confidence=1.0),不调用 AI
+     * 2. AI 推理:未命中规则时,注入当前账套科目体系 + 历史成功反馈 few-shot,调用 GLM
+     * 3. 科目校验:AI 返回的科目编码必须在可用科目列表中,否则回退到最接近的科目或返回错误
+     * <p>
+     * 与旧版 {@link #suggestAccounting(String, Double)} 区别:
+     * - 旧版返回原始 JSON 字符串,新版返回结构化 {@link AccountingSuggestionResponse}
+     * - 新版支持规则库优先匹配,省时省钱
+     * - 新版注入科目体系上下文 + few-shot,识别率更高
+     *
+     * @param description       业务描述
+     * @param amount            金额(元,允许为 null)
+     * @param accountSetId      账套ID(用于匹配账套级规则与注入科目体系)
+     * @param availableSubjects 可用科目列表(允许为 null,为 null 时自动按 accountSetId 查询)
+     * @return 结构化记账建议
+     */
+    public AccountingSuggestionResponse suggestAccountingWithContext(String description, Double amount,
+                                                                     Long accountSetId,
+                                                                     List<Subject> availableSubjects) {
+        if (description == null || description.trim().isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "业务描述不能为空");
+        }
+        if (accountSetId == null) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "账套ID不能为空");
+        }
+
+        // Step 1: 规则库匹配(优先于 AI,命中直接返回,不调用 AI)
+        AiAccountingRule matchedRule = accountingRuleService.matchRule(accountSetId, description);
+        if (matchedRule != null) {
+            log.info("规则命中,跳过AI调用:accountSetId={},keyword={},ruleId={}",
+                    accountSetId, matchedRule.getKeyword(), matchedRule.getId());
+            return buildRuleResponse(matchedRule);
+        }
+
+        // Step 2: 未命中规则,走 AI 推理
+        if (!aiConfig.getEnabled()) {
+            throw new BusinessException(ErrorCode.AI_NOT_ENABLED, "AI功能未启用且无规则命中");
+        }
+
+        // 准备可用科目列表(为空时按 accountSetId 查询)
+        List<Subject> subjects = availableSubjects;
+        if (subjects == null || subjects.isEmpty()) {
+            subjects = loadSubjectsForAccountSet(accountSetId);
+        }
+        if (subjects.isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_FOUND, "当前账套无可用科目,无法生成记账建议");
+        }
+
+        // 拉取 few-shot 示例(完全采纳的历史反馈)
+        List<AiRecognitionFeedback> fewShotExamples =
+                recognitionFeedbackService.getRecentFewShotExamples(accountSetId, FEW_SHOT_EXAMPLES_COUNT);
+
+        // 构建增强 prompt
+        Map<String, Object> request = buildEnhancedAccountingRequest(description, amount, subjects, fewShotExamples);
+
+        // 调用 GLM
+        String response = callGlmApi(request, aiConfig.getChatModel());
+        log.info("AI记账建议生成完成:accountSetId={},description={}", accountSetId, description);
+
+        // Step 3: 解析并校验科目
+        return parseAndValidateAiResponse(response, subjects);
+    }
+
+    /**
+     * 根据账套ID加载科目列表(限制前 100 个常用科目,避免 prompt 过长)
+     */
+    private List<Subject> loadSubjectsForAccountSet(Long accountSetId) {
+        LambdaQueryWrapper<Subject> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Subject::getAccountSetId, accountSetId)
+                .eq(Subject::getStatus, 1)
+                .orderByAsc(Subject::getCode)
+                .last("LIMIT " + MAX_SUBJECTS_IN_PROMPT);
+        return subjectService.list(wrapper);
+    }
+
+    /**
+     * 由规则命中结果构建响应
+     */
+    private AccountingSuggestionResponse buildRuleResponse(AiAccountingRule rule) {
+        AccountingSuggestionResponse response = new AccountingSuggestionResponse();
+        response.setSource(SOURCE_RULE);
+        response.setDebitSubjectCode(rule.getDebitSubjectCode());
+        response.setDebitSubjectName(rule.getDebitSubjectName());
+        response.setCreditSubjectCode(rule.getCreditSubjectCode());
+        response.setCreditSubjectName(rule.getCreditSubjectName());
+        response.setSummary(rule.getVoucherSummary());
+        // 规则命中视为完全可信(用户可手动维护规则)
+        response.setConfidence(1.0);
+        response.setRuleId(rule.getId());
+        return response;
+    }
+
+    /**
+     * 构建增强 prompt 的 GLM 请求
+     * 注入:可用科目列表 + 历史记账示例(few-shot) + 业务描述 + 金额 + 输出要求
+     */
+    private Map<String, Object> buildEnhancedAccountingRequest(String description, Double amount,
+                                                               List<Subject> subjects,
+                                                               List<AiRecognitionFeedback> fewShotExamples) {
+        Map<String, Object> request = new HashMap<>();
+
+        Map<String, Object>[] messages = new Map[2];
+
+        // 系统消息:角色 + 科目列表 + few-shot 示例
+        messages[0] = new HashMap<>();
+        messages[0].put("role", "system");
+        messages[0].put("content", buildSystemPrompt(subjects, fewShotExamples));
+
+        // 用户消息:业务描述 + 金额
+        messages[1] = new HashMap<>();
+        messages[1].put("role", "user");
+        String amountStr = (amount == null) ? "未提供" : String.format("%.2f", amount);
+        messages[1].put("content", String.format(
+                "## 业务描述\n%s\n\n金额: %s元\n\n请根据上述业务描述推荐借贷科目,并严格按指定 JSON 格式返回。",
+                description, amountStr));
+
+        request.put("model", aiConfig.getChatModel());
+        request.put("messages", messages);
+        return request;
+    }
+
+    /**
+     * 构建系统 prompt:科目列表 + few-shot 示例 + 输出要求
+     */
+    private String buildSystemPrompt(List<Subject> subjects, List<AiRecognitionFeedback> fewShotExamples) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("你是专业的会计记账助手。根据业务描述推荐借贷科目。\n\n");
+
+        // 可用科目列表
+        sb.append("## 可用科目列表\n");
+        sb.append("必须从以下科目中选择,不可使用列表外的科目编码:\n");
+        String accountList = subjects.stream()
+                .map(s -> "- " + s.getCode() + " " + s.getName())
+                .collect(Collectors.joining("\n"));
+        sb.append(accountList);
+        sb.append("\n\n");
+
+        // few-shot 示例
+        if (fewShotExamples != null && !fewShotExamples.isEmpty()) {
+            sb.append("## 历史记账示例\n");
+            sb.append("以下是同账套下用户已采纳的记账示例,可参考其科目选择:\n");
+            for (AiRecognitionFeedback ex : fewShotExamples) {
+                sb.append("- 描述: ").append(ex.getOriginalDescription())
+                        .append(" → 借: ").append(ex.getActualDebitCode())
+                        .append(", 贷: ").append(ex.getActualCreditCode());
+                if (ex.getActualSummary() != null && !ex.getActualSummary().isEmpty()) {
+                    sb.append(", 摘要: ").append(ex.getActualSummary());
+                }
+                sb.append("\n");
+            }
+            sb.append("\n");
+        }
+
+        // 业务类型分类提示
+        sb.append("## 业务类型分类提示\n");
+        sb.append("- 费用类(差旅/办公/水电/电话/租金/折旧): 借 管理费用, 贷 银行存款/库存现金/累计折旧\n");
+        sb.append("- 薪酬类(工资/社保/公积金): 借 管理费用, 贷 应付职工薪酬\n");
+        sb.append("- 采购类(采购材料): 借 原材料/库存商品, 贷 应付账款/银行存款\n");
+        sb.append("- 销售类(销售商品): 借 应收账款/银行存款, 贷 主营业务收入\n");
+        sb.append("- 税金类(进项税/销项税): 涉及应交税费科目\n\n");
+
+        // 输出要求
+        sb.append("## 要求\n");
+        sb.append("1. 必须从可用科目列表中选择科目,不可编造\n");
+        sb.append("2. 借贷必须平衡\n");
+        sb.append("3. 返回 JSON: {\"debitSubjectCode\": \"xxxx\", \"debitSubjectName\": \"xxx\", ");
+        sb.append("\"creditSubjectCode\": \"xxxx\", \"creditSubjectName\": \"xxx\", ");
+        sb.append("\"summary\": \"xxx\", \"confidence\": 0.85}\n");
+        sb.append("4. confidence 范围 0-1,表示对推荐结果的置信度\n");
+        sb.append("5. 仅返回 JSON,不要包含任何其他文字或 markdown 标记");
+        return sb.toString();
+    }
+
+    /**
+     * 解析 AI 返回的 JSON 并校验科目编码是否在可用科目列表中
+     * - 科目编码存在:返回原始 AI 建议
+     * - 科目编码不存在:尝试按编码前缀回退到最接近的科目
+     * - 解析失败:抛业务异常,由 GlobalExceptionHandler 返回 500
+     */
+    @SuppressWarnings("unchecked")
+    private AccountingSuggestionResponse parseAndValidateAiResponse(String response, List<Subject> availableSubjects) {
+        String cleaned = cleanJsonResult(response);
+        Map<String, Object> parsed;
+        try {
+            parsed = objectMapper.readValue(cleaned, Map.class);
+        } catch (Exception e) {
+            log.warn("AI返回JSON解析失败,raw={}", response, e);
+            throw new BusinessException(ErrorCode.AI_OCR_PARSE_ERROR.getCode(),
+                    "AI返回结果解析失败,请重试或人工选择科目");
+        }
+
+        AccountingSuggestionResponse result = new AccountingSuggestionResponse();
+        result.setSource(SOURCE_AI);
+        result.setRawAiResponse(response);
+
+        String debitCode = getStringValue(parsed, "debitSubjectCode");
+        String debitName = getStringValue(parsed, "debitSubjectName");
+        String creditCode = getStringValue(parsed, "creditSubjectCode");
+        String creditName = getStringValue(parsed, "creditSubjectName");
+        String summary = getStringValue(parsed, "summary");
+        Double confidence = getDoubleValue(parsed, "confidence");
+
+        // 校验科目编码是否存在,不存在则按前缀回退
+        Subject debitSubject = findSubjectByCode(availableSubjects, debitCode);
+        if (debitSubject == null) {
+            debitSubject = findClosestSubjectByPrefix(availableSubjects, debitCode);
+            if (debitSubject != null) {
+                log.info("借方科目回退:{} -> {}", debitCode, debitSubject.getCode());
+            }
+        }
+        Subject creditSubject = findSubjectByCode(availableSubjects, creditCode);
+        if (creditSubject == null) {
+            creditSubject = findClosestSubjectByPrefix(availableSubjects, creditCode);
+            if (creditSubject != null) {
+                log.info("贷方科目回退:{} -> {}", creditCode, creditSubject.getCode());
+            }
+        }
+
+        // 借贷科目均无法匹配时返回错误
+        if (debitSubject == null && creditSubject == null) {
+            log.warn("AI返回的借贷科目均不在可用列表中:debit={},credit={}", debitCode, creditCode);
+            throw new BusinessException(ErrorCode.AI_OCR_PARSE_ERROR.getCode(),
+                    "AI推荐的科目不在当前账套科目体系中,请人工选择科目");
+        }
+
+        // 部分缺失时,另一方可保留 AI 原始返回(由前端二次校验)
+        result.setDebitSubjectCode(debitSubject != null ? debitSubject.getCode() : debitCode);
+        result.setDebitSubjectName(debitSubject != null ? debitSubject.getName() : debitName);
+        result.setCreditSubjectCode(creditSubject != null ? creditSubject.getCode() : creditCode);
+        result.setCreditSubjectName(creditSubject != null ? creditSubject.getName() : creditName);
+        result.setSummary(summary);
+        result.setConfidence(confidence != null ? confidence : 0.5);
+        return result;
+    }
+
+    /**
+     * 按编码精确匹配科目
+     */
+    private Subject findSubjectByCode(List<Subject> subjects, String code) {
+        if (code == null || code.isEmpty()) {
+            return null;
+        }
+        return subjects.stream()
+                .filter(s -> code.equals(s.getCode()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
+     * 按编码前缀回退查找最接近的科目
+     * 例:AI 返回 "6602.05" 但实际科目只有 "6602",回退到 "6602"
+     */
+    private Subject findClosestSubjectByPrefix(List<Subject> subjects, String code) {
+        if (code == null || code.isEmpty()) {
+            return null;
+        }
+        // 截取前 4 位作为一级科目编码
+        String prefix = code.length() >= 4 ? code.substring(0, 4) : code;
+        return subjects.stream()
+                .filter(s -> s.getCode() != null && s.getCode().startsWith(prefix))
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
+     * 从 Map 中安全取字符串值
+     */
+    private String getStringValue(Map<String, Object> map, String key) {
+        Object v = map.get(key);
+        return v == null ? null : v.toString();
+    }
+
+    /**
+     * 从 Map 中安全取 Double 值(支持 Number/字符串)
+     */
+    private Double getDoubleValue(Map<String, Object> map, String key) {
+        Object v = map.get(key);
+        if (v == null) {
+            return null;
+        }
+        if (v instanceof Number num) {
+            return num.doubleValue();
+        }
+        try {
+            return Double.parseDouble(v.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /**
