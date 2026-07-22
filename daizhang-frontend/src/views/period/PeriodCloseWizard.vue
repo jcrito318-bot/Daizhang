@@ -195,7 +195,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   MagicStick,
@@ -454,6 +454,7 @@ async function handleExecute(): Promise<void> {
 }
 
 /** 递归揭示步骤,模拟逐步执行动画 */
+let animationTimer: ReturnType<typeof setTimeout> | null = null
 function animateSteps(result: PeriodCloseWizardVO, index: number): void {
   if (index >= result.steps.length) {
     // 所有步骤揭示完毕
@@ -470,7 +471,7 @@ function animateSteps(result: PeriodCloseWizardVO, index: number): void {
     return
   }
   visibleSteps.value.push(result.steps[index])
-  setTimeout(() => animateSteps(result, index + 1), STEP_ANIMATION_INTERVAL)
+  animationTimer = setTimeout(() => animateSteps(result, index + 1), STEP_ANIMATION_INTERVAL)
 }
 
 /** 重置向导状态 */
@@ -491,6 +492,14 @@ onMounted(async () => {
     }
   } catch {
     // 拦截器已提示
+  }
+})
+
+onBeforeUnmount(() => {
+  // 清理可能挂起的动画 timer,防止组件卸载后回调执行报错
+  if (animationTimer) {
+    clearTimeout(animationTimer)
+    animationTimer = null
   }
 })
 </script>

@@ -111,7 +111,7 @@ describe('UserList.vue - BUG-01 修复:handleResetPassword 随机密码', () => 
     await triggerResetPassword(wrapper)
 
     const newPassword = (userApi.resetPassword as any).mock.calls[0][1] as string
-    expect(newPassword.length).toBe(8)
+    expect(newPassword.length).toBe(12)
   })
 
   it('多次调用应生成不同的密码(基本随机性)', async () => {

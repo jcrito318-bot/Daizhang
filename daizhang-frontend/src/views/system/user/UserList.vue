@@ -271,8 +271,10 @@ async function handleResetPassword(row: SysUserVO) {
     // 重置成功后弹窗明示新密码,提示管理员转告用户首次登录后修改。
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
     let newPassword = ''
-    for (let i = 0; i < 8; i++) {
-      newPassword += chars[Math.floor(Math.random() * chars.length)]
+    const randomArray = new Uint32Array(1)
+    for (let i = 0; i < 12; i++) {
+      crypto.getRandomValues(randomArray)
+      newPassword += chars[randomArray[0] % chars.length]
     }
     await userApi.resetPassword(row.id, newPassword)
     // 使用 VNode 渲染避免 dangerouslyUseHTMLString 带来的 XSS 风险

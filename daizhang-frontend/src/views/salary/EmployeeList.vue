@@ -206,7 +206,7 @@ const handleDelete = (row: EmployeeVO) => {
     await salaryApi.deleteEmployee(row.id)
     ElMessage.success('删除成功')
     loadData()
-  })
+  }).catch(() => {})
 }
 
 const handleSubmit = async () => {

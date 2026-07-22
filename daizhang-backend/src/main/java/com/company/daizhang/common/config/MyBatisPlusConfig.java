@@ -31,7 +31,10 @@ public class MyBatisPlusConfig {
     public MybatisPlusInterceptor mybatisPlusInterceptor() {
         MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();
         // 分页插件（使用H2数据库方言）
-        interceptor.addInnerInterceptor(new PaginationInnerInterceptor(DbType.H2));
+        PaginationInnerInterceptor paginationInterceptor = new PaginationInnerInterceptor(DbType.H2);
+        // 全局限制单页最大条数,防止 size=99999 等 DoS 攻击
+        paginationInterceptor.setMaxLimit(500L);
+        interceptor.addInnerInterceptor(paginationInterceptor);
         // 乐观锁插件
         interceptor.addInnerInterceptor(new OptimisticLockerInnerInterceptor());
         return interceptor;

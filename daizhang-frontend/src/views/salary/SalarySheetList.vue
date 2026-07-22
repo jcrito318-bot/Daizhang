@@ -156,7 +156,7 @@ const handleConfirm = (row: SalarySheetVO) => {
     await salaryApi.confirmSalarySheet(row.id)
     ElMessage.success('确认成功')
     loadData()
-  })
+  }).catch(() => {})
 }
 
 const handleDelete = (row: SalarySheetVO) => {
@@ -166,7 +166,7 @@ const handleDelete = (row: SalarySheetVO) => {
     await salaryApi.deleteSalarySheet(row.id)
     ElMessage.success('删除成功')
     loadData()
-  })
+  }).catch(() => {})
 }
 
 onMounted(() => {

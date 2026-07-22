@@ -285,7 +285,7 @@ const handleDelete = (row: FixedAssetVO) => {
     await assetApi.deleteAsset(row.id)
     ElMessage.success('删除成功')
     loadData()
-  })
+  }).catch(() => {})
 }
 
 const handleSubmit = async () => {

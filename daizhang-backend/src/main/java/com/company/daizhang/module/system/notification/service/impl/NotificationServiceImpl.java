@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.util.HtmlUtils;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -51,8 +52,9 @@ public class NotificationServiceImpl implements NotificationService {
         notification.setAccountSetId(accountSetId);
         notification.setCustomerId(customerId);
         notification.setType(type);
-        notification.setTitle(title);
-        notification.setContent(content);
+        // XSS 防护:对 title/content 做 HTML 转义,防止存储型 XSS
+        notification.setTitle(HtmlUtils.htmlEscape(title));
+        notification.setContent(content != null ? HtmlUtils.htmlEscape(content) : null);
         notification.setLevel(level != null ? level : DEFAULT_LEVEL);
         notification.setStatus(STATUS_UNREAD);
         notificationMapper.insert(notification);

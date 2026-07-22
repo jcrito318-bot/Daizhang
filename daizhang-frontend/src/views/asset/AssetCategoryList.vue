@@ -162,7 +162,7 @@ const handleDelete = (row: AssetCategoryVO) => {
     await assetApi.deleteCategory(row.id)
     ElMessage.success('删除成功')
     loadData()
-  })
+  }).catch(() => {})
 }
 
 const handleSubmit = async () => {

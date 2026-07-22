@@ -165,7 +165,7 @@ const handleCalculateDepreciation = () => {
     } finally {
       calculating.value = false
     }
-  })
+  }).catch(() => {})
 }
 
 onMounted(() => {
