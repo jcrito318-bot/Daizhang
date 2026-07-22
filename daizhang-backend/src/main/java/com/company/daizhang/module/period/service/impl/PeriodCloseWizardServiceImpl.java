@@ -285,35 +285,85 @@ public class PeriodCloseWizardServiceImpl implements PeriodCloseWizardService {
      * 步骤 7: 下月开启。
      * 自动创建下月会计期间(如果不存在),状态为"开"。已存在则跳过。
      * 跨年场景(12月)自动滚到次年1月。
+     * <p>
+     * P5.2.2 跨年结转向导化:当当前结账月份为12月时,自动调用
+     * {@link PeriodService#carryForwardYear} 执行年度结转(创建次年12个期间 + 3103→3104结转 + 余额结转)。
+     * carryForwardYear 会创建次年1月期间,故其成功后下方"创建下月期间"逻辑会因已存在而跳过,避免重复创建。
+     * 年度结转失败不影响主流程(下月期间创建),仅在结果中标记"年度结转失败,请手动执行"。
      */
     private WizardStepResult executeOpenNextPeriod(Long accountSetId, int year, int month) {
         try {
             int nextYear = (month == 12) ? year + 1 : year;
             int nextMonth = (month == 12) ? 1 : month + 1;
 
-            // 检查下月期间是否已存在
+            // P5.2.2 跨年结转:12月结账时自动触发年度结转
+            boolean yearCarryForwardDone = false;
+            boolean yearCarryForwardFailed = false;
+            boolean nextYearAlreadyExists = false;
+            if (month == 12) {
+                // 先检查次年期间是否已存在:已存在则跳过年度结转
+                // (避免 carryForwardYear 抛"下一年度会计期间已存在"及重复创建)
+                LambdaQueryWrapper<AccountPeriod> nextYearWrapper = new LambdaQueryWrapper<>();
+                nextYearWrapper.eq(AccountPeriod::getAccountSetId, accountSetId)
+                               .eq(AccountPeriod::getYear, nextYear);
+                Long nextYearCount = accountPeriodMapper.selectCount(nextYearWrapper);
+                if (nextYearCount != null && nextYearCount > 0) {
+                    nextYearAlreadyExists = true;
+                    log.info("次年{}会计期间已存在,跳过年度结转, 账套ID={}", nextYear, accountSetId);
+                } else {
+                    log.info("12月结账触发年度结转, 账套ID={}, 来源年度={}", accountSetId, year);
+                    try {
+                        periodService.carryForwardYear(accountSetId, year);
+                        yearCarryForwardDone = true;
+                        log.info("年度结转成功, 账套ID={}, 来源年度={}, 目标年度={}", accountSetId, year, nextYear);
+                    } catch (Exception e) {
+                        // 年度结转失败不影响主流程(下月期间创建),仅记录告警并标记
+                        yearCarryForwardFailed = true;
+                        log.warn("年度结转失败,请手动执行, 账套ID={}, 年度={}: {}", accountSetId, year, e.getMessage(), e);
+                    }
+                }
+            }
+
+            // 检查下月期间是否已存在(年度结转成功后次年1月已由 carryForwardYear 创建,此处会跳过创建)
             LambdaQueryWrapper<AccountPeriod> wrapper = new LambdaQueryWrapper<>();
             wrapper.eq(AccountPeriod::getAccountSetId, accountSetId)
                     .eq(AccountPeriod::getYear, nextYear)
                     .eq(AccountPeriod::getMonth, nextMonth);
             Long existCount = accountPeriodMapper.selectCount(wrapper);
+
+            boolean nextPeriodCreated = false;
+            String periodMessage;
             if (existCount != null && existCount > 0) {
-                return WizardStepResult.skipped(7, "下月开启",
-                        nextYear + "年" + nextMonth + "月会计期间已存在,无需重复创建");
+                periodMessage = nextYear + "年" + nextMonth + "月会计期间已存在,无需重复创建";
+            } else {
+                // 创建下月会计期间,状态为"开"
+                AccountPeriod nextPeriod = new AccountPeriod();
+                nextPeriod.setAccountSetId(accountSetId);
+                nextPeriod.setYear(nextYear);
+                nextPeriod.setMonth(nextMonth);
+                nextPeriod.setStartDate(LocalDate.of(nextYear, nextMonth, 1));
+                nextPeriod.setEndDate(LocalDate.of(nextYear, nextMonth, 1).plusMonths(1).minusDays(1));
+                nextPeriod.setStatus(PeriodStatus.OPEN.getCode());
+                accountPeriodMapper.insert(nextPeriod);
+                nextPeriodCreated = true;
+                periodMessage = nextYear + "年" + nextMonth + "月会计期间已创建";
             }
 
-            // 创建下月会计期间,状态为"开"
-            AccountPeriod nextPeriod = new AccountPeriod();
-            nextPeriod.setAccountSetId(accountSetId);
-            nextPeriod.setYear(nextYear);
-            nextPeriod.setMonth(nextMonth);
-            nextPeriod.setStartDate(LocalDate.of(nextYear, nextMonth, 1));
-            nextPeriod.setEndDate(LocalDate.of(nextYear, nextMonth, 1).plusMonths(1).minusDays(1));
-            nextPeriod.setStatus(PeriodStatus.OPEN.getCode());
-            accountPeriodMapper.insert(nextPeriod);
+            // 拼接年度结转结果到步骤消息
+            StringBuilder message = new StringBuilder(periodMessage);
+            if (yearCarryForwardDone) {
+                message.append(";年度结转已执行(次年12个期间+余额结转)");
+            } else if (yearCarryForwardFailed) {
+                message.append(";年度结转失败,请手动执行");
+            } else if (nextYearAlreadyExists) {
+                message.append(";次年期间已存在,跳过年度结转");
+            }
 
-            return WizardStepResult.success(7, "下月开启",
-                    nextYear + "年" + nextMonth + "月会计期间已创建");
+            // 步骤状态:执行了年度结转或新建了下月期间视为成功;均已存在则为跳过
+            if (yearCarryForwardDone || nextPeriodCreated) {
+                return WizardStepResult.success(7, "下月开启", message.toString());
+            }
+            return WizardStepResult.skipped(7, "下月开启", message.toString());
         } catch (Exception e) {
             log.warn("下月开启失败, 账套ID={}", accountSetId, e);
             return WizardStepResult.failed(7, "下月开启",

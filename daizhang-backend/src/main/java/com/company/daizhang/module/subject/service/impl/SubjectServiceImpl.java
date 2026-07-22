@@ -24,7 +24,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -357,7 +359,69 @@ public class SubjectServiceImpl extends ServiceImpl<SubjectMapper, Subject> impl
         
         log.info("删除科目成功，科目ID: {}, 科目编码: {}", id, subject.getCode());
     }
-    
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int copySubjectsFromAccountSet(Long sourceAccountSetId, Long targetAccountSetId) {
+        // IDOR治理:源账套读权限,目标账套写权限
+        accountSetAccessService.checkAccess(sourceAccountSetId);
+        accountSetAccessService.checkOwner(targetAccountSetId);
+
+        // 校验:目标账套不应已有科目
+        long targetCount = this.count(new LambdaQueryWrapper<Subject>()
+                .eq(Subject::getAccountSetId, targetAccountSetId));
+        if (targetCount > 0) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "目标账套已有科目,无法复制");
+        }
+
+        // 拉取源科目,按 level 升序排序(确保父先于子)
+        List<Subject> sourceSubjects = this.list(new LambdaQueryWrapper<Subject>()
+                .eq(Subject::getAccountSetId, sourceAccountSetId)
+                .orderByAsc(Subject::getLevel));
+
+        if (sourceSubjects.isEmpty()) {
+            log.info("源账套ID: {} 无科目,跳过复制", sourceAccountSetId);
+            return 0;
+        }
+
+        // parentId 重映射:oldId -> newId
+        Map<Long, Long> oldIdToNewId = new HashMap<>();
+        int count = 0;
+
+        for (Subject source : sourceSubjects) {
+            Subject target = new Subject();
+            BeanUtil.copyProperties(source, target);
+            // 清空基类字段,让 MyBatis-Plus 自动填充
+            target.setId(null);
+            target.setCreateBy(null);
+            target.setCreateTime(null);
+            target.setUpdateBy(null);
+            target.setUpdateTime(null);
+            target.setDeleted(null);
+            target.setVersion(null);
+            // 切换到目标账套
+            target.setAccountSetId(targetAccountSetId);
+            // parentId 重映射:根节点(parentId=0)保持,其他用映射后的新 ID
+            Long oldParentId = source.getParentId();
+            if (oldParentId != null && oldParentId > 0) {
+                Long newParentId = oldIdToNewId.get(oldParentId);
+                if (newParentId == null) {
+                    throw new BusinessException(ErrorCode.INTERNAL_ERROR,
+                            "源科目父级ID映射失败,源科目ID: " + source.getId());
+                }
+                target.setParentId(newParentId);
+            }
+            // 逐个保存以获取自增 ID,用于子科目的 parentId 映射
+            this.save(target);
+            oldIdToNewId.put(source.getId(), target.getId());
+            count++;
+        }
+
+        log.info("跨账套复制科目成功,源账套ID: {}, 目标账套ID: {}, 复制数量: {}",
+                sourceAccountSetId, targetAccountSetId, count);
+        return count;
+    }
+
     private void addSubject(List<Subject> list, Long accountSetId, String code, String name,
                             String category, Long parentId, int level, int balanceDirection,
                             int isAuxiliary, int isCash, int isBank, int isCurrent) {

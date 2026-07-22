@@ -509,4 +509,231 @@ public class ReportExcelUtil {
         response.setHeader("Content-disposition", "attachment;filename*=utf-8''" + encodedFileName);
         workbook.write(response.getOutputStream());
     }
+
+    // ==================== 构建 Workbook(不写入响应流,供批量打包复用) ====================
+    // 以下方法创建并填充 XSSFWorkbook 后返回(不关闭),调用方负责关闭。
+    // 与 exportXxx 方法逻辑一致,但不依赖 HttpServletResponse,便于将多个报表写入 zip。
+
+    /**
+     * 构建资产负债表 Workbook
+     */
+    public XSSFWorkbook buildBalanceSheetWorkbook(BalanceSheetVO data, Integer year, Integer month) {
+        XSSFWorkbook workbook = new XSSFWorkbook();
+        Sheet sheet = workbook.createSheet("资产负债表");
+
+        CellStyle headerStyle = workbook.createCellStyle();
+        Font headerFont = workbook.createFont();
+        headerFont.setBold(true);
+        headerStyle.setFont(headerFont);
+        headerStyle.setAlignment(HorizontalAlignment.CENTER);
+        CellStyle amountStyle = createAmountStyle(workbook);
+
+        Row titleRow = sheet.createRow(0);
+        Cell titleCell = titleRow.createCell(0);
+        titleCell.setCellValue("资产负债表 " + year + "年" + month + "月");
+        titleCell.setCellStyle(headerStyle);
+
+        Row headerRow = sheet.createRow(2);
+        headerRow.createCell(0).setCellValue("项目");
+        headerRow.createCell(1).setCellValue("行次");
+        headerRow.createCell(2).setCellValue("年初余额");
+        headerRow.createCell(3).setCellValue("期末余额");
+        for (int i = 0; i < 4; i++) {
+            headerRow.getCell(i).setCellStyle(headerStyle);
+        }
+
+        int rowNum = 3;
+        rowNum = writeBalanceSheetItems(sheet, rowNum, "资产", data.getAssets(), amountStyle);
+        rowNum++;
+        rowNum = writeBalanceSheetItems(sheet, rowNum, "负债", data.getLiabilities(), amountStyle);
+        rowNum++;
+        rowNum = writeBalanceSheetItems(sheet, rowNum, "所有者权益", data.getEquity(), amountStyle);
+
+        sheet.setColumnWidth(0, 20 * 256);
+        sheet.setColumnWidth(1, 10 * 256);
+        sheet.setColumnWidth(2, 15 * 256);
+        sheet.setColumnWidth(3, 15 * 256);
+        return workbook;
+    }
+
+    /**
+     * 构建利润表 Workbook
+     */
+    public XSSFWorkbook buildIncomeStatementWorkbook(IncomeStatementVO data, Integer year, Integer month) {
+        XSSFWorkbook workbook = new XSSFWorkbook();
+        Sheet sheet = workbook.createSheet("利润表");
+
+        CellStyle headerStyle = workbook.createCellStyle();
+        Font headerFont = workbook.createFont();
+        headerFont.setBold(true);
+        headerStyle.setFont(headerFont);
+        headerStyle.setAlignment(HorizontalAlignment.CENTER);
+        CellStyle amountStyle = createAmountStyle(workbook);
+
+        Row titleRow = sheet.createRow(0);
+        Cell titleCell = titleRow.createCell(0);
+        titleCell.setCellValue("利润表 " + year + "年" + month + "月");
+        titleCell.setCellStyle(headerStyle);
+
+        Row headerRow = sheet.createRow(2);
+        headerRow.createCell(0).setCellValue("项目");
+        headerRow.createCell(1).setCellValue("行次");
+        headerRow.createCell(2).setCellValue("本月数");
+        headerRow.createCell(3).setCellValue("本年累计数");
+        for (int i = 0; i < 4; i++) {
+            headerRow.getCell(i).setCellStyle(headerStyle);
+        }
+
+        int rowNum = 3;
+        for (IncomeStatementItem item : data.getItems()) {
+            Row row = sheet.createRow(rowNum++);
+            row.createCell(0).setCellValue(item.getName());
+            row.createCell(1).setCellValue(item.getRowNo());
+            setAmountCell(row, 2, item.getCurrentAmount().doubleValue(), amountStyle);
+            setAmountCell(row, 3, item.getYearAmount().doubleValue(), amountStyle);
+        }
+
+        sheet.setColumnWidth(0, 20 * 256);
+        sheet.setColumnWidth(1, 10 * 256);
+        sheet.setColumnWidth(2, 15 * 256);
+        sheet.setColumnWidth(3, 15 * 256);
+        return workbook;
+    }
+
+    /**
+     * 构建科目余额表 Workbook
+     */
+    public XSSFWorkbook buildSubjectBalanceTableWorkbook(SubjectBalanceTableVO data, Integer year, Integer month) {
+        XSSFWorkbook workbook = new XSSFWorkbook();
+        Sheet sheet = workbook.createSheet("科目余额表");
+
+        CellStyle headerStyle = workbook.createCellStyle();
+        Font headerFont = workbook.createFont();
+        headerFont.setBold(true);
+        headerStyle.setFont(headerFont);
+        headerStyle.setAlignment(HorizontalAlignment.CENTER);
+        CellStyle amountStyle = createAmountStyle(workbook);
+
+        Row titleRow = sheet.createRow(0);
+        Cell titleCell = titleRow.createCell(0);
+        titleCell.setCellValue("科目余额表 " + year + "年" + month + "月");
+        titleCell.setCellStyle(headerStyle);
+
+        Row headerRow = sheet.createRow(2);
+        headerRow.createCell(0).setCellValue("科目编码");
+        headerRow.createCell(1).setCellValue("科目名称");
+        headerRow.createCell(2).setCellValue("期初借方");
+        headerRow.createCell(3).setCellValue("期初贷方");
+        headerRow.createCell(4).setCellValue("本期借方");
+        headerRow.createCell(5).setCellValue("本期贷方");
+        headerRow.createCell(6).setCellValue("期末借方");
+        headerRow.createCell(7).setCellValue("期末贷方");
+        for (int i = 0; i < 8; i++) {
+            headerRow.getCell(i).setCellStyle(headerStyle);
+        }
+
+        int rowNum = 3;
+        for (SubjectBalanceRow row : data.getRows()) {
+            Row dataRow = sheet.createRow(rowNum++);
+            dataRow.createCell(0).setCellValue(row.getSubjectCode());
+            dataRow.createCell(1).setCellValue(row.getSubjectName());
+            setAmountCell(dataRow, 2, row.getBeginDebit().doubleValue(), amountStyle);
+            setAmountCell(dataRow, 3, row.getBeginCredit().doubleValue(), amountStyle);
+            setAmountCell(dataRow, 4, row.getPeriodDebit().doubleValue(), amountStyle);
+            setAmountCell(dataRow, 5, row.getPeriodCredit().doubleValue(), amountStyle);
+            setAmountCell(dataRow, 6, row.getEndDebit().doubleValue(), amountStyle);
+            setAmountCell(dataRow, 7, row.getEndCredit().doubleValue(), amountStyle);
+        }
+
+        sheet.setColumnWidth(0, 12 * 256);
+        sheet.setColumnWidth(1, 20 * 256);
+        for (int i = 2; i < 8; i++) {
+            sheet.setColumnWidth(i, 15 * 256);
+        }
+        return workbook;
+    }
+
+    /**
+     * 构建现金流量表 Workbook
+     */
+    public XSSFWorkbook buildCashFlowStatementWorkbook(CashFlowStatementVO data, Integer year, Integer month) {
+        XSSFWorkbook workbook = new XSSFWorkbook();
+        Sheet sheet = workbook.createSheet("现金流量表");
+
+        CellStyle headerStyle = workbook.createCellStyle();
+        Font headerFont = workbook.createFont();
+        headerFont.setBold(true);
+        headerStyle.setFont(headerFont);
+        headerStyle.setAlignment(HorizontalAlignment.CENTER);
+        CellStyle amountStyle = createAmountStyle(workbook);
+
+        Row titleRow = sheet.createRow(0);
+        Cell titleCell = titleRow.createCell(0);
+        titleCell.setCellValue("现金流量表 " + year + "年" + month + "月");
+        titleCell.setCellStyle(headerStyle);
+
+        Row headerRow = sheet.createRow(2);
+        headerRow.createCell(0).setCellValue("项目");
+        headerRow.createCell(1).setCellValue("行次");
+        headerRow.createCell(2).setCellValue("金额");
+        for (int i = 0; i < 3; i++) {
+            headerRow.getCell(i).setCellStyle(headerStyle);
+        }
+
+        int rowNum = 3;
+        int rowNo = 1;
+
+        rowNum = writeCashFlowSection(sheet, rowNum, "一、经营活动产生的现金流量", headerStyle, true);
+        if (data.getItems() != null) {
+            for (CashFlowItemVO item : data.getItems()) {
+                if ("经营".equals(item.getCategory()) || "经营活动".equals(item.getCategory())) {
+                    Row row = sheet.createRow(rowNum++);
+                    row.createCell(0).setCellValue("    " + item.getItemName());
+                    row.createCell(1).setCellValue(rowNo++);
+                    setAmountCell(row, 2, item.getAmount() != null ? item.getAmount().doubleValue() : 0, amountStyle);
+                }
+            }
+        }
+        rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流入小计", data.getOperatingInflow(), rowNo++, amountStyle);
+        rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流出小计", data.getOperatingOutflow(), rowNo++, amountStyle);
+        rowNum = writeCashFlowSummary(sheet, rowNum, "    经营活动产生的现金流量净额", data.getOperatingNetFlow(), rowNo++, amountStyle);
+
+        rowNum = writeCashFlowSection(sheet, rowNum, "二、投资活动产生的现金流量", headerStyle, true);
+        if (data.getItems() != null) {
+            for (CashFlowItemVO item : data.getItems()) {
+                if ("投资".equals(item.getCategory()) || "投资活动".equals(item.getCategory())) {
+                    Row row = sheet.createRow(rowNum++);
+                    row.createCell(0).setCellValue("    " + item.getItemName());
+                    row.createCell(1).setCellValue(rowNo++);
+                    setAmountCell(row, 2, item.getAmount() != null ? item.getAmount().doubleValue() : 0, amountStyle);
+                }
+            }
+        }
+        rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流入小计", data.getInvestingInflow(), rowNo++, amountStyle);
+        rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流出小计", data.getInvestingOutflow(), rowNo++, amountStyle);
+        rowNum = writeCashFlowSummary(sheet, rowNum, "    投资活动产生的现金流量净额", data.getInvestingNetFlow(), rowNo++, amountStyle);
+
+        rowNum = writeCashFlowSection(sheet, rowNum, "三、筹资活动产生的现金流量", headerStyle, true);
+        if (data.getItems() != null) {
+            for (CashFlowItemVO item : data.getItems()) {
+                if ("筹资".equals(item.getCategory()) || "筹资活动".equals(item.getCategory())) {
+                    Row row = sheet.createRow(rowNum++);
+                    row.createCell(0).setCellValue("    " + item.getItemName());
+                    row.createCell(1).setCellValue(rowNo++);
+                    setAmountCell(row, 2, item.getAmount() != null ? item.getAmount().doubleValue() : 0, amountStyle);
+                }
+            }
+        }
+        rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流入小计", data.getFinancingInflow(), rowNo++, amountStyle);
+        rowNum = writeCashFlowSummary(sheet, rowNum, "    现金流出小计", data.getFinancingOutflow(), rowNo++, amountStyle);
+        rowNum = writeCashFlowSummary(sheet, rowNum, "    筹资活动产生的现金流量净额", data.getFinancingNetFlow(), rowNo++, amountStyle);
+
+        rowNum = writeCashFlowSection(sheet, rowNum, "四、现金及现金等价物净增加额", headerStyle, true);
+        rowNum = writeCashFlowSummary(sheet, rowNum, "    现金及现金等价物净增加额", data.getNetIncrease(), rowNo++, amountStyle);
+
+        sheet.setColumnWidth(0, 35 * 256);
+        sheet.setColumnWidth(1, 10 * 256);
+        sheet.setColumnWidth(2, 18 * 256);
+        return workbook;
+    }
 }

@@ -9,17 +9,21 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 /**
  * 工商外勤任务管理控制器
+ * <p>
+ * P5 代账定位精简:默认关闭。通过 {@code app.module.industry-commerce.enabled=true} 启用。
  */
 @Tag(name = "工商外勤任务")
 @RestController
 @RequestMapping("/ic/task")
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "app.module.industry-commerce.enabled", havingValue = "true", matchIfMissing = false)
 public class IndustryCommerceTaskController {
 
     private final IndustryCommerceTaskService industryCommerceTaskService;

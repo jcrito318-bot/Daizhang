@@ -16,6 +16,7 @@ import com.company.daizhang.module.customer.service.PortalAccountService;
 import com.company.daizhang.module.customer.vo.PortalAccountVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,10 +28,15 @@ import java.util.stream.Collectors;
 
 /**
  * 客户看账门户服务实现
+ * <p>
+ * P5 代账定位精简:代账公司是乙方,客户无需自助登录查账,默认关闭。
+ * 通过 {@code app.module.portal-account.enabled=false} 灰度关闭,
+ * 商业版如需启用可设为 true。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "app.module.portal-account.enabled", havingValue = "true", matchIfMissing = false)
 public class PortalAccountServiceImpl extends ServiceImpl<PortalAccountMapper, PortalAccount> implements PortalAccountService {
 
     private final PasswordEncoder passwordEncoder;

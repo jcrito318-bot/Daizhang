@@ -1,5 +1,6 @@
 package com.company.daizhang.module.accountset.controller;
 
+import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.annotation.SensitiveOperation;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
@@ -8,13 +9,17 @@ import com.company.daizhang.module.accountset.dto.AccountSetQueryRequest;
 import com.company.daizhang.module.accountset.dto.AccountSetUpdateRequest;
 import com.company.daizhang.module.accountset.service.AccountSetService;
 import com.company.daizhang.module.accountset.vo.AccountSetVO;
+import com.company.daizhang.module.subject.service.SubjectService;
+import com.company.daizhang.module.voucher.service.VoucherTemplateService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 账套管理控制器
@@ -26,6 +31,8 @@ import java.util.List;
 public class AccountSetController {
     
     private final AccountSetService accountSetService;
+    private final SubjectService subjectService;
+    private final VoucherTemplateService voucherTemplateService;
     
     @Operation(summary = "分页查询账套")
     @GetMapping("/page")
@@ -89,5 +96,17 @@ public class AccountSetController {
     public Result<Void> init(@PathVariable Long id) {
         accountSetService.initAccountSet(id);
         return Result.success();
+    }
+
+    @Operation(summary = "跨账套复制科目体系+凭证模板(P5.0.1)")
+    @PostMapping("/{targetId}/copy-from/{sourceId}")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
+    public Result<Map<String, Integer>> copyFromAccountSet(@PathVariable Long targetId, @PathVariable Long sourceId) {
+        int subjectCount = subjectService.copySubjectsFromAccountSet(sourceId, targetId);
+        int templateCount = voucherTemplateService.copyTemplatesFromAccountSet(sourceId, targetId);
+        Map<String, Integer> result = new HashMap<>();
+        result.put("subjectCount", subjectCount);
+        result.put("templateCount", templateCount);
+        return Result.success(result);
     }
 }

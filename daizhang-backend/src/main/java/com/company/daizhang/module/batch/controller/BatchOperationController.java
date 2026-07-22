@@ -4,15 +4,18 @@ import com.company.daizhang.common.annotation.OperationLog;
 import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
+import com.company.daizhang.module.batch.dto.BatchDepreciationRequest;
 import com.company.daizhang.module.batch.dto.BatchHistoryQueryRequest;
 import com.company.daizhang.module.batch.dto.BatchOperationResponse;
 import com.company.daizhang.module.batch.dto.BatchPeriodCloseRequest;
+import com.company.daizhang.module.batch.dto.BatchReportExportRequest;
 import com.company.daizhang.module.batch.dto.BatchReportGenerateRequest;
 import com.company.daizhang.module.batch.dto.BatchVoucherAuditRequest;
 import com.company.daizhang.module.batch.service.BatchOperationService;
 import com.company.daizhang.module.system.entity.SysOperationLog;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -68,6 +71,21 @@ public class BatchOperationController {
     @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<BatchOperationResponse> batchGenerateReport(@Valid @RequestBody BatchReportGenerateRequest request) {
         BatchOperationResponse response = batchOperationService.batchGenerateReport(request);
+        return Result.success(response);
+    }
+
+    @PostMapping("/report/export-zip")
+    @Operation(summary = "批量导出报表(zip 打包)(P5.1.1)")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
+    public void batchExportReportZip(@Valid @RequestBody BatchReportExportRequest request, HttpServletResponse response) {
+        batchOperationService.batchExportReportZip(request, response);
+    }
+
+    @PostMapping("/asset/depreciation/calculate")
+    @Operation(summary = "跨账套批量计提固定资产折旧(P5.1.2)")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
+    public Result<BatchOperationResponse> batchCalculateDepreciation(@Valid @RequestBody BatchDepreciationRequest request) {
+        BatchOperationResponse response = batchOperationService.batchCalculateDepreciation(request);
         return Result.success(response);
     }
 

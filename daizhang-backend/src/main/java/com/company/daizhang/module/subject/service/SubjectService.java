@@ -42,4 +42,13 @@ public interface SubjectService extends IService<Subject> {
      * 删除科目
      */
     void deleteSubject(Long id);
+
+    /**
+     * 跨账套复制科目体系(P5.0.1)
+     * 将源账套的全部科目复制到目标账套。parentId 重新映射。
+     * @param sourceAccountSetId 源账套ID
+     * @param targetAccountSetId 目标账套ID
+     * @return 复制的科目数量
+     */
+    int copySubjectsFromAccountSet(Long sourceAccountSetId, Long targetAccountSetId);
 }

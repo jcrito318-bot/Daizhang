@@ -9,17 +9,21 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
 /**
  * 客户看账门户控制器
+ * <p>
+ * P5 代账定位精简:默认关闭。通过 {@code app.module.portal-account.enabled=true} 启用。
  */
 @Tag(name = "客户看账门户管理")
 @RestController
 @RequestMapping("/portal-account")
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "app.module.portal-account.enabled", havingValue = "true", matchIfMissing = false)
 public class PortalAccountController {
 
     private final PortalAccountService portalAccountService;

@@ -74,4 +74,14 @@ public interface VoucherTemplateService extends IService<VoucherTemplate> {
      * @return 模板视图对象(含明细)
      */
     VoucherTemplateVO applyTemplate(Long id);
+
+    /**
+     * 跨账套复制凭证模板(P5.0.1)
+     * 将源账套的全部凭证模板复制到目标账套。
+     * detailJson 用 subjectCode 引用科目,无需 ID 重映射。
+     * @param sourceAccountSetId 源账套ID
+     * @param targetAccountSetId 目标账套ID
+     * @return 复制的模板数量
+     */
+    int copyTemplatesFromAccountSet(Long sourceAccountSetId, Long targetAccountSetId);
 }

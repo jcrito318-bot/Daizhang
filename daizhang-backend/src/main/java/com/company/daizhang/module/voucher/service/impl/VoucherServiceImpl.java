@@ -1237,7 +1237,14 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         accountSetAccessService.checkOwner(original.getAccountSetId());
         // 红冲仅对已过账凭证有意义（status=2），未审核/未过账凭证不可红冲
         if (original.getStatus() == null || original.getStatus() != 2) {
-            throw new BusinessException(ErrorCode.PARAM_ERROR, "只有已过账的凭证才能红冲");
+            throw new BusinessException(ErrorCode.VOUCHER_CANNOT_REVERSE);
+        }
+        // P5.2.1 红冲幂等校验:原凭证已被红冲则不允许重复红冲
+        // 通过 original_voucher_id 外键关联(此前仅靠摘要软关联,无法可靠判重)
+        LambdaQueryWrapper<Voucher> reversedWrapper = new LambdaQueryWrapper<>();
+        reversedWrapper.eq(Voucher::getOriginalVoucherId, id);
+        if (this.count(reversedWrapper) > 0) {
+            throw new BusinessException(ErrorCode.VOUCHER_REVERSED);
         }
 
         // 确定红冲凭证的目标期间：未指定时默认取原凭证期间
@@ -1291,6 +1298,9 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
         // source=2 标识"系统红冲"凭证(0-手工录入 1-系统结转 2-系统红冲),
         // 便于报表/审计按来源筛选红冲凭证,与手工录入凭证区分
         newVoucher.setSource(2);
+        // P5.2.1 外键关联原凭证,替代此前仅靠摘要"[红冲]原凭证号"的软关联,
+        // 支撑"是否已被红冲"判重及红冲溯源查询
+        newVoucher.setOriginalVoucherId(original.getId());
 
         // 生成凭证号+save整体重试,防止并发下凭证号唯一索引冲突(与createVoucher一致)
         String newVoucherNo = null;

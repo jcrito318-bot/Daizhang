@@ -136,6 +136,15 @@ app:
     iv-length: 12
     # GCM 认证标签 128 位(16 字节)
     tag-length: 128
+  # 模块功能开关(P5 代账定位精简)
+  # 客户门户:代账公司是乙方,客户无需自助登录查账,默认关闭
+  # 工商年报:已对接外部系统,本系统内不再维护,默认关闭
+  module:
+    portal-account:
+      enabled: ${PORTAL_ACCOUNT_ENABLED:false}
+    industry-commerce:
+      enabled: ${INDUSTRY_COMMERCE_ENABLED:false}
+
   # P4.2 / P4.3 安全策略配置
   security:
     # 2FA 临时 token 有效期(秒),仅用于登录后 2FA 验证阶段

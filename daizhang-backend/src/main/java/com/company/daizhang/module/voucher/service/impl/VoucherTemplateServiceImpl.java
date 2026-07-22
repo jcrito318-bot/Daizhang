@@ -26,7 +26,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -186,6 +188,70 @@ public class VoucherTemplateServiceImpl extends ServiceImpl<VoucherTemplateMappe
 
         log.info("应用凭证模板,模板ID: {}, 模板名称: {}", id, template.getTemplateName());
         return vo;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public int copyTemplatesFromAccountSet(Long sourceAccountSetId, Long targetAccountSetId) {
+        // IDOR治理:源账套读权限,目标账套写权限
+        accountSetAccessService.checkAccess(sourceAccountSetId);
+        accountSetAccessService.checkOwner(targetAccountSetId);
+
+        // 拉取源模板
+        List<VoucherTemplate> sourceTemplates = this.list(new LambdaQueryWrapper<VoucherTemplate>()
+                .eq(VoucherTemplate::getAccountSetId, sourceAccountSetId));
+
+        if (sourceTemplates.isEmpty()) {
+            log.info("源账套ID: {} 无凭证模板,跳过复制", sourceAccountSetId);
+            return 0;
+        }
+
+        // 收集目标账套已有的 templateCode,用于冲突检测
+        List<VoucherTemplate> targetTemplates = this.list(new LambdaQueryWrapper<VoucherTemplate>()
+                .eq(VoucherTemplate::getAccountSetId, targetAccountSetId)
+                .select(VoucherTemplate::getTemplateCode));
+        Set<String> existingCodes = new HashSet<>();
+        for (VoucherTemplate t : targetTemplates) {
+            if (t.getTemplateCode() != null) {
+                existingCodes.add(t.getTemplateCode());
+            }
+        }
+
+        int count = 0;
+        for (VoucherTemplate source : sourceTemplates) {
+            VoucherTemplate target = new VoucherTemplate();
+            BeanUtil.copyProperties(source, target);
+            // 清空基类字段,让 MyBatis-Plus 自动填充
+            target.setId(null);
+            target.setCreateBy(null);
+            target.setCreateTime(null);
+            target.setUpdateBy(null);
+            target.setUpdateTime(null);
+            target.setDeleted(null);
+            target.setVersion(null);
+            // 切换到目标账套
+            target.setAccountSetId(targetAccountSetId);
+            // 处理 templateCode 冲突:若目标账套已有相同 templateCode,加后缀 "_copy"
+            String code = source.getTemplateCode();
+            if (existingCodes.contains(code)) {
+                String newCode = code + "_copy";
+                int suffix = 2;
+                while (existingCodes.contains(newCode)) {
+                    newCode = code + "_copy_" + suffix++;
+                }
+                target.setTemplateCode(newCode);
+                existingCodes.add(newCode);
+            } else {
+                existingCodes.add(code);
+            }
+            // detailJson 原样复制(用 subjectCode 引用科目,跨账套无需 ID 重映射)
+            this.save(target);
+            count++;
+        }
+
+        log.info("跨账套复制凭证模板成功,源账套ID: {}, 目标账套ID: {}, 复制数量: {}",
+                sourceAccountSetId, targetAccountSetId, count);
+        return count;
     }
 
     // ==================== 私有辅助方法 ====================

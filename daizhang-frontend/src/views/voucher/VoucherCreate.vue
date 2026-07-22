@@ -10,6 +10,9 @@
             </el-button>
             <el-button @click="handleBack">返回</el-button>
             <el-button type="primary" :loading="submitLoading" @click="handleSubmit">保存</el-button>
+            <el-tooltip content="Ctrl+S 保存 | Ctrl+Enter 新增行 | Alt+T 模板 | Esc 返回" placement="bottom">
+              <el-icon class="shortcut-hint-icon"><QuestionFilled /></el-icon>
+            </el-tooltip>
           </div>
         </div>
       </template>
@@ -180,10 +183,11 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { DocumentCopy, Plus } from '@element-plus/icons-vue'
+import { DocumentCopy, Plus, QuestionFilled } from '@element-plus/icons-vue'
 import { voucherApi, templateApi, abstractApi } from '@/api/voucher'
 import { subjectApi } from '@/api/subject'
 import { useAppStore } from '@/stores/app'
+import { useShortcut } from '@/composables/useShortcut'
 import type {
   VoucherCreateRequest,
   VoucherDetailRequest,
@@ -573,6 +577,15 @@ async function loadVoucherDetail(id: number) {
   }
 }
 
+// 凭证录入快捷键(P5.3.1):Ctrl+S 保存 / Ctrl+Enter 新增分录行 / Alt+T 打开模板 / Esc 返回
+// 仅绑定带修饰键的组合或 Escape,避免与 el-select/el-input-number 的 Enter/方向键行为冲突
+useShortcut([
+  { ctrl: true, key: 's', handler: () => handleSubmit() },
+  { ctrl: true, key: 'enter', handler: () => handleAddRow() },
+  { alt: true, key: 't', handler: () => handleOpenTemplateDialog() },
+  { key: 'escape', handler: () => handleBack() }
+])
+
 // 离开页面提示:有未保存改动时弹窗确认
 onBeforeRouteLeave(async (_to, _from, next) => {
   if (!formDirty.value) {
@@ -634,6 +647,15 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+// 快捷键提示图标:与保存按钮垂直对齐
+.shortcut-hint-icon {
+  margin-left: 8px;
+  font-size: 16px;
+  color: #909399;
+  cursor: help;
+  vertical-align: middle;
 }
 
 .voucher-header {

@@ -65,6 +65,9 @@ public enum ErrorCode {
     VOUCHER_YEAR_INVALID(3021, "年度格式不正确"),
     VOUCHER_MONTH_INVALID(3022, "月份必须在1-12之间"),
     VOUCHER_ALREADY_CANCELED(3023, "凭证已作废"),
+    // P5.2.1 红字冲销相关 3024-3025
+    VOUCHER_CANNOT_REVERSE(3024, "该凭证状态不允许红冲,仅已过账凭证可红冲"),
+    VOUCHER_REVERSED(3025, "该凭证已被红冲,不能重复红冲"),
     VOUCHER_TEMPLATE_NOT_FOUND(3031, "凭证模板不存在"),
     VOUCHER_TEMPLATE_DETAIL_EMPTY(3032, "凭证模板明细不能为空"),
     VOUCHER_TEMPLATE_CODE_DUPLICATE(3033, "模板编码已存在"),

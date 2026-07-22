@@ -60,4 +60,7 @@ public class Voucher extends BaseEntity {
      * 草稿状态 0-正常 1-草稿
      */
     private Integer draftStatus;
+
+    /** 红冲关联的原凭证ID(P5.2.1,null=非红冲凭证) */
+    private Long originalVoucherId;
 }

@@ -1,12 +1,15 @@
 package com.company.daizhang.module.batch.service;
 
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.batch.dto.BatchDepreciationRequest;
 import com.company.daizhang.module.batch.dto.BatchOperationResponse;
 import com.company.daizhang.module.batch.dto.BatchPeriodCloseRequest;
+import com.company.daizhang.module.batch.dto.BatchReportExportRequest;
 import com.company.daizhang.module.batch.dto.BatchReportGenerateRequest;
 import com.company.daizhang.module.batch.dto.BatchVoucherAuditRequest;
 import com.company.daizhang.module.batch.dto.BatchHistoryQueryRequest;
 import com.company.daizhang.module.system.entity.SysOperationLog;
+import jakarta.servlet.http.HttpServletResponse;
 
 /**
  * 跨账套批量操作服务
@@ -55,4 +58,25 @@ public interface BatchOperationService {
      * @return 操作日志分页结果
      */
     PageResult<SysOperationLog> queryHistory(BatchHistoryQueryRequest request);
+
+    /**
+     * 批量导出报表(zip 打包,跨多个账套)
+     * <p>
+     * 遍历每个账套及报表类型,生成 Excel 并打包为 zip 流式写入响应。
+     * 单个账套或单个报表类型失败时跳过并告警,不中断整个 zip。
+     *
+     * @param request  批量导出报表请求
+     * @param response HTTP 响应(写入 zip 流)
+     */
+    void batchExportReportZip(BatchReportExportRequest request, HttpServletResponse response);
+
+    /**
+     * 跨账套批量计提固定资产折旧
+     * <p>
+     * 每个账套独立事务(per item 事务),单个账套失败不影响其他账套。
+     *
+     * @param request 批量计提折旧请求
+     * @return 批量操作响应(含每个账套的结果)
+     */
+    BatchOperationResponse batchCalculateDepreciation(BatchDepreciationRequest request);
 }

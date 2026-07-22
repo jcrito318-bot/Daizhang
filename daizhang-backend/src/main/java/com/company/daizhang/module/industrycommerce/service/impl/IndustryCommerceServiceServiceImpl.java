@@ -23,6 +23,7 @@ import com.company.daizhang.module.system.entity.SysUser;
 import com.company.daizhang.module.system.mapper.SysUserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,11 +35,15 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * 工商服务实现
+ * 工商服务管理实现
+ * <p>
+ * P5 代账定位精简:工商年报已对接外部系统,本系统内默认关闭。
+ * 通过 {@code app.module.industry-commerce.enabled=true} 启用。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@ConditionalOnProperty(name = "app.module.industry-commerce.enabled", havingValue = "true", matchIfMissing = false)
 public class IndustryCommerceServiceServiceImpl implements IndustryCommerceServiceService {
 
     private final IndustryCommerceServiceMapper industryCommerceServiceMapper;

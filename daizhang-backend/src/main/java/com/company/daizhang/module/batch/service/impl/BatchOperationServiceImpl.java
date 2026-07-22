@@ -6,10 +6,14 @@ import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.module.accountset.entity.AccountSet;
 import com.company.daizhang.module.accountset.mapper.AccountSetMapper;
 import com.company.daizhang.module.accountset.service.AccountSetAccessService;
+import com.company.daizhang.module.asset.dto.DepreciationRequest;
+import com.company.daizhang.module.asset.service.AssetService;
+import com.company.daizhang.module.batch.dto.BatchDepreciationRequest;
 import com.company.daizhang.module.batch.dto.BatchHistoryQueryRequest;
 import com.company.daizhang.module.batch.dto.BatchOperationResponse;
 import com.company.daizhang.module.batch.dto.BatchOperationResultVO;
 import com.company.daizhang.module.batch.dto.BatchPeriodCloseRequest;
+import com.company.daizhang.module.batch.dto.BatchReportExportRequest;
 import com.company.daizhang.module.batch.dto.BatchReportGenerateRequest;
 import com.company.daizhang.module.batch.dto.BatchVoucherAuditRequest;
 import com.company.daizhang.module.batch.service.BatchOperationService;
@@ -17,6 +21,11 @@ import com.company.daizhang.module.period.service.PeriodService;
 import com.company.daizhang.module.period.vo.ClosePeriodResultVO;
 import com.company.daizhang.module.report.dto.ReportQueryRequest;
 import com.company.daizhang.module.report.service.ReportService;
+import com.company.daizhang.module.report.util.ReportExcelUtil;
+import com.company.daizhang.module.report.vo.BalanceSheetVO;
+import com.company.daizhang.module.report.vo.CashFlowStatementVO;
+import com.company.daizhang.module.report.vo.IncomeStatementVO;
+import com.company.daizhang.module.report.vo.SubjectBalanceTableVO;
 import com.company.daizhang.module.system.entity.SysOperationLog;
 import com.company.daizhang.module.system.service.SysOperationLogService;
 import com.company.daizhang.module.voucher.entity.Voucher;
@@ -24,12 +33,17 @@ import com.company.daizhang.module.voucher.mapper.VoucherMapper;
 import com.company.daizhang.module.voucher.service.VoucherService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import jakarta.annotation.PostConstruct;
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -38,6 +52,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 /**
  * 跨账套批量操作服务实现
@@ -60,6 +76,8 @@ public class BatchOperationServiceImpl implements BatchOperationService {
     private final VoucherService voucherService;
     private final PeriodService periodService;
     private final ReportService reportService;
+    private final ReportExcelUtil reportExcelUtil;
+    private final AssetService assetService;
     private final AccountSetAccessService accountSetAccessService;
     private final AccountSetMapper accountSetMapper;
     private final VoucherMapper voucherMapper;
@@ -208,6 +226,84 @@ public class BatchOperationServiceImpl implements BatchOperationService {
                 request.getStartDate(), request.getEndDate(), pageNum, pageSize);
     }
 
+    @Override
+    public void batchExportReportZip(BatchReportExportRequest request, HttpServletResponse response) {
+        log.info("批量导出报表(zip)开始, 账套数量={}", request.getItems().size());
+        Map<Long, String> accountSetNameMap = loadAccountSetNames(request.getItems().stream()
+                .map(BatchReportExportRequest.ReportExportItem::getAccountSetId)
+                .collect(Collectors.toList()));
+
+        // 设置响应头:zip 流式下载,文件名 reports_{timestamp}.zip
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        String zipFileName = "reports_" + timestamp + ".zip";
+        response.setContentType("application/zip");
+        response.setCharacterEncoding("utf-8");
+        response.setHeader("Content-Disposition", "attachment; filename=\"" + zipFileName + "\"");
+
+        try (ZipOutputStream zos = new ZipOutputStream(response.getOutputStream())) {
+            for (BatchReportExportRequest.ReportExportItem item : request.getItems()) {
+                Long accountSetId = item.getAccountSetId();
+                String accountSetName = accountSetNameMap.getOrDefault(accountSetId, String.valueOf(accountSetId));
+                // 单个账套内多报表类型逐个 try-catch,失败跳过不中断整个 zip
+                for (String reportType : item.getReportTypes()) {
+                    // try-with-resources 关闭 workbook;失败时仅告警并跳过
+                    try (XSSFWorkbook workbook = buildReportWorkbook(reportType, accountSetId,
+                            item.getYear(), item.getMonth())) {
+                        String reportName = REPORT_TYPE_MAP.getOrDefault(reportType, reportType);
+                        String entryName = accountSetName + "_" + reportName + "_"
+                                + item.getYear() + "_" + item.getMonth() + ".xlsx";
+                        zos.putNextEntry(new ZipEntry(entryName));
+                        workbook.write(zos);
+                        zos.closeEntry();
+                    } catch (Exception e) {
+                        // 单个报表类型失败:跳过并告警,不影响其他文件
+                        log.warn("批量导出报表失败, 账套ID={}, 报表类型={}: {}", accountSetId, reportType, e.getMessage());
+                    }
+                }
+            }
+        } catch (IOException e) {
+            log.error("批量导出报表 zip 写入失败", e);
+            throw new BusinessException("批量导出报表失败: " + e.getMessage());
+        }
+        log.info("批量导出报表(zip)完成");
+    }
+
+    @Override
+    public BatchOperationResponse batchCalculateDepreciation(BatchDepreciationRequest request) {
+        log.info("批量计提折旧开始, 账套数量={}", request.getItems().size());
+        Map<Long, String> accountSetNameMap = loadAccountSetNames(request.getItems().stream()
+                .map(BatchDepreciationRequest.DepreciationItem::getAccountSetId)
+                .collect(Collectors.toList()));
+
+        List<BatchOperationResultVO> results = new ArrayList<>();
+        for (BatchDepreciationRequest.DepreciationItem item : request.getItems()) {
+            // per item 事务:每个账套的计提在独立事务中执行,失败仅回滚该账套
+            BatchOperationResultVO result = transactionTemplate.execute(status -> {
+                BatchOperationResultVO r = new BatchOperationResultVO();
+                r.setAccountSetId(item.getAccountSetId());
+                r.setAccountSetName(accountSetNameMap.get(item.getAccountSetId()));
+                try {
+                    accountSetAccessService.checkOwner(item.getAccountSetId());
+                    DepreciationRequest depReq = new DepreciationRequest();
+                    depReq.setAccountSetId(item.getAccountSetId());
+                    depReq.setYear(item.getYear());
+                    depReq.setMonth(item.getMonth());
+                    assetService.calculateDepreciation(depReq);
+                    r.setStatus(BatchOperationResultVO.STATUS_SUCCESS);
+                    r.setMessage("折旧计提成功");
+                } catch (Exception e) {
+                    status.setRollbackOnly();
+                    r.setStatus(BatchOperationResultVO.STATUS_FAILED);
+                    r.setMessage(e.getMessage());
+                    log.warn("批量计提折旧失败, 账套ID={}: {}", item.getAccountSetId(), e.getMessage());
+                }
+                return r;
+            });
+            results.add(result);
+        }
+        return buildResponse(results);
+    }
+
     // ==================== 单账套处理逻辑 ====================
 
     /**
@@ -319,6 +415,44 @@ public class BatchOperationServiceImpl implements BatchOperationService {
             case "subject-balance":
                 reportService.subjectBalanceTable(request);
                 break;
+            default:
+                throw new BusinessException("不支持的报表类型：" + reportType);
+        }
+    }
+
+    /**
+     * 根据报表类型生成数据并构建 Excel Workbook(供批量 zip 打包复用)
+     * <p>
+     * 权限校验:报表为只读操作,ACCESS 级别(OWNER/ACCOUNTANT/VIEWER)即可。
+     *
+     * @param reportType  报表类型
+     * @param accountSetId 账套ID
+     * @param year         年度
+     * @param month        月份
+     * @return 已填充的 XSSFWorkbook(调用方负责关闭)
+     */
+    private XSSFWorkbook buildReportWorkbook(String reportType, Long accountSetId, Integer year, Integer month) {
+        // 权限校验:报表为只读操作,ACCESS 级别(OWNER/ACCOUNTANT/VIEWER)即可
+        accountSetAccessService.checkAccess(accountSetId);
+
+        ReportQueryRequest reportRequest = new ReportQueryRequest();
+        reportRequest.setAccountSetId(accountSetId);
+        reportRequest.setYear(year);
+        reportRequest.setMonth(month);
+
+        switch (reportType) {
+            case "balance-sheet":
+                BalanceSheetVO balanceData = reportService.balanceSheet(reportRequest);
+                return reportExcelUtil.buildBalanceSheetWorkbook(balanceData, year, month);
+            case "income-statement":
+                IncomeStatementVO incomeData = reportService.incomeStatement(reportRequest);
+                return reportExcelUtil.buildIncomeStatementWorkbook(incomeData, year, month);
+            case "cash-flow-statement":
+                CashFlowStatementVO cashFlowData = reportService.cashFlowStatement(accountSetId, year, month);
+                return reportExcelUtil.buildCashFlowStatementWorkbook(cashFlowData, year, month);
+            case "subject-balance":
+                SubjectBalanceTableVO subjectBalanceData = reportService.subjectBalanceTable(reportRequest);
+                return reportExcelUtil.buildSubjectBalanceTableWorkbook(subjectBalanceData, year, month);
             default:
                 throw new BusinessException("不支持的报表类型：" + reportType);
         }
