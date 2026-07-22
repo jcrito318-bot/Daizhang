@@ -40,6 +40,7 @@ public class TaxRiskWarningController {
 
     @Operation(summary = "创建风险预警")
     @PostMapping
+    @RequireAccountSetAccess(RequireAccountSetAccess.AccessLevel.OWNER)
     public Result<Void> create(@Valid @RequestBody TaxRiskWarningRequest request) {
         taxRiskWarningService.createWarning(request);
         return Result.success();

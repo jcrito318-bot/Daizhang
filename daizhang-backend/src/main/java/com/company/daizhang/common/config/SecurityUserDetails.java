@@ -64,6 +64,6 @@ public class SecurityUserDetails implements UserDetails {
 
     @Override
     public boolean isEnabled() {
-        return status == 1;
+        return status != null && status == 1;
     }
 }

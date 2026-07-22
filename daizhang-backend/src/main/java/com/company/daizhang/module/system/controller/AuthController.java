@@ -176,10 +176,13 @@ public class AuthController {
                     "账户已被锁定,请稍后再试", locked);
         }
 
+        boolean authed = false;
         try {
             Authentication authentication = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(username, request.getPassword())
             );
+            // 认证成功,后续异常(如DB抖动)不应被误记为登录失败
+            authed = true;
 
             SecurityContextHolder.getContext().setAuthentication(authentication);
             SecurityUserDetails userDetails = (SecurityUserDetails) authentication.getPrincipal();
@@ -225,8 +228,10 @@ public class AuthController {
             return Result.success("登录成功", response);
         } catch (Exception e) {
             log.error("登录失败: {}", e.getMessage());
-            // P4.3: 记录失败尝试
-            loginAttemptService.recordFailure(username, clientIp);
+            // P4.3: 仅在认证未通过时记录失败尝试,认证成功后的异常不应误锁账户
+            if (!authed) {
+                loginAttemptService.recordFailure(username, clientIp);
+            }
             int remaining = loginAttemptService.getRemainingAttempts(username);
             // 记录登录失败日志,userId为null(认证未通过)
             saveLoginLog(username, null, 1, 0, clientIp, userAgent, "用户名或密码错误");
@@ -268,15 +273,37 @@ public class AuthController {
                     "临时令牌无效");
         }
 
+        // BF-01 修复:2FA 验证码速率限制,防止暴力枚举 6 位 TOTP 码。
+        // 按 tempToken 中的用户维度(用户名)做失败计数,达到阈值(5次)后锁定,tempToken 失效。
+        if (loginAttemptService.isLocked(username)) {
+            int remaining = loginAttemptService.getRemainingAttempts(username);
+            log.warn("用户 {} 2FA 验证被锁定(剩余尝试次数 {})", username, remaining);
+            saveLoginLog(username, userId, 1, 0, clientIp, userAgent, "2FA验证码已被锁定");
+            return Result.error(ErrorCode.USER_ACCOUNT_LOCKED.getCode(),
+                    "验证码尝试次数过多,请稍后再试");
+        }
+
         // 验证 TOTP code(优先验证 6 位码,失败再验证备用码)
         boolean codeOk = totpService.verifyCode(userId, request.getCode());
         if (!codeOk) {
             codeOk = totpService.verifyBackupCode(userId, request.getCode());
         }
         if (!codeOk) {
+            // BF-01 修复:记录 2FA 验证失败,达到阈值后锁定
+            loginAttemptService.recordFailure(username, clientIp);
+            int remaining = loginAttemptService.getRemainingAttempts(username);
             saveLoginLog(username, userId, 1, 0, clientIp, userAgent, "2FA验证码错误");
-            return Result.error(ErrorCode.TWO_FACTOR_CODE_INVALID.getCode(), "双因素验证码错误");
+            String msg = remaining > 0
+                    ? "双因素验证码错误,剩余尝试次数 " + remaining
+                    : "验证码尝试次数过多,账户已被锁定,请稍后再试";
+            int code = remaining > 0
+                    ? ErrorCode.TWO_FACTOR_CODE_INVALID.getCode()
+                    : ErrorCode.USER_ACCOUNT_LOCKED.getCode();
+            return Result.error(code, msg);
         }
+
+        // BF-01 修复:2FA 验证通过,清除验证码失败计数,避免遗留失败记录误锁
+        loginAttemptService.recordSuccess(username);
 
         // 2FA 验证通过,签发正式 token + refresh token
         String token = jwtUtils.generateToken(userId, username);

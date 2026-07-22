@@ -16,12 +16,9 @@ import com.company.daizhang.module.voucher.entity.Voucher;
 import com.company.daizhang.module.voucher.entity.VoucherDetail;
 import com.company.daizhang.module.voucher.mapper.VoucherDetailMapper;
 import com.company.daizhang.module.voucher.mapper.VoucherMapper;
-import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -33,14 +30,8 @@ import java.util.stream.Collectors;
  * <p>
  * 一键完成"结转损益 + 结账 + 下月开启"的月末结账流程。
  * <p>
- * 事务策略:整个流程通过 {@link TransactionTemplate} 包裹在单个事务中,
- * 任一必选步骤失败则调用 {@code status.setRollbackOnly()} 标记回滚,
- * 同时仍正常返回 {@link PeriodCloseWizardVO} 以便前端展示各步骤明细。
- * <p>
- * 注意:不使用 @Transactional 注解,因为需要在 catch 异常后继续返回 VO 而非抛出。
- * 内层 {@link PeriodService} 方法(@Transactional)抛异常时会设置 globalRollbackOnly,
- * 外层 catch 后由 TransactionTemplate.commit 触发 UnexpectedRollbackException,
- * 显式调用 {@code status.setRollbackOnly()} 设置 localRollbackOnly 可规避此问题。
+ * 事务策略:各步骤独立执行,内层 {@link PeriodService} 方法(@Transactional)各自独立事务,
+ * 失败步骤仅回滚该步骤,后续步骤继续执行(保持向导设计意图),最终汇总 VO 正常返回。
  */
 @Slf4j
 @Service
@@ -51,10 +42,6 @@ public class PeriodCloseWizardServiceImpl implements PeriodCloseWizardService {
     private final AccountPeriodMapper accountPeriodMapper;
     private final VoucherMapper voucherMapper;
     private final VoucherDetailMapper voucherDetailMapper;
-    private final PlatformTransactionManager transactionManager;
-
-    /** 事务模板(由 PlatformTransactionManager 构造,避免依赖自动配置 Bean) */
-    private TransactionTemplate transactionTemplate;
 
     /**
      * 步骤 3"结转损益"识别用摘要。
@@ -75,11 +62,6 @@ public class PeriodCloseWizardServiceImpl implements PeriodCloseWizardService {
             "下月开启"         // 7
     };
 
-    @PostConstruct
-    void initTransactionTemplate() {
-        this.transactionTemplate = new TransactionTemplate(transactionManager);
-    }
-
     @Override
     public PeriodCloseWizardVO executeCloseWizard(Long accountSetId, int year, int month,
                                                    PeriodCloseWizardRequest request) {
@@ -94,83 +76,78 @@ public class PeriodCloseWizardServiceImpl implements PeriodCloseWizardService {
         log.info("期末结账向导开始, 账套ID={}, 期间={}-{}, skipOptional={}, autoClose={}",
                 accountSetId, year, month, skipOptional, autoClose);
 
-        // 使用 TransactionTemplate 在单个事务中执行所有步骤
-        PeriodCloseWizardVO vo = transactionTemplate.execute(status -> {
-            PeriodCloseWizardVO result = new PeriodCloseWizardVO();
-            List<WizardStepResult> steps = new ArrayList<>(7);
-            result.setSteps(steps);
-            boolean aborted = false;
+        // 各步骤独立事务执行(内层 @Transactional 方法各自独立事务),
+        // 失败步骤仅回滚该步骤,后续步骤继续执行(保持向导设计意图),最终汇总 VO 正常返回
+        PeriodCloseWizardVO vo = new PeriodCloseWizardVO();
+        List<WizardStepResult> steps = new ArrayList<>(7);
+        vo.setSteps(steps);
+        boolean aborted = false;
 
-            // 前置校验:本期已结账则全部跳过,不执行任何写操作
-            AccountPeriod period = findPeriod(accountSetId, year, month);
-            if (period != null && PeriodStatus.CLOSED.getCode().equals(period.getStatus())) {
-                for (int i = 1; i <= 7; i++) {
-                    steps.add(WizardStepResult.skipped(i, STEP_NAMES[i - 1],
-                            "本期已结账,无需重复执行结账向导"));
-                }
-                result.setNextPeriodOpened(false);
-                applySummary(result, false);
-                return result;
+        // 前置校验:本期已结账则全部跳过,不执行任何写操作
+        AccountPeriod period = findPeriod(accountSetId, year, month);
+        if (period != null && PeriodStatus.CLOSED.getCode().equals(period.getStatus())) {
+            for (int i = 1; i <= 7; i++) {
+                steps.add(WizardStepResult.skipped(i, STEP_NAMES[i - 1],
+                        "本期已结账,无需重复执行结账向导"));
             }
+            vo.setNextPeriodOpened(false);
+            applySummary(vo, false);
+            log.info("期末结账向导完成, 账套ID={}, 期间={}-{}, 整体状态={}, 成功={}, 失败={}, 跳过={}, 下月已开={}",
+                    accountSetId, year, month, vo.getOverallStatus(),
+                    vo.getSuccessCount(), vo.getFailedCount(), vo.getSkippedCount(), vo.isNextPeriodOpened());
+            return vo;
+        }
 
-            // ============ 步骤 1: 数据完整性检查 ============
-            WizardStepResult step1 = executeDataIntegrityCheck(accountSetId, year, month);
-            steps.add(step1);
-            if (WizardStepResult.STATUS_FAILED.equals(step1.getStatus()) && autoClose) {
-                // autoClose=true: 数据完整性检查失败,中止后续步骤
-                aborted = true;
-            }
+        // ============ 步骤 1: 数据完整性检查 ============
+        WizardStepResult step1 = executeDataIntegrityCheck(accountSetId, year, month);
+        steps.add(step1);
+        if (WizardStepResult.STATUS_FAILED.equals(step1.getStatus()) && autoClose) {
+            // autoClose=true: 数据完整性检查失败,中止后续步骤
+            aborted = true;
+        }
 
-            // ============ 步骤 2: 期末调汇(预留,暂未实现) ============
-            steps.add(buildSkippedStep(2, aborted, "期末调汇",
-                    "本期暂未实现期末调汇,已跳过"));
+        // ============ 步骤 2: 期末调汇(预留,暂未实现) ============
+        steps.add(buildSkippedStep(2, aborted, "期末调汇",
+                "本期暂未实现期末调汇,已跳过"));
 
-            // ============ 步骤 3: 结转损益 ============
-            WizardStepResult step3 = aborted
-                    ? WizardStepResult.skipped(3, "结转损益", "前序步骤失败,本步骤已跳过")
-                    : executeCarryForward(accountSetId, year, month);
-            steps.add(step3);
-            if (WizardStepResult.STATUS_FAILED.equals(step3.getStatus())) {
-                aborted = true;
-            }
+        // ============ 步骤 3: 结转损益 ============
+        WizardStepResult step3 = aborted
+                ? WizardStepResult.skipped(3, "结转损益", "前序步骤失败,本步骤已跳过")
+                : executeCarryForward(accountSetId, year, month);
+        steps.add(step3);
+        if (WizardStepResult.STATUS_FAILED.equals(step3.getStatus())) {
+            aborted = true;
+        }
 
-            // ============ 步骤 4: 结转成本(可选,商业账套跳过) ============
-            steps.add(buildSkippedStep(4, aborted, "结转成本",
-                    skipOptional ? "可选步骤,已跳过" : "暂未实现,已跳过"));
+        // ============ 步骤 4: 结转成本(可选,商业账套跳过) ============
+        steps.add(buildSkippedStep(4, aborted, "结转成本",
+                skipOptional ? "可选步骤,已跳过" : "暂未实现,已跳过"));
 
-            // ============ 步骤 5: 计提折旧(可选,依赖固定资产模块) ============
-            steps.add(buildSkippedStep(5, aborted, "计提折旧",
-                    skipOptional ? "可选步骤,已跳过" : "暂未实现,已跳过"));
+        // ============ 步骤 5: 计提折旧(可选,依赖固定资产模块) ============
+        steps.add(buildSkippedStep(5, aborted, "计提折旧",
+                skipOptional ? "可选步骤,已跳过" : "暂未实现,已跳过"));
 
-            // ============ 步骤 6: 结账 ============
-            WizardStepResult step6 = aborted
-                    ? WizardStepResult.skipped(6, "结账", "前序步骤失败,本步骤已跳过")
-                    : executeClosePeriod(accountSetId, year, month);
-            steps.add(step6);
-            if (WizardStepResult.STATUS_FAILED.equals(step6.getStatus())) {
-                aborted = true;
-            }
+        // ============ 步骤 6: 结账 ============
+        WizardStepResult step6 = aborted
+                ? WizardStepResult.skipped(6, "结账", "前序步骤失败,本步骤已跳过")
+                : executeClosePeriod(accountSetId, year, month);
+        steps.add(step6);
+        if (WizardStepResult.STATUS_FAILED.equals(step6.getStatus())) {
+            aborted = true;
+        }
 
-            // ============ 步骤 7: 下月开启 ============
-            WizardStepResult step7 = aborted
-                    ? WizardStepResult.skipped(7, "下月开启", "前序步骤失败,本步骤已跳过")
-                    : executeOpenNextPeriod(accountSetId, year, month);
-            steps.add(step7);
-            if (WizardStepResult.STATUS_FAILED.equals(step7.getStatus())) {
-                aborted = true;
-            }
-            result.setNextPeriodOpened(WizardStepResult.STATUS_SUCCESS.equals(step7.getStatus()));
+        // ============ 步骤 7: 下月开启 ============
+        WizardStepResult step7 = aborted
+                ? WizardStepResult.skipped(7, "下月开启", "前序步骤失败,本步骤已跳过")
+                : executeOpenNextPeriod(accountSetId, year, month);
+        steps.add(step7);
+        if (WizardStepResult.STATUS_FAILED.equals(step7.getStatus())) {
+            aborted = true;
+        }
+        vo.setNextPeriodOpened(WizardStepResult.STATUS_SUCCESS.equals(step7.getStatus()));
 
-            // 汇总各步骤状态,决定整体状态与是否回滚
-            applySummary(result, aborted);
-
-            // 任一必选步骤失败时标记事务回滚(显式设置 localRollbackOnly,
-            // 规避内层 @Transactional 抛异常后 TransactionTemplate.commit 抛 UnexpectedRollbackException)
-            if (PeriodCloseWizardVO.OVERALL_FAILED.equals(result.getOverallStatus())) {
-                status.setRollbackOnly();
-            }
-            return result;
-        });
+        // 汇总各步骤状态
+        applySummary(vo, aborted);
 
         log.info("期末结账向导完成, 账套ID={}, 期间={}-{}, 整体状态={}, 成功={}, 失败={}, 跳过={}, 下月已开={}",
                 accountSetId, year, month, vo.getOverallStatus(),
@@ -434,7 +411,7 @@ public class PeriodCloseWizardServiceImpl implements PeriodCloseWizardService {
 
     /**
      * 汇总各步骤状态并设置 overallStatus / 各计数。
-     * hasFailure=true 时整体状态为 failed,后续由调用方调用 status.setRollbackOnly()。
+     * hasFailure=true 时整体状态为 failed。
      */
     private void applySummary(PeriodCloseWizardVO vo, boolean hasFailure) {
         List<WizardStepResult> steps = vo.getSteps();

@@ -21,11 +21,14 @@ import com.company.daizhang.module.system.entity.SysUserRole;
 import com.company.daizhang.module.system.mapper.SysRoleMapper;
 import com.company.daizhang.module.system.mapper.SysUserMapper;
 import com.company.daizhang.module.system.mapper.SysUserRoleMapper;
+import com.company.daizhang.module.system.security.service.LoginAttemptService;
 import com.company.daizhang.module.system.security.service.PasswordPolicyService;
 import com.company.daizhang.module.system.service.SysUserService;
 import com.company.daizhang.module.system.vo.UserVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,6 +53,14 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     private final PasswordEncoder passwordEncoder;
     private final UserAccountSetMapper userAccountSetMapper;
     private final PasswordPolicyService passwordPolicyService;
+
+    /**
+     * 登录尝试锁定服务。使用 @Lazy 避免循环依赖。
+     * resetPassword 时需调用 recordSuccess 清理 login_attempt 表的失败记录以解除锁定。
+     */
+    @Autowired
+    @Lazy
+    private LoginAttemptService loginAttemptService;
 
     // 手机号正则
     private static final Pattern PHONE_PATTERN = Pattern.compile("^1[3-9]\\d{9}$");
@@ -341,7 +352,11 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         user.setLoginFailCount(0);
         user.setLockedUntil(null);
         this.updateById(user);
-        
+
+        // Bug 4 修复:同步清理 login_attempt 表中的失败记录以解除账户锁定,
+        // 否则仅重置 sys_user 表字段后,login_attempt 表的失败计数仍会触发锁定。
+        loginAttemptService.recordSuccess(user.getUsername());
+
         log.info("重置密码成功，用户ID: {}", id);
     }
     

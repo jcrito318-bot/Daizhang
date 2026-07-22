@@ -124,7 +124,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { customerApi } from '@/api/customer'
@@ -132,6 +132,7 @@ import { useAppStore } from '@/stores/app'
 import type { CustomerVO } from '@/types/customer'
 
 const router = useRouter()
+const route = useRoute()
 const appStore = useAppStore()
 const loading = ref(false)
 // BF-06 修复:将 any[] 替换为 CustomerVO[],提供编译期类型保护
@@ -305,8 +306,18 @@ const resetForm = () => {
   formRef.value?.clearValidate()
 }
 
-onMounted(() => {
-  loadData()
+onMounted(async () => {
+  await loadData()
+  // 详情页"编辑"跳转携带 ?edit=<id>,在此拉取客户并打开编辑弹窗
+  const editId = route.query.edit
+  if (editId) {
+    try {
+      const res = await customerApi.getById(Number(editId))
+      handleEdit(res.data)
+    } catch {
+      // handled by interceptor
+    }
+  }
 })
 </script>
 

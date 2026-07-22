@@ -52,6 +52,15 @@ public class AccountSetAccessAspect {
             if (annotation.required()) {
                 // fail-closed: 无法解析accountSetId时拒绝访问,防止注解被静默绕过
                 log.error("IDOR校验失败: 方法{}未找到accountSetId参数,拒绝访问", method.getName());
+                // Bug 7: 参数名匹配可能因缺少 -parameters 编译标志而静默失败,
+                // 检测参数真实名称是否可用并告警,让运维能察觉 -parameters 缺失问题
+                for (Parameter p : method.getParameters()) {
+                    if (!p.isNamePresent()) {
+                        log.error("IDOR参数名匹配失败: 方法{}的参数{}真实名称不可用,疑似未配置 -parameters 编译标志, "
+                                        + "请确认 maven-compiler-plugin 已启用 <parameters>true</parameters>",
+                                method.getName(), p.getName());
+                    }
+                }
                 throw new BusinessException(ErrorCode.FORBIDDEN, "无法解析账套ID，拒绝访问");
             }
             // required=false: 允许无accountSetId的合法场景(如按userId查询的列表接口),此时应由Service层兜底校验

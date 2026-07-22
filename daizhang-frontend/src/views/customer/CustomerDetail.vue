@@ -105,7 +105,8 @@ const handleBack = () => {
 }
 
 const handleEdit = () => {
-  // TODO: open edit dialog
+  // 编辑弹窗在列表页内联实现,跳回列表页并通过 query 触发编辑
+  router.push(`/customer/list?edit=${route.params.id}`)
 }
 
 onMounted(() => {

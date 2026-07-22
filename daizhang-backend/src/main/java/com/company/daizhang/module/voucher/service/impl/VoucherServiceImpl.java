@@ -1833,11 +1833,10 @@ public class VoucherServiceImpl extends ServiceImpl<VoucherMapper, Voucher> impl
                 accountSetId, year, month, carryVouchers.size());
 
         for (Voucher voucher : carryVouchers) {
-            // 仅处理已过账凭证;其他状态说明数据异常,跳过余额回滚但仍在下方统一删除
+            // 仅处理已过账凭证;其他状态说明数据异常,无法自动反结账,抛异常中止以提示人工处理
+            // (原实现仅日志告警并 continue,凭证仍在下方被删除,导致余额回滚缺失,数据无法恢复)
             if (voucher.getStatus() == null || voucher.getStatus() != 2) {
-                log.warn("反结账清理:凭证ID={}状态非已过账(status={}),跳过余额回滚",
-                        voucher.getId(), voucher.getStatus());
-                continue;
+                throw new BusinessException("结转凭证 " + voucher.getVoucherNo() + " 状态异常(非已过账),无法自动反结账,请人工处理");
             }
             LambdaQueryWrapper<VoucherDetail> detailWrapper = new LambdaQueryWrapper<>();
             detailWrapper.eq(VoucherDetail::getVoucherId, voucher.getId());

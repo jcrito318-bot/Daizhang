@@ -666,22 +666,28 @@ public class PeriodServiceImpl implements PeriodService {
             profitBalance.setYearCredit(carriedYearCredit);
             accountBalanceMapper.insert(profitBalance);
         }
+        // 本期发生额按借贷方向分别累计(盈利贷方,亏损借方),记录实际发生额
         if (profit.compareTo(BigDecimal.ZERO) >= 0) {
-            // 盈利：贷记本年利润，累加本期贷方发生额+本年累计贷方
             BigDecimal newPeriodCredit = (profitBalance.getPeriodCredit() != null ? profitBalance.getPeriodCredit() : BigDecimal.ZERO).add(profit);
             profitBalance.setPeriodCredit(newPeriodCredit);
             BigDecimal newYearCredit = (profitBalance.getYearCredit() != null ? profitBalance.getYearCredit() : BigDecimal.ZERO).add(profit);
             profitBalance.setYearCredit(newYearCredit);
-            BigDecimal currentCredit = profitBalance.getEndCredit() != null ? profitBalance.getEndCredit() : BigDecimal.ZERO;
-            profitBalance.setEndCredit(currentCredit.add(profit));
         } else {
-            // 亏损：借记本年利润，累加本期借方发生额+本年累计借方
             BigDecimal newPeriodDebit = (profitBalance.getPeriodDebit() != null ? profitBalance.getPeriodDebit() : BigDecimal.ZERO).add(profit.abs());
             profitBalance.setPeriodDebit(newPeriodDebit);
             BigDecimal newYearDebit = (profitBalance.getYearDebit() != null ? profitBalance.getYearDebit() : BigDecimal.ZERO).add(profit.abs());
             profitBalance.setYearDebit(newYearDebit);
-            BigDecimal currentDebit = profitBalance.getEndDebit() != null ? profitBalance.getEndDebit() : BigDecimal.ZERO;
-            profitBalance.setEndDebit(currentDebit.add(profit.abs()));
+        }
+        // 期末余额按净值重算:避免盈亏交替时单方向累加导致借贷两侧同时挂账
+        BigDecimal currentCredit = profitBalance.getEndCredit() != null ? profitBalance.getEndCredit() : BigDecimal.ZERO;
+        BigDecimal currentDebit = profitBalance.getEndDebit() != null ? profitBalance.getEndDebit() : BigDecimal.ZERO;
+        BigDecimal netCredit = currentCredit.add(profit).subtract(currentDebit);
+        if (netCredit.compareTo(BigDecimal.ZERO) >= 0) {
+            profitBalance.setEndCredit(netCredit);
+            profitBalance.setEndDebit(BigDecimal.ZERO);
+        } else {
+            profitBalance.setEndDebit(netCredit.abs());
+            profitBalance.setEndCredit(BigDecimal.ZERO);
         }
         accountBalanceMapper.updateById(profitBalance);
 

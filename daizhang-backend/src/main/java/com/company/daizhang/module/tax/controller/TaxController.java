@@ -25,6 +25,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -92,6 +93,7 @@ public class TaxController {
 
     @Operation(summary = "获取申报到期提醒")
     @GetMapping("/deadline-reminder")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<List<TaxDeadlineReminderVO>> deadlineReminder() {
         List<TaxDeadlineReminderVO> reminders = taxService.getDeadlineReminders();
         return Result.success(reminders);
@@ -109,6 +111,7 @@ public class TaxController {
 
     @Operation(summary = "全账套税务检查汇总（漏报/错报检查）")
     @GetMapping("/check/all")
+    @PreAuthorize("hasRole('ADMIN')")
     public Result<TaxCheckSummaryVO> checkAllTaxDeclarations(@RequestParam Integer year,
                                                               @RequestParam Integer month) {
         TaxCheckSummaryVO summary = taxService.checkAllTaxDeclarations(year, month);
@@ -119,6 +122,7 @@ public class TaxController {
 
     @Operation(summary = "分页查询税务申报记录")
     @GetMapping("/declaration/page")
+    @RequireAccountSetAccess(required = false)
     public Result<PageResult<TaxDeclarationVO>> pageDeclarations(@Valid TaxDeclarationQueryRequest request) {
         PageResult<TaxDeclarationVO> page = taxDeclarationService.pageDeclarations(request);
         return Result.success(page);
@@ -176,6 +180,7 @@ public class TaxController {
 
     @Operation(summary = "分页查询税务计算记录")
     @GetMapping("/calculation/page")
+    @RequireAccountSetAccess(required = false)
     public Result<PageResult<TaxCalculationVO>> pageCalculations(@Valid TaxCalculationQueryRequest request) {
         PageResult<TaxCalculationVO> page = taxCalculationRecordService.pageCalculations(request);
         return Result.success(page);

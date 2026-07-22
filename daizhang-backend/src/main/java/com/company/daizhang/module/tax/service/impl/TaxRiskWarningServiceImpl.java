@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
+import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.document.entity.InputInvoice;
 import com.company.daizhang.module.document.entity.OutputInvoice;
 import com.company.daizhang.module.document.mapper.InputInvoiceMapper;
@@ -44,6 +45,7 @@ public class TaxRiskWarningServiceImpl implements TaxRiskWarningService {
     private final OutputInvoiceMapper outputInvoiceMapper;
     private final InputInvoiceMapper inputInvoiceMapper;
     private final TaxDeclarationMapper taxDeclarationMapper;
+    private final AccountSetAccessService accountSetAccessService;
 
     /**
      * 税负率预警阈值
@@ -89,6 +91,8 @@ public class TaxRiskWarningServiceImpl implements TaxRiskWarningService {
         if (warning == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "风险预警不存在");
         }
+        // Bug 6 修复:校验当前用户对该预警所属账套的所有者权限,防止越权处理他人账套预警
+        accountSetAccessService.checkOwner(warning.getAccountSetId());
         warning.setStatus(1);
         warning.setHandleRemark(handleRemark);
         taxRiskWarningMapper.updateById(warning);
@@ -101,6 +105,8 @@ public class TaxRiskWarningServiceImpl implements TaxRiskWarningService {
         if (warning == null) {
             throw new BusinessException(ErrorCode.NOT_FOUND.getCode(), "风险预警不存在");
         }
+        // Bug 6 修复:校验当前用户对该预警所属账套的所有者权限,防止越权忽略他人账套预警
+        accountSetAccessService.checkOwner(warning.getAccountSetId());
         warning.setStatus(2);
         taxRiskWarningMapper.updateById(warning);
     }

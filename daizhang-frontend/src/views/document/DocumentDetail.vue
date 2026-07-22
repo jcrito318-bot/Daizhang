@@ -266,7 +266,8 @@ function handleBack() {
 }
 
 function handleEdit() {
-  router.push(`/document/${document.value!.id}/edit`)
+  // 编辑弹窗在列表页内联实现,跳回列表页并通过 query 触发编辑
+  router.push(`/document?edit=${route.params.id}`)
 }
 
 function goToVoucher(v: VoucherVO) {

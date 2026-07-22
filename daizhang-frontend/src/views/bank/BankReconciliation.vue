@@ -232,9 +232,9 @@ async function loadUnmatchedVouchers() {
       pageSize: 1000
     }
     const res = await voucherApi.getPage(params)
-    // 过滤出未与银行流水匹配的凭证（没有关联 voucherNo 的简单方式：根据状态过滤）
-    // 这里简化处理，取所有已过账的凭证作为候选
-    unmatchedVouchers.value = res.data.list.filter(v => v.status >= 1)
+    // 当前按"已审核未过账"过滤作为候选(已过账凭证通常已完成对账)
+    // 后端应提供 matchedBankTransactionId 等未匹配标记字段以精确过滤
+    unmatchedVouchers.value = res.data.list.filter(v => v.status === 1)
   } catch {
     // handled by interceptor
   } finally {

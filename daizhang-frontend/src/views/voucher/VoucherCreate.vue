@@ -506,7 +506,10 @@ async function handleSubmit() {
     const date = new Date(form.voucherDate)
     form.year = date.getFullYear()
     form.month = date.getMonth() + 1
-    form.accountSetId = appStore.currentAccountSetId || 0
+    // 仅新建模式下用当前账套覆盖;编辑模式保留 loadVoucherDetail 已设置的原始账套归属
+    if (!isEdit.value) {
+      form.accountSetId = appStore.currentAccountSetId || 0
+    }
 
     submitLoading.value = true
     try {

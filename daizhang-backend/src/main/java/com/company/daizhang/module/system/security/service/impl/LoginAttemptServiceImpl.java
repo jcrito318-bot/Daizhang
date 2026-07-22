@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 登录尝试锁定服务实现 (P4.3)
@@ -41,6 +42,8 @@ public class LoginAttemptServiceImpl implements LoginAttemptService {
         if (StrUtil.isBlank(username)) {
             return;
         }
+        // 大小写归一化,防止大小写变体绕过锁定计数
+        username = username.toLowerCase(Locale.ROOT);
         LoginAttempt attempt = new LoginAttempt();
         attempt.setUsername(username);
         attempt.setAttemptTime(LocalDateTime.now());
@@ -60,6 +63,8 @@ public class LoginAttemptServiceImpl implements LoginAttemptService {
         if (StrUtil.isBlank(username)) {
             return;
         }
+        // 大小写归一化,与 recordFailure/isLocked 使用同一 key
+        username = username.toLowerCase(Locale.ROOT);
         // 成功登录后清除该用户名的全部失败记录
         loginAttemptMapper.delete(
                 new LambdaQueryWrapper<LoginAttempt>()
@@ -72,6 +77,8 @@ public class LoginAttemptServiceImpl implements LoginAttemptService {
         if (StrUtil.isBlank(username)) {
             return false;
         }
+        // 大小写归一化,与 recordFailure 使用同一 key
+        username = username.toLowerCase(Locale.ROOT);
         return countRecentFailures(username) >= failThreshold;
     }
 
@@ -80,6 +87,8 @@ public class LoginAttemptServiceImpl implements LoginAttemptService {
         if (StrUtil.isBlank(username)) {
             return failThreshold;
         }
+        // 大小写归一化,与 recordFailure/isLocked 使用同一 key
+        username = username.toLowerCase(Locale.ROOT);
         int failures = countRecentFailures(username);
         int remaining = failThreshold - failures;
         return Math.max(remaining, 0);

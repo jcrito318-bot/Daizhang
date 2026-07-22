@@ -58,6 +58,13 @@ vi.mock('@/api/ai', () => ({
   }
 }))
 
+// mock vue-router:useRoute/useRouter 在 jsdom 下无真实路由,
+// 提供 query 空对象避免 onMounted 中 route.query.edit 访问报错
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+  useRoute: () => ({ query: {} })
+}))
+
 import DocumentList from '@/views/document/DocumentList.vue'
 import { documentApi } from '@/api/document'
 import { ElMessage } from 'element-plus'

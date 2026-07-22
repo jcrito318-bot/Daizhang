@@ -343,7 +343,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { MagicStick } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules, UploadProps, UploadRequestOptions, UploadUserFile } from 'element-plus'
@@ -356,6 +356,7 @@ import type { DocumentVO, DocumentCreateRequest, DocumentQueryRequest } from '@/
 import type { VoucherVO, VoucherQueryRequest } from '@/types/voucher'
 
 const router = useRouter()
+const route = useRoute()
 const appStore = useAppStore()
 
 const loading = ref(false)
@@ -776,8 +777,18 @@ async function handleAiRecognize() {
   }
 }
 
-onMounted(() => {
-  loadData()
+onMounted(async () => {
+  await loadData()
+  // 详情页"编辑"跳转携带 ?edit=<id>,在此拉取票据并打开编辑弹窗
+  const editId = route.query.edit
+  if (editId) {
+    try {
+      const res = await documentApi.getById(Number(editId))
+      handleEdit(res.data)
+    } catch {
+      // handled by interceptor
+    }
+  }
 })
 </script>
 
