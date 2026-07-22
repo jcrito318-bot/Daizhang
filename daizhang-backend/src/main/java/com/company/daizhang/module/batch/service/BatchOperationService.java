@@ -6,7 +6,9 @@ import com.company.daizhang.module.batch.dto.BatchOperationResponse;
 import com.company.daizhang.module.batch.dto.BatchPeriodCloseRequest;
 import com.company.daizhang.module.batch.dto.BatchReportExportRequest;
 import com.company.daizhang.module.batch.dto.BatchReportGenerateRequest;
+import com.company.daizhang.module.batch.dto.BatchTaxCheckRequest;
 import com.company.daizhang.module.batch.dto.BatchVoucherAuditRequest;
+import com.company.daizhang.module.batch.dto.BatchZeroDeclarationRequest;
 import com.company.daizhang.module.batch.dto.BatchHistoryQueryRequest;
 import com.company.daizhang.module.system.entity.SysOperationLog;
 import jakarta.servlet.http.HttpServletResponse;
@@ -79,4 +81,28 @@ public interface BatchOperationService {
      * @return 批量操作响应(含每个账套的结果)
      */
     BatchOperationResponse batchCalculateDepreciation(BatchDepreciationRequest request);
+
+    /**
+     * 零申报批量自动记账+结账(B1)
+     * <p>
+     * 面向零申报客户(当月无业务发生),每个账套依次执行:结转损益(无数据则跳过)→ 结账。
+     * 结转损益异常(如"无收入费用科目"或"已结转")时记录告警但继续结账;
+     * 结账失败时回滚当前账套事务并标记失败。每个账套独立事务,单个失败不影响其他账套。
+     *
+     * @param request 零申报批量处理请求
+     * @return 批量操作响应(含每个账套的结果)
+     */
+    BatchOperationResponse batchZeroDeclaration(BatchZeroDeclarationRequest request);
+
+    /**
+     * 跨账套批量漏报检查(B2)
+     * <p>
+     * 对每个账套执行税务检查(漏报/错报/状态异常)。检查为只读操作,
+     * 返回的 VO 中存在问题项时标记为 STATUS_PARTIAL 并在 message 中列出问题摘要,
+     * 无问题则 STATUS_SUCCESS。每个账套独立处理,单个账套异常不影响其他账套。
+     *
+     * @param request 批量税务检查请求
+     * @return 批量操作响应(含每个账套的结果)
+     */
+    BatchOperationResponse batchTaxCheck(BatchTaxCheckRequest request);
 }

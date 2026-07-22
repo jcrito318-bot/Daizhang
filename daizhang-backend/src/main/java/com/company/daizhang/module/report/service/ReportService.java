@@ -4,9 +4,11 @@ import com.company.daizhang.module.report.dto.ReportQueryRequest;
 import com.company.daizhang.module.report.vo.BalanceSheetVO;
 import com.company.daizhang.module.report.vo.CashFlowAdjustmentVO;
 import com.company.daizhang.module.report.vo.CashFlowStatementVO;
+import com.company.daizhang.module.report.vo.CustomerBriefingVO;
 import com.company.daizhang.module.report.vo.DepartmentExpenseReportVO;
 import com.company.daizhang.module.report.vo.EquityChangeStatementVO;
 import com.company.daizhang.module.report.vo.IncomeStatementVO;
+import com.company.daizhang.module.report.vo.MultiYearComparisonVO;
 import com.company.daizhang.module.report.vo.SubjectBalanceTableVO;
 import com.company.daizhang.module.report.vo.YearOnYearVO;
 import jakarta.servlet.http.HttpServletResponse;
@@ -140,4 +142,20 @@ public interface ReportService {
      * 导出部门费用分析表PDF
      */
     void exportDepartmentExpensePdf(ReportQueryRequest request, HttpServletResponse response);
+
+    /**
+     * 客户经营简报(B5)
+     * 汇总单账套单月的关键经营指标
+     */
+    CustomerBriefingVO customerBriefing(Long accountSetId, Integer year, Integer month);
+
+    /**
+     * 导出客户经营简报Excel(B5)
+     */
+    void exportCustomerBriefing(Long accountSetId, Integer year, Integer month, HttpServletResponse response);
+
+    /**
+     * 多年度对比分析(B6)
+     */
+    MultiYearComparisonVO multiYearComparison(Long accountSetId, Integer startYear, Integer endYear);
 }

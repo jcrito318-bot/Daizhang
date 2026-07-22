@@ -10,7 +10,9 @@ import com.company.daizhang.module.batch.dto.BatchOperationResponse;
 import com.company.daizhang.module.batch.dto.BatchPeriodCloseRequest;
 import com.company.daizhang.module.batch.dto.BatchReportExportRequest;
 import com.company.daizhang.module.batch.dto.BatchReportGenerateRequest;
+import com.company.daizhang.module.batch.dto.BatchTaxCheckRequest;
 import com.company.daizhang.module.batch.dto.BatchVoucherAuditRequest;
+import com.company.daizhang.module.batch.dto.BatchZeroDeclarationRequest;
 import com.company.daizhang.module.batch.service.BatchOperationService;
 import com.company.daizhang.module.system.entity.SysOperationLog;
 import io.swagger.v3.oas.annotations.Operation;
@@ -86,6 +88,24 @@ public class BatchOperationController {
     @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
     public Result<BatchOperationResponse> batchCalculateDepreciation(@Valid @RequestBody BatchDepreciationRequest request) {
         BatchOperationResponse response = batchOperationService.batchCalculateDepreciation(request);
+        return Result.success(response);
+    }
+
+    @PostMapping("/zero-declaration")
+    @Operation(summary = "零申报批量自动记账+结账(B1)")
+    @OperationLog("零申报批量记账结账")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
+    public Result<BatchOperationResponse> batchZeroDeclaration(@Valid @RequestBody BatchZeroDeclarationRequest request) {
+        BatchOperationResponse response = batchOperationService.batchZeroDeclaration(request);
+        return Result.success(response);
+    }
+
+    @PostMapping("/tax/check")
+    @Operation(summary = "跨账套批量漏报检查(B2)")
+    @OperationLog("批量税务漏报检查")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
+    public Result<BatchOperationResponse> batchTaxCheck(@Valid @RequestBody BatchTaxCheckRequest request) {
+        BatchOperationResponse response = batchOperationService.batchTaxCheck(request);
         return Result.success(response);
     }
 

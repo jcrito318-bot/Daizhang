@@ -4,8 +4,11 @@ import com.company.daizhang.common.annotation.RequireAccountSetAccess;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.module.salary.dto.*;
+import com.company.daizhang.module.salary.service.PayslipPushService;
 import com.company.daizhang.module.salary.service.SalaryService;
 import com.company.daizhang.module.salary.vo.EmployeeVO;
+import com.company.daizhang.module.salary.vo.PayslipPushRecordVO;
+import com.company.daizhang.module.salary.vo.PayslipPushResultVO;
 import com.company.daizhang.module.salary.vo.SalaryItemVO;
 import com.company.daizhang.module.salary.vo.SalarySheetVO;
 import io.swagger.v3.oas.annotations.Operation;
@@ -25,6 +28,7 @@ import org.springframework.web.bind.annotation.*;
 public class SalaryController {
 
     private final SalaryService salaryService;
+    private final PayslipPushService payslipPushService;
 
     // ==================== 员工管理 ====================
 
@@ -200,5 +204,25 @@ public class SalaryController {
                                @RequestParam Integer month,
                                HttpServletResponse response) {
         salaryService.exportPayslips(accountSetId, year, month, response);
+    }
+
+    // ==================== 工资条推送(B7) ====================
+
+    @Operation(summary = "批量推送工资条（B7）")
+    @PostMapping("/payslip/push")
+    @RequireAccountSetAccess(value = RequireAccountSetAccess.AccessLevel.OWNER, required = false)
+    public Result<PayslipPushResultVO> pushPayslip(@RequestParam Long salarySheetId) {
+        PayslipPushResultVO result = payslipPushService.batchPushPayslip(salarySheetId);
+        return Result.success(result);
+    }
+
+    @Operation(summary = "查询工资条推送记录（B7）")
+    @GetMapping("/payslip/push/records")
+    public Result<PageResult<PayslipPushRecordVO>> pagePushRecords(
+            @RequestParam Long salarySheetId,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        PageResult<PayslipPushRecordVO> result = payslipPushService.pagePushRecords(salarySheetId, page, size);
+        return Result.success(result);
     }
 }

@@ -4,6 +4,7 @@ import com.company.daizhang.module.report.vo.BalanceSheetItem;
 import com.company.daizhang.module.report.vo.BalanceSheetVO;
 import com.company.daizhang.module.report.vo.CashFlowItemVO;
 import com.company.daizhang.module.report.vo.CashFlowStatementVO;
+import com.company.daizhang.module.report.vo.CustomerBriefingVO;
 import com.company.daizhang.module.report.vo.DepartmentExpenseItem;
 import com.company.daizhang.module.report.vo.DepartmentExpenseReportVO;
 import com.company.daizhang.module.report.vo.EquityChangeItem;
@@ -19,6 +20,7 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -454,6 +456,116 @@ public class ReportExcelUtil {
             log.error("导出现金流量表失败", e);
             throw new RuntimeException("导出失败", e);
         }
+    }
+
+    /**
+     * 导出客户经营简报
+     */
+    public void exportCustomerBriefing(CustomerBriefingVO data, HttpServletResponse response) {
+        try (Workbook workbook = new XSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("客户经营简报");
+
+            CellStyle headerStyle = workbook.createCellStyle();
+            Font headerFont = workbook.createFont();
+            headerFont.setBold(true);
+            headerStyle.setFont(headerFont);
+            headerStyle.setAlignment(HorizontalAlignment.CENTER);
+            CellStyle sectionStyle = workbook.createCellStyle();
+            Font sectionFont = workbook.createFont();
+            sectionFont.setBold(true);
+            sectionStyle.setFont(sectionFont);
+            CellStyle amountStyle = createAmountStyle(workbook);
+
+            // 标题
+            Row titleRow = sheet.createRow(0);
+            Cell titleCell = titleRow.createCell(0);
+            titleCell.setCellValue("客户经营简报 " + data.getYear() + "年" + data.getMonth() + "月");
+            titleCell.setCellStyle(headerStyle);
+
+            int rowNum = 2;
+            // 账套信息
+            Row infoRow = sheet.createRow(rowNum++);
+            infoRow.createCell(0).setCellValue("账套名称");
+            infoRow.createCell(1).setCellValue(data.getAccountSetName() != null ? data.getAccountSetName() : "");
+
+            // 一、经营概况
+            rowNum = writeBriefingSection(sheet, rowNum, "一、经营概况", sectionStyle);
+            rowNum = writeBriefingRow(sheet, rowNum, "营业收入(本月)", data.getTotalRevenue(), amountStyle);
+            rowNum = writeBriefingRow(sheet, rowNum, "营业成本+费用(本月)", data.getTotalExpense(), amountStyle);
+            rowNum = writeBriefingRow(sheet, rowNum, "净利润(本月)", data.getNetProfit(), amountStyle);
+            rowNum = writeBriefingRow(sheet, rowNum, "年累计收入", data.getYearAccumulatedRevenue(), amountStyle);
+            rowNum = writeBriefingRow(sheet, rowNum, "年累计净利润", data.getYearAccumulatedProfit(), amountStyle);
+
+            // 二、资产概况
+            rowNum = writeBriefingSection(sheet, rowNum, "二、资产概况", sectionStyle);
+            rowNum = writeBriefingRow(sheet, rowNum, "总资产", data.getTotalAssets(), amountStyle);
+            rowNum = writeBriefingRow(sheet, rowNum, "总负债", data.getTotalLiabilities(), amountStyle);
+            rowNum = writeBriefingRow(sheet, rowNum, "净资产(所有者权益)", data.getNetAssets(), amountStyle);
+            rowNum = writeBriefingPercentRow(sheet, rowNum, "资产负债率(%)", data.getDebtRatio(), amountStyle);
+
+            // 三、现金流概况
+            rowNum = writeBriefingSection(sheet, rowNum, "三、现金流概况", sectionStyle);
+            rowNum = writeBriefingRow(sheet, rowNum, "经营活动现金流净额", data.getOperatingCashFlow(), amountStyle);
+
+            // 四、税务概况
+            rowNum = writeBriefingSection(sheet, rowNum, "四、税务概况", sectionStyle);
+            rowNum = writeBriefingRow(sheet, rowNum, "本月增值税", data.getVatAmount(), amountStyle);
+            rowNum = writeBriefingRow(sheet, rowNum, "本月企业所得税", data.getIncomeTaxAmount(), amountStyle);
+            rowNum = writeBriefingPercentRow(sheet, rowNum, "税负率(%)", data.getTaxBurden(), amountStyle);
+
+            // 五、关键指标
+            rowNum = writeBriefingSection(sheet, rowNum, "五、关键指标", sectionStyle);
+            rowNum = writeBriefingPercentRow(sheet, rowNum, "毛利率(%)", data.getGrossMargin(), amountStyle);
+            rowNum = writeBriefingPercentRow(sheet, rowNum, "净利率(%)", data.getNetMargin(), amountStyle);
+
+            // 六、风险提示
+            rowNum = writeBriefingSection(sheet, rowNum, "六、风险提示", sectionStyle);
+            if (data.getRiskHints() != null) {
+                for (String hint : data.getRiskHints()) {
+                    Row row = sheet.createRow(rowNum++);
+                    row.createCell(0).setCellValue(hint != null ? hint : "");
+                }
+            }
+
+            // 设置列宽
+            sheet.setColumnWidth(0, 28 * 256);
+            sheet.setColumnWidth(1, 20 * 256);
+
+            outputExcel(response, workbook, "客户经营简报_" + data.getYear() + "年" + data.getMonth() + "月.xlsx");
+        } catch (IOException e) {
+            log.error("导出客户经营简报失败", e);
+            throw new RuntimeException("导出失败", e);
+        }
+    }
+
+    /**
+     * 写入简报分区标题
+     */
+    private int writeBriefingSection(Sheet sheet, int rowNum, String sectionName, CellStyle sectionStyle) {
+        Row row = sheet.createRow(rowNum++);
+        row.createCell(0).setCellValue(sectionName);
+        row.getCell(0).setCellStyle(sectionStyle);
+        return rowNum;
+    }
+
+    /**
+     * 写入简报金额行
+     */
+    private int writeBriefingRow(Sheet sheet, int rowNum, String label, BigDecimal amount, CellStyle amountStyle) {
+        Row row = sheet.createRow(rowNum++);
+        row.createCell(0).setCellValue(label);
+        setAmountCell(row, 1, amount != null ? amount.doubleValue() : 0, amountStyle);
+        return rowNum;
+    }
+
+    /**
+     * 写入简报百分比行
+     */
+    private int writeBriefingPercentRow(Sheet sheet, int rowNum, String label, BigDecimal percent, CellStyle amountStyle) {
+        Row row = sheet.createRow(rowNum++);
+        row.createCell(0).setCellValue(label);
+        setAmountCell(row, 1, percent != null ? percent.doubleValue() : 0, amountStyle);
+        return rowNum;
     }
 
     /**

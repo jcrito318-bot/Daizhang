@@ -7,9 +7,11 @@ import com.company.daizhang.module.report.service.ReportService;
 import com.company.daizhang.module.report.vo.BalanceSheetVO;
 import com.company.daizhang.module.report.vo.CashFlowAdjustmentVO;
 import com.company.daizhang.module.report.vo.CashFlowStatementVO;
+import com.company.daizhang.module.report.vo.CustomerBriefingVO;
 import com.company.daizhang.module.report.vo.DepartmentExpenseReportVO;
 import com.company.daizhang.module.report.vo.EquityChangeStatementVO;
 import com.company.daizhang.module.report.vo.IncomeStatementVO;
+import com.company.daizhang.module.report.vo.MultiYearComparisonVO;
 import com.company.daizhang.module.report.vo.SubjectBalanceTableVO;
 import com.company.daizhang.module.report.vo.YearOnYearVO;
 import io.swagger.v3.oas.annotations.Operation;
@@ -235,5 +237,35 @@ public class ReportController {
     @GetMapping("/department-expense/pdf")
     public void exportDepartmentExpensePdf(ReportQueryRequest request, HttpServletResponse response) {
         reportService.exportDepartmentExpensePdf(request, response);
+    }
+
+    @Operation(summary = "客户经营简报(B5)")
+    @GetMapping("/customer-briefing")
+    @RequireAccountSetAccess
+    public Result<CustomerBriefingVO> customerBriefing(@RequestParam Long accountSetId,
+                                                       @RequestParam Integer year,
+                                                       @RequestParam Integer month) {
+        CustomerBriefingVO result = reportService.customerBriefing(accountSetId, year, month);
+        return Result.success(result);
+    }
+
+    @Operation(summary = "导出客户经营简报Excel(B5)")
+    @GetMapping("/customer-briefing/export")
+    @RequireAccountSetAccess
+    public void exportCustomerBriefing(@RequestParam Long accountSetId,
+                                       @RequestParam Integer year,
+                                       @RequestParam Integer month,
+                                       HttpServletResponse response) {
+        reportService.exportCustomerBriefing(accountSetId, year, month, response);
+    }
+
+    @Operation(summary = "多年度对比分析(B6)")
+    @GetMapping("/multi-year-comparison")
+    @RequireAccountSetAccess
+    public Result<MultiYearComparisonVO> multiYearComparison(@RequestParam Long accountSetId,
+                                                              @RequestParam Integer startYear,
+                                                              @RequestParam Integer endYear) {
+        MultiYearComparisonVO result = reportService.multiYearComparison(accountSetId, startYear, endYear);
+        return Result.success(result);
     }
 }

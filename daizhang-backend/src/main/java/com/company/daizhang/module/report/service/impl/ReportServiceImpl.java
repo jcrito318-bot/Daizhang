@@ -6,8 +6,10 @@ import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.module.accountset.entity.AccountBalance;
 import com.company.daizhang.module.accountset.entity.AccountPeriod;
+import com.company.daizhang.module.accountset.entity.AccountSet;
 import com.company.daizhang.module.accountset.mapper.AccountBalanceMapper;
 import com.company.daizhang.module.accountset.mapper.AccountPeriodMapper;
+import com.company.daizhang.module.accountset.mapper.AccountSetMapper;
 import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.report.dto.ReportQueryRequest;
 import com.company.daizhang.module.report.entity.CashFlowAdjustment;
@@ -21,6 +23,8 @@ import com.company.daizhang.module.subject.entity.Subject;
 import com.company.daizhang.module.subject.mapper.AuxiliaryCategoryMapper;
 import com.company.daizhang.module.subject.mapper.AuxiliaryItemMapper;
 import com.company.daizhang.module.subject.mapper.SubjectMapper;
+import com.company.daizhang.module.tax.service.TaxCalculateService;
+import com.company.daizhang.module.tax.vo.TaxCalculationResultVO;
 import com.company.daizhang.module.voucher.entity.Voucher;
 import com.company.daizhang.module.voucher.entity.VoucherDetail;
 import com.company.daizhang.module.voucher.mapper.VoucherDetailMapper;
@@ -62,6 +66,8 @@ public class ReportServiceImpl implements ReportService {
     private final AuxiliaryCategoryMapper auxiliaryCategoryMapper;
     private final AuxiliaryItemMapper auxiliaryItemMapper;
     private final AccountSetAccessService accountSetAccessService;
+    private final AccountSetMapper accountSetMapper;
+    private final TaxCalculateService taxCalculateService;
 
     @Override
     @Transactional(readOnly = true)
@@ -1972,5 +1978,238 @@ public class ReportServiceImpl implements ReportService {
         log.info("生成部门费用分析报表：accountSetId={}, year={}年{}月, 部门数={}, 费用合计={}",
                 accountSetId, year, month, items.size(), totalExpense);
         return vo;
+    }
+
+    // ==================== 客户经营简报(B5) ====================
+
+    @Override
+    @Transactional(readOnly = true)
+    public CustomerBriefingVO customerBriefing(Long accountSetId, Integer year, Integer month) {
+        accountSetAccessService.checkAccess(accountSetId);
+
+        // 复用现有报表方法获取数据
+        ReportQueryRequest request = new ReportQueryRequest();
+        request.setAccountSetId(accountSetId);
+        request.setYear(year);
+        request.setMonth(month);
+
+        BalanceSheetVO balanceSheetVO = balanceSheet(request);
+        IncomeStatementVO incomeStatementVO = incomeStatement(request);
+        CashFlowStatementVO cashFlowStatementVO = cashFlowStatement(accountSetId, year, month);
+
+        // 税务数据:复用 TaxCalculateService 计算
+        BigDecimal vatAmount = safeTaxAmount(taxCalculateService.calculateVAT(accountSetId, year, month));
+        BigDecimal incomeTaxAmount = safeTaxAmount(taxCalculateService.calculateCorporateIncomeTax(accountSetId, year, month));
+
+        CustomerBriefingVO vo = new CustomerBriefingVO();
+        vo.setAccountSetId(accountSetId);
+        AccountSet accountSet = accountSetMapper.selectById(accountSetId);
+        vo.setAccountSetName(accountSet != null ? accountSet.getName() : null);
+        vo.setYear(year);
+        vo.setMonth(month);
+
+        // 经营概况
+        BigDecimal totalRevenue = nvl(incomeStatementVO.getTotalRevenue());
+        BigDecimal totalExpense = nvl(incomeStatementVO.getTotalExpense());
+        BigDecimal netProfit = nvl(incomeStatementVO.getNetProfit());
+        vo.setTotalRevenue(totalRevenue);
+        vo.setTotalExpense(totalExpense);
+        vo.setNetProfit(netProfit);
+        // 年累计直接复用利润表的本年累计字段(1~month)
+        vo.setYearAccumulatedRevenue(nvl(incomeStatementVO.getTotalRevenueYear()));
+        vo.setYearAccumulatedProfit(nvl(incomeStatementVO.getNetProfitYear()));
+
+        // 资产概况
+        BigDecimal totalAssets = nvl(balanceSheetVO.getTotalAssets());
+        BigDecimal totalLiabilities = nvl(balanceSheetVO.getTotalLiabilities());
+        BigDecimal netAssets = nvl(balanceSheetVO.getTotalEquity());
+        vo.setTotalAssets(totalAssets);
+        vo.setTotalLiabilities(totalLiabilities);
+        vo.setNetAssets(netAssets);
+        vo.setDebtRatio(calcPercent(totalLiabilities, totalAssets));
+
+        // 现金流概况
+        vo.setOperatingCashFlow(nvl(cashFlowStatementVO.getOperatingNetFlow()));
+
+        // 税务概况
+        vo.setVatAmount(vatAmount);
+        vo.setIncomeTaxAmount(incomeTaxAmount);
+        vo.setTaxBurden(calcPercent(vatAmount.add(incomeTaxAmount), totalRevenue));
+
+        // 关键指标
+        // 毛利率 = (营业收入 - 营业成本) / 营业收入 * 100
+        BigDecimal operatingCost = sumOperatingCost(incomeStatementVO);
+        vo.setGrossMargin(calcPercent(totalRevenue.subtract(operatingCost), totalRevenue));
+        vo.setNetMargin(calcPercent(netProfit, totalRevenue));
+
+        // 风险提示(简单规则)
+        List<String> riskHints = new ArrayList<>();
+        BigDecimal seventy = new BigDecimal("70");
+        if (vo.getDebtRatio() != null && vo.getDebtRatio().compareTo(seventy) > 0) {
+            riskHints.add("资产负债率偏高(" + vo.getDebtRatio().setScale(2, RoundingMode.HALF_UP) + "%)，存在偿债风险");
+        }
+        if (vo.getNetMargin() != null && vo.getNetMargin().compareTo(BigDecimal.ZERO) < 0) {
+            riskHints.add("净利率为负(" + vo.getNetMargin().setScale(2, RoundingMode.HALF_UP) + "%)，本期亏损");
+        }
+        BigDecimal one = new BigDecimal("1");
+        if (vo.getTaxBurden() != null && vo.getTaxBurden().compareTo(one) < 0
+                && totalRevenue.compareTo(BigDecimal.ZERO) > 0) {
+            riskHints.add("税负率偏低(" + vo.getTaxBurden().setScale(2, RoundingMode.HALF_UP) + "%)，请关注税务合规");
+        }
+        if (riskHints.isEmpty()) {
+            riskHints.add("暂无明显风险");
+        }
+        vo.setRiskHints(riskHints);
+
+        log.info("生成客户经营简报：accountSetId={}, {}年{}月", accountSetId, year, month);
+        return vo;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public void exportCustomerBriefing(Long accountSetId, Integer year, Integer month, HttpServletResponse response) {
+        CustomerBriefingVO data = customerBriefing(accountSetId, year, month);
+        reportExcelUtil.exportCustomerBriefing(data, response);
+    }
+
+    // ==================== 多年度对比分析(B6) ====================
+
+    @Override
+    @Transactional(readOnly = true)
+    public MultiYearComparisonVO multiYearComparison(Long accountSetId, Integer startYear, Integer endYear) {
+        accountSetAccessService.checkAccess(accountSetId);
+
+        MultiYearComparisonVO vo = new MultiYearComparisonVO();
+        vo.setAccountSetId(accountSetId);
+        vo.setStartYear(startYear);
+        vo.setEndYear(endYear);
+
+        List<MultiYearComparisonVO.YearlyData> years = new ArrayList<>();
+        MultiYearComparisonVO.YearlyData prev = null;
+
+        // 按年份升序逐年计算
+        for (int year = startYear; year <= endYear; year++) {
+            MultiYearComparisonVO.YearlyData data = buildYearlyData(accountSetId, year);
+            // 同比增长率(第一年为null)
+            if (prev != null) {
+                data.setRevenueGrowthRate(calcGrowthRate(data.getTotalRevenue(), prev.getTotalRevenue()));
+                data.setProfitGrowthRate(calcGrowthRate(data.getNetProfit(), prev.getNetProfit()));
+                data.setAssetGrowthRate(calcGrowthRate(data.getTotalAssets(), prev.getTotalAssets()));
+            }
+            years.add(data);
+            prev = data;
+        }
+
+        vo.setYears(years);
+        log.info("生成多年度对比分析：accountSetId={}, {}~{}年", accountSetId, startYear, endYear);
+        return vo;
+    }
+
+    /**
+     * 构建单年度数据(取12月数据作为年末/年累计)
+     */
+    private MultiYearComparisonVO.YearlyData buildYearlyData(Long accountSetId, Integer year) {
+        ReportQueryRequest request = new ReportQueryRequest();
+        request.setAccountSetId(accountSetId);
+        request.setYear(year);
+        request.setMonth(12);
+
+        // 复用现有报表方法
+        BalanceSheetVO balanceSheetVO = balanceSheet(request);
+        IncomeStatementVO incomeStatementVO = incomeStatement(request);
+        CashFlowStatementVO cashFlowStatementVO = cashFlowStatement(accountSetId, year, 12);
+
+        MultiYearComparisonVO.YearlyData data = new MultiYearComparisonVO.YearlyData();
+        data.setYear(year);
+
+        // 年累计收入/费用/净利润(利润表本年累计字段)
+        BigDecimal totalRevenue = nvl(incomeStatementVO.getTotalRevenueYear());
+        BigDecimal totalExpense = nvl(incomeStatementVO.getTotalExpenseYear());
+        BigDecimal netProfit = nvl(incomeStatementVO.getNetProfitYear());
+        data.setTotalRevenue(totalRevenue);
+        data.setTotalExpense(totalExpense);
+        data.setNetProfit(netProfit);
+
+        // 年末资产负债
+        data.setTotalAssets(nvl(balanceSheetVO.getTotalAssets()));
+        data.setTotalLiabilities(nvl(balanceSheetVO.getTotalLiabilities()));
+        data.setNetAssets(nvl(balanceSheetVO.getTotalEquity()));
+
+        // 年经营活动现金流(本年累计净额)
+        data.setOperatingCashFlow(nvl(cashFlowStatementVO.getOperatingNetFlowYear()));
+
+        // 年增值税合计(1~12月累加)
+        BigDecimal vatAmount = calculateYearVatTotal(accountSetId, year);
+        data.setVatAmount(vatAmount);
+
+        // 企业所得税(传12即年度累计预缴)
+        BigDecimal incomeTaxAmount = safeTaxAmount(taxCalculateService.calculateCorporateIncomeTax(accountSetId, year, 12));
+        // 年税负率 = (增值税 + 企业所得税) / 年营业收入 * 100
+        data.setTaxBurden(calcPercent(vatAmount.add(incomeTaxAmount), totalRevenue));
+
+        return data;
+    }
+
+    /**
+     * 计算年度增值税合计(1~12月累加)
+     */
+    private BigDecimal calculateYearVatTotal(Long accountSetId, Integer year) {
+        BigDecimal total = BigDecimal.ZERO;
+        for (int m = 1; m <= 12; m++) {
+            try {
+                total = total.add(safeTaxAmount(taxCalculateService.calculateVAT(accountSetId, year, m)));
+            } catch (Exception e) {
+                log.warn("计算增值税失败，accountSetId={}, year={}, month={}", accountSetId, year, m, e);
+            }
+        }
+        return total;
+    }
+
+    // ==================== 简报/对比 辅助方法 ====================
+
+    /**
+     * 从利润表项目中汇总营业成本(科目编码5401/5402开头)
+     */
+    private BigDecimal sumOperatingCost(IncomeStatementVO incomeStatementVO) {
+        BigDecimal operatingCost = BigDecimal.ZERO;
+        if (incomeStatementVO.getItems() == null) {
+            return operatingCost;
+        }
+        for (IncomeStatementItem item : incomeStatementVO.getItems()) {
+            String code = item.getCode();
+            if (code != null && (code.startsWith("5401") || code.startsWith("5402"))) {
+                operatingCost = operatingCost.add(nvl(item.getCurrentAmount()));
+            }
+        }
+        return operatingCost;
+    }
+
+    /**
+     * 计算百分比 ratio = numerator / denominator * 100，除零保护返回0
+     */
+    private BigDecimal calcPercent(BigDecimal numerator, BigDecimal denominator) {
+        if (numerator == null) {
+            numerator = BigDecimal.ZERO;
+        }
+        if (denominator == null || denominator.compareTo(BigDecimal.ZERO) == 0) {
+            return BigDecimal.ZERO;
+        }
+        return numerator.divide(denominator, 4, RoundingMode.HALF_UP)
+                .multiply(new BigDecimal("100"))
+                .setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /**
+     * 提取税种计算结果的应纳税额(null安全)
+     */
+    private BigDecimal safeTaxAmount(TaxCalculationResultVO result) {
+        return result != null && result.getTaxAmount() != null ? result.getTaxAmount() : BigDecimal.ZERO;
+    }
+
+    /**
+     * BigDecimal null安全取值
+     */
+    private BigDecimal nvl(BigDecimal value) {
+        return value != null ? value : BigDecimal.ZERO;
     }
 }

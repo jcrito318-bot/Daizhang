@@ -15,7 +15,9 @@ import com.company.daizhang.module.batch.dto.BatchOperationResultVO;
 import com.company.daizhang.module.batch.dto.BatchPeriodCloseRequest;
 import com.company.daizhang.module.batch.dto.BatchReportExportRequest;
 import com.company.daizhang.module.batch.dto.BatchReportGenerateRequest;
+import com.company.daizhang.module.batch.dto.BatchTaxCheckRequest;
 import com.company.daizhang.module.batch.dto.BatchVoucherAuditRequest;
+import com.company.daizhang.module.batch.dto.BatchZeroDeclarationRequest;
 import com.company.daizhang.module.batch.service.BatchOperationService;
 import com.company.daizhang.module.period.service.PeriodService;
 import com.company.daizhang.module.period.vo.ClosePeriodResultVO;
@@ -26,6 +28,8 @@ import com.company.daizhang.module.report.vo.BalanceSheetVO;
 import com.company.daizhang.module.report.vo.CashFlowStatementVO;
 import com.company.daizhang.module.report.vo.IncomeStatementVO;
 import com.company.daizhang.module.report.vo.SubjectBalanceTableVO;
+import com.company.daizhang.module.tax.service.TaxService;
+import com.company.daizhang.module.tax.vo.TaxCheckResultVO;
 import com.company.daizhang.module.system.entity.SysOperationLog;
 import com.company.daizhang.module.system.service.SysOperationLogService;
 import com.company.daizhang.module.voucher.entity.Voucher;
@@ -82,6 +86,7 @@ public class BatchOperationServiceImpl implements BatchOperationService {
     private final AccountSetMapper accountSetMapper;
     private final VoucherMapper voucherMapper;
     private final SysOperationLogService operationLogService;
+    private final TaxService taxService;
     private final PlatformTransactionManager transactionManager;
 
     /** per item 事务模板(由 PlatformTransactionManager 构造,避免依赖自动配置的 Bean) */
@@ -304,6 +309,68 @@ public class BatchOperationServiceImpl implements BatchOperationService {
         return buildResponse(results);
     }
 
+    @Override
+    public BatchOperationResponse batchZeroDeclaration(BatchZeroDeclarationRequest request) {
+        log.info("零申报批量自动记账+结账开始, 账套数量={}", request.getItems().size());
+        List<BatchZeroDeclarationRequest.ZeroDeclarationItem> items = dedupZeroDeclarationItems(request.getItems());
+        Map<Long, String> accountSetNameMap = loadAccountSetNames(items.stream()
+                .map(BatchZeroDeclarationRequest.ZeroDeclarationItem::getAccountSetId)
+                .collect(Collectors.toList()));
+
+        List<BatchOperationResultVO> results = new ArrayList<>();
+        for (BatchZeroDeclarationRequest.ZeroDeclarationItem item : items) {
+            // per item 事务:每个账套的结转+结账在独立事务中执行,失败仅回滚该账套
+            BatchOperationResultVO result = transactionTemplate.execute(status -> {
+                BatchOperationResultVO r = new BatchOperationResultVO();
+                r.setAccountSetId(item.getAccountSetId());
+                r.setAccountSetName(accountSetNameMap.get(item.getAccountSetId()));
+                try {
+                    doZeroDeclaration(item, r);
+                } catch (Exception e) {
+                    // 单个账套失败:标记回滚当前 item 事务,但不影响其他账套
+                    status.setRollbackOnly();
+                    r.setStatus(BatchOperationResultVO.STATUS_FAILED);
+                    r.setMessage(e.getMessage());
+                    log.warn("零申报批量处理失败, 账套ID={}: {}", item.getAccountSetId(), e.getMessage());
+                }
+                return r;
+            });
+            results.add(result);
+        }
+        return buildResponse(results);
+    }
+
+    @Override
+    public BatchOperationResponse batchTaxCheck(BatchTaxCheckRequest request) {
+        log.info("跨账套批量漏报检查开始, 账套数量={}", request.getItems().size());
+        List<BatchTaxCheckRequest.TaxCheckItem> items = dedupTaxCheckItems(request.getItems());
+        Map<Long, String> accountSetNameMap = loadAccountSetNames(items.stream()
+                .map(BatchTaxCheckRequest.TaxCheckItem::getAccountSetId)
+                .collect(Collectors.toList()));
+
+        List<BatchOperationResultVO> results = new ArrayList<>();
+        for (BatchTaxCheckRequest.TaxCheckItem item : items) {
+            // 只读检查操作,为统一风格仍使用 transactionTemplate(per item 隔离异常)
+            BatchOperationResultVO result = transactionTemplate.execute(status -> {
+                BatchOperationResultVO r = new BatchOperationResultVO();
+                r.setAccountSetId(item.getAccountSetId());
+                r.setAccountSetName(accountSetNameMap.get(item.getAccountSetId()));
+                try {
+                    doTaxCheck(item, r);
+                } catch (Exception e) {
+                    // 单个账套检查异常:标记回滚并标记失败,但不影响其他账套
+                    status.setRollbackOnly();
+                    r.setStatus(BatchOperationResultVO.STATUS_FAILED);
+                    r.setMessage(e.getMessage());
+                    log.warn("批量税务检查失败, 账套ID={}: {}", item.getAccountSetId(), e.getMessage());
+                }
+                return r;
+            });
+            results.add(result);
+        }
+        return buildResponse(results);
+    }
+
     // ==================== 单账套处理逻辑 ====================
 
     /**
@@ -355,6 +422,73 @@ public class BatchOperationServiceImpl implements BatchOperationService {
             String msg = (closeResult != null && closeResult.getMessage() != null)
                     ? closeResult.getMessage() : "结账失败";
             throw new BusinessException(msg);
+        }
+    }
+
+    /**
+     * 零申报单个账套处理:结转损益(无数据则跳过)→ 结账
+     * <p>
+     * 结转损益异常(如"无收入费用科目"或"已结转")时记录告警但继续结账;
+     * 结账失败时抛出异常,由外层 catch 标记回滚+失败。
+     */
+    private void doZeroDeclaration(BatchZeroDeclarationRequest.ZeroDeclarationItem item,
+                                   BatchOperationResultVO result) {
+        Long accountSetId = item.getAccountSetId();
+        // 权限校验:零申报处理包含结转+结账(写操作),需 OWNER 权限
+        accountSetAccessService.checkOwner(accountSetId);
+
+        // 1. 结转损益:零申报客户通常无收入费用科目数据,异常时记录告警但继续结账
+        try {
+            periodService.carryForward(accountSetId, item.getYear(), item.getMonth());
+        } catch (Exception e) {
+            // 结转损益异常(如"无收入费用科目"或"已结转"):零申报场景属正常,记录告警后继续结账
+            log.warn("零申报结转损益跳过, 账套ID={}, {}年{}月: {}",
+                    accountSetId, item.getYear(), item.getMonth(), e.getMessage());
+        }
+
+        // 2. 结账:失败时抛出异常,由外层 catch 标记回滚+失败
+        ClosePeriodResultVO closeResult = periodService.closePeriod(accountSetId, item.getYear(), item.getMonth());
+        if (closeResult != null && closeResult.isSuccess()) {
+            result.setStatus(BatchOperationResultVO.STATUS_SUCCESS);
+            result.setMessage("零申报结账成功");
+        } else {
+            result.setStatus(BatchOperationResultVO.STATUS_FAILED);
+            String msg = (closeResult != null && closeResult.getMessage() != null)
+                    ? closeResult.getMessage() : "结账失败";
+            throw new BusinessException(msg);
+        }
+    }
+
+    /**
+     * 单个账套税务检查(漏报/错报/状态异常)
+     * <p>
+     * 检查为只读操作。返回的 VO 列表非空表示存在问题项,标记为 STATUS_PARTIAL 并列出问题摘要;
+     * 为空则 STATUS_SUCCESS。
+     */
+    private void doTaxCheck(BatchTaxCheckRequest.TaxCheckItem item, BatchOperationResultVO result) {
+        Long accountSetId = item.getAccountSetId();
+        // 权限校验:税务检查为只读操作,ACCESS 级别(OWNER/ACCOUNTANT/VIEWER)即可
+        accountSetAccessService.checkAccess(accountSetId);
+
+        List<TaxCheckResultVO> checkResults = taxService.checkTaxDeclaration(
+                accountSetId, item.getYear(), item.getMonth());
+        if (checkResults == null || checkResults.isEmpty()) {
+            // 无问题项:检查通过
+            result.setStatus(BatchOperationResultVO.STATUS_SUCCESS);
+            result.setMessage("税务检查通过,无漏报/错报");
+        } else {
+            // 存在漏报/错报/状态异常项:标记为部分失败,列出问题摘要
+            result.setStatus(BatchOperationResultVO.STATUS_PARTIAL);
+            List<String> summaries = checkResults.stream()
+                    .map(vo -> {
+                        String type = vo.getCheckType() == null ? "未知" : vo.getCheckType();
+                        String taxType = vo.getTaxType() == null ? "" : vo.getTaxType();
+                        String desc = vo.getDescription() == null ? "" : vo.getDescription();
+                        return type + "(" + taxType + "):" + desc;
+                    })
+                    .collect(Collectors.toList());
+            result.setMessage(String.format("发现 %d 项问题:%s",
+                    checkResults.size(), String.join("；", summaries)));
         }
     }
 
@@ -523,6 +657,32 @@ public class BatchOperationServiceImpl implements BatchOperationService {
             List<BatchPeriodCloseRequest.PeriodCloseItem> items) {
         Map<String, BatchPeriodCloseRequest.PeriodCloseItem> merged = new HashMap<>();
         for (BatchPeriodCloseRequest.PeriodCloseItem item : items) {
+            String key = item.getAccountSetId() + "-" + item.getYear() + "-" + item.getMonth();
+            merged.putIfAbsent(key, item);
+        }
+        return new ArrayList<>(merged.values());
+    }
+
+    /**
+     * 零申报处理项去重(同一账套+期间仅处理一次)
+     */
+    private List<BatchZeroDeclarationRequest.ZeroDeclarationItem> dedupZeroDeclarationItems(
+            List<BatchZeroDeclarationRequest.ZeroDeclarationItem> items) {
+        Map<String, BatchZeroDeclarationRequest.ZeroDeclarationItem> merged = new HashMap<>();
+        for (BatchZeroDeclarationRequest.ZeroDeclarationItem item : items) {
+            String key = item.getAccountSetId() + "-" + item.getYear() + "-" + item.getMonth();
+            merged.putIfAbsent(key, item);
+        }
+        return new ArrayList<>(merged.values());
+    }
+
+    /**
+     * 税务检查项去重(同一账套+期间仅检查一次)
+     */
+    private List<BatchTaxCheckRequest.TaxCheckItem> dedupTaxCheckItems(
+            List<BatchTaxCheckRequest.TaxCheckItem> items) {
+        Map<String, BatchTaxCheckRequest.TaxCheckItem> merged = new HashMap<>();
+        for (BatchTaxCheckRequest.TaxCheckItem item : items) {
             String key = item.getAccountSetId() + "-" + item.getYear() + "-" + item.getMonth();
             merged.putIfAbsent(key, item);
         }
