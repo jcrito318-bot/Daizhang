@@ -1,7 +1,12 @@
 package com.company.daizhang.module.bank.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.company.daizhang.common.BaseEntity;
+import com.company.daizhang.common.annotation.FieldEncrypt;
+import com.company.daizhang.common.crypto.annotation.EncryptedField;
+import com.company.daizhang.common.crypto.enums.MaskType;
+import com.company.daizhang.common.crypto.mybatis.EncryptTypeHandler;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -13,7 +18,7 @@ import java.time.LocalDate;
  */
 @Data
 @EqualsAndHashCode(callSuper = true)
-@TableName("bank_account")
+@TableName(value = "bank_account", autoResultMap = true)
 public class BankAccount extends BaseEntity {
 
     /**
@@ -27,8 +32,11 @@ public class BankAccount extends BaseEntity {
     private String accountName;
 
     /**
-     * 银行账号
+     * 银行账号 (P4.1: AES-GCM 加密存储,读库自动解密;对外展示脱敏)
      */
+    @TableField(typeHandler = EncryptTypeHandler.class)
+    @EncryptedField("银行账户账号")
+    @FieldEncrypt(maskType = MaskType.BANK_ACCOUNT)
     private String accountNumber;
 
     /**

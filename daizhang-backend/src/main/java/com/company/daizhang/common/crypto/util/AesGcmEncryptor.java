@@ -1,11 +1,13 @@
 package com.company.daizhang.common.crypto.util;
 
 import com.company.daizhang.common.crypto.config.CryptoProperties;
+import com.company.daizhang.common.crypto.enums.MaskType;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.Cipher;
+import javax.crypto.Mac;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.ByteBuffer;
@@ -19,12 +21,12 @@ import java.util.Base64;
  * 算法参数:
  * <ul>
  *     <li>算法:AES/GCM/NoPadding</li>
- *     <li>密钥:32 字节(256 位),由 {@link CryptoProperties#getSecretKey()} 提供</li>
- *     <li>IV(初始化向量):12 字节,每次加密随机生成(符合 NIST SP 800-38D 推荐)</li>
- *     <li>认证标签(GCM Tag):16 字节(128 位),提供完整性认证</li>
+ *     <li>密钥:32 字节(256 位),由 {@link CryptoProperties#getResolvedKeyBytes()} 提供</li>
+ *     <li>IV(初始化向量):默认 12 字节,每次加密随机生成(符合 NIST SP 800-38D 推荐)</li>
+ *     <li>认证标签(GCM Tag):默认 128 位(16 字节),提供完整性认证</li>
  * </ul>
  * <p>
- * 密文格式:{@code base64(IV(12B) || ciphertext || tag(16B))},解密时按相同顺序拆分。
+ * 密文格式:{@code base64(IV(ivLength) || ciphertext || tag)},解密时按相同顺序拆分。
  * <p>
  * GCM 模式相比 CBC 的优势:
  * <ol>
@@ -39,22 +41,23 @@ public class AesGcmEncryptor {
 
     private static final String TRANSFORMATION = "AES/GCM/NoPadding";
     private static final String ALGORITHM = "AES";
-    /** GCM 推荐 IV 长度:12 字节(96 位) */
-    private static final int IV_LENGTH = 12;
-    /** GCM 认证标签长度:128 位(16 字节) */
-    private static final int TAG_LENGTH_BITS = 128;
+    private static final String HMAC_ALGORITHM = "HmacSHA256";
 
     private final CryptoProperties cryptoProperties;
     private final SecretKeySpec keySpec;
+    private final int ivLength;
+    private final int tagLengthBits;
     private final SecureRandom secureRandom = new SecureRandom();
 
     @Autowired
     public AesGcmEncryptor(CryptoProperties cryptoProperties) {
         this.cryptoProperties = cryptoProperties;
-        // 启动时密钥已通过 CryptoProperties.validate() 校验长度为 32 字节,
-        // 此处直接构造 SecretKeySpec;若 enabled=false 则密钥为空,所有加解密方法会直接透传
-        if (cryptoProperties.isEnabled() && cryptoProperties.getSecretKey() != null) {
-            byte[] keyBytes = Base64.getDecoder().decode(cryptoProperties.getSecretKey());
+        this.ivLength = cryptoProperties.getIvLength();
+        this.tagLengthBits = cryptoProperties.getTagLength();
+        // CryptoProperties.validate() 已在 @PostConstruct 阶段完成密钥解析与校验,
+        // 此处直接取解析后的 32 字节密钥;若 enabled=false 则密钥为 null,所有加解密方法会直接透传
+        byte[] keyBytes = cryptoProperties.getResolvedKeyBytes();
+        if (cryptoProperties.isEnabled() && keyBytes != null) {
             this.keySpec = new SecretKeySpec(keyBytes, ALGORITHM);
         } else {
             this.keySpec = null;
@@ -79,11 +82,11 @@ public class AesGcmEncryptor {
         }
         try {
             // 每次加密生成随机 IV,防止相同明文产生相同密文
-            byte[] iv = new byte[IV_LENGTH];
+            byte[] iv = new byte[ivLength];
             secureRandom.nextBytes(iv);
 
             Cipher cipher = Cipher.getInstance(TRANSFORMATION);
-            GCMParameterSpec parameterSpec = new GCMParameterSpec(TAG_LENGTH_BITS, iv);
+            GCMParameterSpec parameterSpec = new GCMParameterSpec(tagLengthBits, iv);
             cipher.init(Cipher.ENCRYPT_MODE, keySpec, parameterSpec);
             byte[] cipherText = cipher.doFinal(plaintext.getBytes(StandardCharsets.UTF_8));
 
@@ -115,19 +118,19 @@ public class AesGcmEncryptor {
         }
         try {
             byte[] decoded = Base64.getDecoder().decode(ciphertext);
-            if (decoded.length <= IV_LENGTH) {
+            if (decoded.length <= ivLength) {
                 // 长度不足,可能是未加密的旧数据,直接返回原值
-                // (数据迁移场景:旧数据为明文,需由 DataMigrationService 处理)
+                // (数据迁移场景:旧数据为明文,需由 FieldEncryptionMigrationRunner 处理)
                 return ciphertext;
             }
             ByteBuffer buffer = ByteBuffer.wrap(decoded);
-            byte[] iv = new byte[IV_LENGTH];
+            byte[] iv = new byte[ivLength];
             buffer.get(iv);
             byte[] cipherText = new byte[buffer.remaining()];
             buffer.get(cipherText);
 
             Cipher cipher = Cipher.getInstance(TRANSFORMATION);
-            GCMParameterSpec parameterSpec = new GCMParameterSpec(TAG_LENGTH_BITS, iv);
+            GCMParameterSpec parameterSpec = new GCMParameterSpec(tagLengthBits, iv);
             cipher.init(Cipher.DECRYPT_MODE, keySpec, parameterSpec);
             byte[] plainBytes = cipher.doFinal(cipherText);
             return new String(plainBytes, StandardCharsets.UTF_8);
@@ -156,9 +159,51 @@ public class AesGcmEncryptor {
         }
         try {
             byte[] decoded = Base64.getDecoder().decode(value);
-            return decoded.length > IV_LENGTH;
+            return decoded.length > ivLength;
         } catch (IllegalArgumentException e) {
             return false;
+        }
+    }
+
+    /**
+     * 对明文执行脱敏,返回脱敏后的字符串(不修改原值)。
+     * <p>
+     * 用于 Service 层将明文字段转换为 VO 时调用,确保对外 API 返回脱敏值。
+     *
+     * @param plainText 明文(从数据库解密后的值)
+     * @param type      脱敏类型
+     * @return 脱敏后的字符串;输入 null 返回 null
+     */
+    public String mask(String plainText, MaskType type) {
+        if (plainText == null || type == null) {
+            return plainText;
+        }
+        return type.mask(plainText);
+    }
+
+    /**
+     * 生成密文搜索摘要(HMAC-SHA256)。
+     * <p>
+     * 用于 {@code @FieldEncrypt(searchable = true)} 场景:相同明文生成相同摘要,
+     * 将摘要存储到独立列后,可用明文等值匹配密文。摘要不可逆,无法还原明文。
+     * <p>
+     * 注意:当前为预留能力,需配合独立的摘要列存储使用。
+     *
+     * @param plainText 明文
+     * @return base64 编码的 HMAC-SHA256 摘要;输入 null 返回 null;加密禁用返回 null
+     */
+    public String generateSearchDigest(String plainText) {
+        if (plainText == null || !cryptoProperties.isEnabled() || keySpec == null) {
+            return null;
+        }
+        try {
+            Mac mac = Mac.getInstance(HMAC_ALGORITHM);
+            mac.init(keySpec);
+            byte[] digest = mac.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
+            return Base64.getEncoder().encodeToString(digest);
+        } catch (Exception e) {
+            log.error("HMAC-SHA256 摘要生成失败", e);
+            throw new IllegalStateException("HMAC-SHA256 摘要生成失败", e);
         }
     }
 }

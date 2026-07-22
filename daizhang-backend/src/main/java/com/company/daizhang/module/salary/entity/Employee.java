@@ -3,8 +3,10 @@ package com.company.daizhang.module.salary.entity;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.company.daizhang.common.BaseEntity;
+import com.company.daizhang.common.annotation.FieldEncrypt;
 import com.company.daizhang.common.crypto.annotation.EncryptedField;
-import com.company.daizhang.common.crypto.mybatis.EncryptedStringTypeHandler;
+import com.company.daizhang.common.crypto.enums.MaskType;
+import com.company.daizhang.common.crypto.mybatis.EncryptTypeHandler;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -51,15 +53,19 @@ public class Employee extends BaseEntity {
     private String position;
 
     /**
-     * 身份证号 (P4.1: AES-GCM 加密存储,读库自动解密)
+     * 身份证号 (P4.1: AES-GCM 加密存储,读库自动解密;对外展示脱敏)
      */
-    @TableField(typeHandler = EncryptedStringTypeHandler.class)
+    @TableField(typeHandler = EncryptTypeHandler.class)
     @EncryptedField("员工身份证号")
+    @FieldEncrypt(maskType = MaskType.ID_CARD)
     private String idCard;
 
     /**
-     * 联系电话
+     * 联系电话 (P4.1: AES-GCM 加密存储,读库自动解密;对外展示脱敏)
      */
+    @TableField(typeHandler = EncryptTypeHandler.class)
+    @EncryptedField("员工联系电话")
+    @FieldEncrypt(maskType = MaskType.PHONE)
     private String phone;
 
     /**
@@ -68,10 +74,11 @@ public class Employee extends BaseEntity {
     private String bankName;
 
     /**
-     * 银行账号 (P4.1: AES-GCM 加密存储,读库自动解密)
+     * 银行账号 (P4.1: AES-GCM 加密存储,读库自动解密;对外展示脱敏)
      */
-    @TableField(typeHandler = EncryptedStringTypeHandler.class)
+    @TableField(typeHandler = EncryptTypeHandler.class)
     @EncryptedField("员工银行账号")
+    @FieldEncrypt(maskType = MaskType.BANK_ACCOUNT)
     private String bankAccount;
 
     /**

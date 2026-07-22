@@ -125,6 +125,13 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '系统设置', roles: ['ADMIN'] }
       },
       {
+        // P4.2: 安全设置(双因素认证管理),所有登录用户均可访问以管理自身账户安全
+        path: 'system/security',
+        name: 'SecuritySettings',
+        component: () => import('@/views/system/SecuritySettings.vue'),
+        meta: { title: '安全设置' }
+      },
+      {
         path: 'period',
         name: 'PeriodManage',
         component: () => import('@/views/period/PeriodManage.vue'),

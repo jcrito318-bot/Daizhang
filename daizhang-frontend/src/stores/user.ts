@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { authApi } from '@/api/auth'
-import type { UserVO, LoginRequest } from '@/types/common'
+import { authApi, totpApi } from '@/api/auth'
+import type { UserVO, LoginRequest, LoginResponse, TotpLoginRequest } from '@/types/common'
 
 // 安全实践 (BF-02 已修复):
 // - access token 仅保存在内存中,不持久化到 localStorage,防止 XSS 窃取
@@ -24,13 +24,36 @@ export const useUserStore = defineStore('user', () => {
     return requiredRoles.some(r => roles.value.includes(r))
   }
 
-  async function login(loginData: LoginRequest) {
+  /**
+   * 登录:返回完整 LoginResponse,由调用方根据 requiresTwoFactor 决定后续流程。
+   * - requiresTwoFactor=true:调用方引导用户输入验证码,再调 loginTotp
+   * - 正常:store 自动写入 token 与 userInfo
+   */
+  async function login(loginData: LoginRequest): Promise<LoginResponse> {
     const res = await authApi.login(loginData)
+    const data = res.data
+    // P4.2: 若需 2FA,不写入 token(此时无正式 token),由调用方处理 2FA 流程
+    if (data.requiresTwoFactor) {
+      return data
+    }
     // access token 仅存内存
-    token.value = res.data.token
-    userInfo.value = res.data.userInfo
+    token.value = data.token
+    userInfo.value = data.userInfo
     // BF-02 修复:refresh token 由后端通过 HttpOnly Cookie 下发,前端无需也无法读取,
     // 不再写入 localStorage。浏览器会自动在后续 /auth/refresh 请求中携带该 Cookie。
+    return data
+  }
+
+  /**
+   * P4.2: 2FA 双因素登录验证。
+   * 用 tempToken + code 换取正式 token,成功后写入 store。
+   */
+  async function loginTotp(loginData: TotpLoginRequest): Promise<LoginResponse> {
+    const res = await totpApi.loginTotp(loginData)
+    const data = res.data
+    token.value = data.token
+    userInfo.value = data.userInfo
+    return data
   }
 
   async function getUserInfo() {
@@ -81,6 +104,7 @@ export const useUserStore = defineStore('user', () => {
     roles,
     hasAnyRole,
     login,
+    loginTotp,
     getUserInfo,
     refreshToken,
     initializeAuth,

@@ -47,4 +47,13 @@ public interface SysUserService extends IService<SysUser> {
      * 更新状态
      */
     void updateStatus(Long id, Integer status);
+
+    /**
+     * P4.3: 用户自己修改密码(校验原密码 + 密码策略 + 密码历史)。
+     *
+     * @param userId      用户ID
+     * @param oldPassword 原密码
+     * @param newPassword 新密码
+     */
+    void changePassword(Long userId, String oldPassword, String newPassword);
 }

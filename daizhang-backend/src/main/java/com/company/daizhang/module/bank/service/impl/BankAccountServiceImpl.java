@@ -5,6 +5,8 @@ import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.company.daizhang.common.crypto.enums.MaskType;
+import com.company.daizhang.common.crypto.util.AesGcmEncryptor;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.PageResult;
@@ -40,6 +42,7 @@ public class BankAccountServiceImpl implements BankAccountService {
     private final SubjectMapper subjectMapper;
     private final AccountSetAccessService accountSetAccessService;
     private final BankTransactionMapper bankTransactionMapper;
+    private final AesGcmEncryptor encryptor;
 
     @Override
     public PageResult<BankAccountVO> pageBankAccounts(BankAccountQueryRequest request) {
@@ -175,6 +178,8 @@ public class BankAccountServiceImpl implements BankAccountService {
     private BankAccountVO convertToVO(BankAccount account) {
         BankAccountVO vo = new BankAccountVO();
         BeanUtil.copyProperties(account, vo);
+        // P4.1: 银行账号脱敏,对外 API 不返回明文
+        vo.setAccountNumber(encryptor.mask(account.getAccountNumber(), MaskType.BANK_ACCOUNT));
         // 账户类型描述
         if (StrUtil.isNotBlank(account.getAccountType())) {
             switch (account.getAccountType()) {

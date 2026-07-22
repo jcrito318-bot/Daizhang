@@ -29,8 +29,10 @@ CREATE TABLE IF NOT EXISTS `backup_record` (
   `created_by_name` VARCHAR(50) DEFAULT NULL COMMENT '创建人名称',
   `created_time` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '删除标志 0-未删除 1-已删除',
-  PRIMARY KEY (`id`),
-  KEY `idx_created_time` (`created_time`),
-  KEY `idx_status` (`status`),
-  KEY `idx_trigger_type` (`trigger_type`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='数据库备份记录表';
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='数据库备份记录表';
+
+-- 索引使用 IF NOT EXISTS 避免与 V1 中已有同名索引冲突(H2 全局索引命名空间)
+CREATE INDEX IF NOT EXISTS `idx_backup_created_time` ON `backup_record`(`created_time`);
+CREATE INDEX IF NOT EXISTS `idx_backup_status` ON `backup_record`(`status`);
+CREATE INDEX IF NOT EXISTS `idx_backup_trigger_type` ON `backup_record`(`trigger_type`);

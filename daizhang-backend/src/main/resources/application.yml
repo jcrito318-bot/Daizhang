@@ -124,12 +124,18 @@ app:
     # 最多保留的备份份数(超出则清理最旧的)
     max-keep: ${BACKUP_MAX_KEEP:30}
   # P4.1 敏感字段 AES-GCM 加密配置
-  # secret-key:32 字节(256 位)的 base64 编码密钥,必须通过环境变量 CRYPTO_SECRET_KEY 注入
-  # 启动时若 enabled=true 且 secret-key 为空,启动失败
-  # 生成命令:openssl rand -base64 32
+  # 密钥解析优先级:secret-key(base64) > aes-key(明文32字节) > 内置默认开发密钥(WARN)
+  # 生产环境务必通过环境变量 CRYPTO_SECRET_KEY(推荐,base64)或 AES_KEY(明文32字节)注入自定义密钥
+  # 生成 base64 密钥命令:openssl rand -base64 32
   crypto:
     enabled: ${CRYPTO_ENABLED:true}
-    secret-key: ${CRYPTO_SECRET_KEY:}
+    # base64 编码密钥,优先级高于 aes-key,生产环境推荐
+    # 默认开发密钥 base64(对应明文 "daizhang_dev_aes_key_32bytes!!_X" 共 32 字节)
+    secret-key: ${CRYPTO_SECRET_KEY:ZGFpemhhbmdfZGV2X2Flc19rZXlfMzJieXRlcyEhX1g=}
+    # GCM 推荐 12 字节 IV(NIST SP 800-38D)
+    iv-length: 12
+    # GCM 认证标签 128 位(16 字节)
+    tag-length: 128
   # P4.2 / P4.3 安全策略配置
   security:
     # 2FA 临时 token 有效期(秒),仅用于登录后 2FA 验证阶段
@@ -142,6 +148,8 @@ app:
     password-expire-days: ${PASSWORD_EXPIRE_DAYS:90}
     # 密码历史校验深度(不能与最近 N 次密码相同)
     password-history-depth: ${PASSWORD_HISTORY_DEPTH:5}
+    # 密码策略开关(false 时跳过强度与历史校验,仅用于调试)
+    password-policy-enabled: ${PASSWORD_POLICY_ENABLED:true}
 
 # Knife4j配置
 # B-021 修复:默认关闭,生产环境不暴露 API 文档。

@@ -21,6 +21,7 @@ import com.company.daizhang.module.system.entity.SysUserRole;
 import com.company.daizhang.module.system.mapper.SysRoleMapper;
 import com.company.daizhang.module.system.mapper.SysUserMapper;
 import com.company.daizhang.module.system.mapper.SysUserRoleMapper;
+import com.company.daizhang.module.system.security.service.PasswordPolicyService;
 import com.company.daizhang.module.system.service.SysUserService;
 import com.company.daizhang.module.system.vo.UserVO;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +30,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -47,6 +49,7 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     private final SysRoleMapper roleMapper;
     private final PasswordEncoder passwordEncoder;
     private final UserAccountSetMapper userAccountSetMapper;
+    private final PasswordPolicyService passwordPolicyService;
 
     // 手机号正则
     private static final Pattern PHONE_PATTERN = Pattern.compile("^1[3-9]\\d{9}$");
@@ -111,10 +114,8 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
             throw new BusinessException(ErrorCode.PARAM_ERROR, "密码不能为空");
         }
         
-        // 业务校验：密码长度不能少于6位
-        if (request.getPassword().length() < 6) {
-            throw new BusinessException(ErrorCode.USER_PASSWORD_TOO_SHORT);
-        }
+        // P4.3: 调用密码策略校验密码强度(长度>=8 + 大小写+数字 + 非弱密码 + 不与用户名相同)
+        passwordPolicyService.validatePassword(request.getPassword(), request.getUsername());
         
         // 业务校验：手机号格式校验
         if (StrUtil.isNotBlank(request.getPhone())) {
@@ -166,6 +167,8 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         if (user.getStatus() == null) {
             user.setStatus(1);
         }
+        // P4.3: 记录初始改密时间,用于密码过期判定
+        user.setPasswordChangedAt(LocalDateTime.now());
         this.save(user);
         
         // 保存用户角色关联
@@ -319,17 +322,24 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
             throw new BusinessException(ErrorCode.PARAM_ERROR, "新密码不能为空");
         }
         
-        // 业务校验：密码长度不能少于6位
-        if (newPassword.length() < 6) {
-            throw new BusinessException(ErrorCode.USER_PASSWORD_TOO_SHORT);
-        }
-        
         SysUser user = this.getById(id);
         if (user == null) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND);
         }
-        
+
+        // P4.3: 调用密码策略校验密码强度(管理员重置不校验历史,仅校验强度)
+        passwordPolicyService.validatePassword(newPassword, user.getUsername());
+
+        // P4.3: 将旧密码 hash 存入密码历史
+        if (StrUtil.isNotBlank(user.getPassword())) {
+            passwordPolicyService.recordPasswordHistory(id, user.getPassword());
+        }
+
         user.setPassword(passwordEncoder.encode(newPassword));
+        // P4.3: 更新改密时间,重置密码过期状态与锁定状态
+        user.setPasswordChangedAt(LocalDateTime.now());
+        user.setLoginFailCount(0);
+        user.setLockedUntil(null);
         this.updateById(user);
         
         log.info("重置密码成功，用户ID: {}", id);
@@ -376,7 +386,43 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
 
         log.info("更新用户状态成功，用户ID: {}, 状态: {}", id, status);
     }
-    
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void changePassword(Long userId, String oldPassword, String newPassword) {
+        if (userId == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED.getCode(), "未登录");
+        }
+        if (StrUtil.isBlank(oldPassword)) {
+            throw new BusinessException(ErrorCode.OLD_PASSWORD_INCORRECT.getCode(), "原密码不能为空");
+        }
+        if (StrUtil.isBlank(newPassword)) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR, "新密码不能为空");
+        }
+
+        SysUser user = this.getById(userId);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND);
+        }
+
+        // 校验原密码
+        if (!passwordEncoder.matches(oldPassword, user.getPassword())) {
+            throw new BusinessException(ErrorCode.OLD_PASSWORD_INCORRECT);
+        }
+
+        // P4.3: 校验新密码强度 + 密码历史(不能与最近 N 次相同)
+        passwordPolicyService.validatePasswordWithHistory(userId, newPassword, user.getUsername());
+
+        // P4.3: 将旧密码 hash 存入密码历史
+        passwordPolicyService.recordPasswordHistory(userId, user.getPassword());
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        user.setPasswordChangedAt(LocalDateTime.now());
+        this.updateById(user);
+
+        log.info("用户修改密码成功,用户ID: {}", userId);
+    }
+
     private void saveUserRoles(Long userId, List<Long> roleIds) {
         for (Long roleId : roleIds) {
             SysUserRole userRole = new SysUserRole();

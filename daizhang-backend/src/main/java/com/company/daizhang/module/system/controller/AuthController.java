@@ -3,14 +3,22 @@ package com.company.daizhang.module.system.controller;
 import cn.hutool.core.util.StrUtil;
 import com.company.daizhang.common.config.SecurityUserDetails;
 import com.company.daizhang.common.config.TokenBlacklist;
+import com.company.daizhang.common.exception.BusinessException;
+import com.company.daizhang.common.exception.ErrorCode;
 import com.company.daizhang.common.result.Result;
 import com.company.daizhang.common.utils.JwtUtils;
+import com.company.daizhang.common.utils.SecurityUtils;
+import com.company.daizhang.module.system.dto.ChangePasswordRequest;
 import com.company.daizhang.module.system.dto.LoginRequest;
 import com.company.daizhang.module.system.dto.LoginResponse;
 import com.company.daizhang.module.system.dto.LogoutRequest;
+import com.company.daizhang.module.system.dto.TotpLoginRequest;
 import com.company.daizhang.module.system.entity.LoginLog;
+import com.company.daizhang.module.system.security.service.LoginAttemptService;
+import com.company.daizhang.module.system.security.service.PasswordPolicyService;
 import com.company.daizhang.module.system.service.LoginLogService;
 import com.company.daizhang.module.system.service.SysUserService;
+import com.company.daizhang.module.system.totp.service.TotpService;
 import com.company.daizhang.module.system.vo.UserVO;
 import io.jsonwebtoken.Claims;
 import io.swagger.v3.oas.annotations.Operation;
@@ -55,6 +63,15 @@ public class AuthController {
 
     @Autowired
     private TokenBlacklist tokenBlacklist;
+
+    @Autowired
+    private TotpService totpService;
+
+    @Autowired
+    private LoginAttemptService loginAttemptService;
+
+    @Autowired
+    private PasswordPolicyService passwordPolicyService;
 
     /**
      * BF-02 修复:refresh token 通过 HttpOnly + Secure + SameSite=Strict Cookie 下发,
@@ -146,14 +163,45 @@ public class AuthController {
                                        HttpServletResponse httpResponse) {
         String clientIp = getClientIp(httpRequest);
         String userAgent = httpRequest.getHeader("User-Agent");
+        String username = request.getUsername();
+
+        // P4.3: 登录前检查账户是否被锁定(15 分钟内失败 >= 阈值)
+        if (loginAttemptService.isLocked(username)) {
+            int remaining = loginAttemptService.getRemainingAttempts(username);
+            log.warn("用户 {} 登录被锁定(剩余尝试次数 {})", username, remaining);
+            saveLoginLog(username, null, 1, 0, clientIp, userAgent, "账户已锁定");
+            LoginResponse locked = new LoginResponse();
+            locked.setRemainingAttempts(0);
+            return Result.error(ErrorCode.USER_ACCOUNT_LOCKED.getCode(),
+                    "账户已被锁定,请稍后再试", locked);
+        }
+
         try {
             Authentication authentication = authenticationManager.authenticate(
-                    new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword())
+                    new UsernamePasswordAuthenticationToken(username, request.getPassword())
             );
 
             SecurityContextHolder.getContext().setAuthentication(authentication);
-
             SecurityUserDetails userDetails = (SecurityUserDetails) authentication.getPrincipal();
+
+            // P4.3: 登录成功,清除失败记录
+            loginAttemptService.recordSuccess(username);
+
+            // P4.2: 检查用户是否启用 2FA
+            if (totpService.isTwoFactorEnabled(userDetails.getUserId())) {
+                // 启用 2FA:不签发正式 token,返回临时 token(5 分钟),前端引导输入验证码
+                String tempToken = jwtUtils.generateTotpTempToken(userDetails.getUserId(), userDetails.getUsername());
+                LoginResponse resp = new LoginResponse();
+                resp.setRequiresTwoFactor(true);
+                resp.setTempToken(tempToken);
+                // 记录日志:密码验证通过,等待 2FA
+                saveLoginLog(username, userDetails.getUserId(), 1, 1, clientIp, userAgent, "密码验证通过,等待2FA");
+                return Result.success("需要双因素认证", resp);
+            }
+
+            // P4.3: 检查密码是否过期(签发 token 但提示前端改密)
+            boolean expired = passwordPolicyService.isPasswordExpired(userDetails.getUserId());
+
             String token = jwtUtils.generateToken(userDetails.getUserId(), userDetails.getUsername());
             String refreshToken = jwtUtils.generateRefreshToken(userDetails.getUserId(), userDetails.getUsername());
 
@@ -165,20 +213,98 @@ public class AuthController {
             response.setToken(token);
             // 不再在 body 中返回 refreshToken(向后兼容:字段保留为 null,旧前端读到 null 不会崩)
             response.setRefreshToken(null);
+            response.setRequiresTwoFactor(false);
+            response.setPasswordExpired(expired);
 
             // 从数据库查询完整用户信息
             UserVO userVO = sysUserService.getUserById(userDetails.getUserId());
             response.setUserInfo(userVO);
 
             // 记录登录成功日志(原代码从未调用LoginLogService.saveLog,导致sys_login_log表永远为空)
-            saveLoginLog(request.getUsername(), userDetails.getUserId(), 1, 1, clientIp, userAgent, "登录成功");
+            saveLoginLog(username, userDetails.getUserId(), 1, 1, clientIp, userAgent, "登录成功");
             return Result.success("登录成功", response);
         } catch (Exception e) {
             log.error("登录失败: {}", e.getMessage());
+            // P4.3: 记录失败尝试
+            loginAttemptService.recordFailure(username, clientIp);
+            int remaining = loginAttemptService.getRemainingAttempts(username);
             // 记录登录失败日志,userId为null(认证未通过)
-            saveLoginLog(request.getUsername(), null, 1, 0, clientIp, userAgent, "用户名或密码错误");
-            return Result.error(401, "用户名或密码错误");
+            saveLoginLog(username, null, 1, 0, clientIp, userAgent, "用户名或密码错误");
+            LoginResponse failResp = new LoginResponse();
+            failResp.setRemainingAttempts(remaining);
+            String msg = remaining > 0
+                    ? "用户名或密码错误,剩余尝试次数 " + remaining
+                    : "账户已被锁定,请稍后再试";
+            int code = remaining > 0 ? 401 : ErrorCode.USER_ACCOUNT_LOCKED.getCode();
+            return Result.error(code, msg, failResp);
         }
+    }
+
+    @PostMapping("/login/totp")
+    @Operation(summary = "2FA 双因素登录验证")
+    public Result<LoginResponse> loginTotp(@Valid @RequestBody TotpLoginRequest request,
+                                           HttpServletRequest httpRequest,
+                                           HttpServletResponse httpResponse) {
+        String clientIp = getClientIp(httpRequest);
+        String userAgent = httpRequest.getHeader("User-Agent");
+
+        // 校验临时 token
+        Claims claims;
+        try {
+            claims = jwtUtils.validateToken(request.getTempToken());
+        } catch (Exception e) {
+            return Result.error(ErrorCode.TWO_FACTOR_TEMP_TOKEN_INVALID.getCode(),
+                    "临时令牌无效或已过期");
+        }
+        if (!"totp-temp".equals(claims.get("type", String.class))) {
+            return Result.error(ErrorCode.TWO_FACTOR_TEMP_TOKEN_INVALID.getCode(),
+                    "临时令牌类型错误");
+        }
+
+        Long userId = claims.get("userId", Long.class);
+        String username = claims.getSubject();
+        if (userId == null) {
+            return Result.error(ErrorCode.TWO_FACTOR_TEMP_TOKEN_INVALID.getCode(),
+                    "临时令牌无效");
+        }
+
+        // 验证 TOTP code(优先验证 6 位码,失败再验证备用码)
+        boolean codeOk = totpService.verifyCode(userId, request.getCode());
+        if (!codeOk) {
+            codeOk = totpService.verifyBackupCode(userId, request.getCode());
+        }
+        if (!codeOk) {
+            saveLoginLog(username, userId, 1, 0, clientIp, userAgent, "2FA验证码错误");
+            return Result.error(ErrorCode.TWO_FACTOR_CODE_INVALID.getCode(), "双因素验证码错误");
+        }
+
+        // 2FA 验证通过,签发正式 token + refresh token
+        String token = jwtUtils.generateToken(userId, username);
+        String refreshToken = jwtUtils.generateRefreshToken(userId, username);
+        setRefreshTokenCookie(httpResponse, refreshToken);
+
+        // 检查密码是否过期
+        boolean expired = passwordPolicyService.isPasswordExpired(userId);
+
+        LoginResponse response = new LoginResponse();
+        response.setToken(token);
+        response.setRefreshToken(null);
+        response.setRequiresTwoFactor(false);
+        response.setPasswordExpired(expired);
+
+        UserVO userVO = sysUserService.getUserById(userId);
+        response.setUserInfo(userVO);
+
+        saveLoginLog(username, userId, 1, 1, clientIp, userAgent, "2FA登录成功");
+        return Result.success("登录成功", response);
+    }
+
+    @PostMapping("/change-password")
+    @Operation(summary = "用户修改密码(P4.3)")
+    public Result<Void> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
+        Long userId = SecurityUtils.getCurrentUserIdRequired();
+        sysUserService.changePassword(userId, request.getOldPassword(), request.getNewPassword());
+        return Result.success("密码修改成功", null);
     }
 
     @PostMapping("/refresh")

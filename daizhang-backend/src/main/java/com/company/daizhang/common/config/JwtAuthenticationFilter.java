@@ -47,6 +47,10 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             // 丢失"短 access + 长 refresh"分层失效的安全收益。refresh token 仅可用于 /auth/refresh 端点。
             if (jwtUtils.isRefreshToken(token)) {
                 log.warn("refresh token 被用于业务接口访问,已拒绝: {}", request.getRequestURI());
+            } else if (jwtUtils.isTotpTempToken(token)) {
+                // P4.2: 拒绝 2FA 临时 token 用于业务接口访问。
+                // 临时 token 仅用于 /auth/login/totp 端点完成 2FA 验证,不可访问任何业务接口。
+                log.warn("2FA 临时 token 被用于业务接口访问,已拒绝: {}", request.getRequestURI());
             } else if (tokenBlacklist.contains(token)) {
                 // 黑名单校验:登出时 token 会被加入黑名单,此处拒绝已登出的 token
                 // (JWT 无状态,否则登出后 token 在过期前仍可正常访问所有受保护接口)

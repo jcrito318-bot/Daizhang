@@ -41,6 +41,13 @@ public class JwtUtils {
     @Value("${jwt.refresh-expiration:604800}")
     private Long refreshExpiration;
 
+    /**
+     * P4.2: 2FA 临时 token 有效期(秒),默认 5 分钟。
+     * 仅用于密码验证通过后、2FA 验证之前的中间态,不可用于业务接口。
+     */
+    @Value("${app.security.two-factor-temp-token-expiration:300}")
+    private Long totpTempTokenExpiration;
+
     @PostConstruct
     public void validateSecret() {
         if (secret == null || secret.isEmpty()) {
@@ -100,6 +107,44 @@ public class JwtUtils {
                 .expiration(new Date(System.currentTimeMillis() + refreshExpiration * 1000))
                 .signWith(getSigningKey())
                 .compact();
+    }
+
+    /**
+     * P4.2: 生成 2FA 临时 token,有效期由 app.security.two-factor-temp-token-expiration 配置(默认 5 分钟)。
+     * <p>
+     * 仅用于密码验证通过后、TOTP 验证之前的中间态。claims 中 type=totp-temp,
+     * JwtAuthenticationFilter 会拒绝 type=totp-temp 的 token 用于业务接口访问
+     * (isRefreshToken 仅识别 refresh;temp token 同样不应被当作 access token)。
+     *
+     * @param userId   用户ID
+     * @param username 用户名
+     * @return 临时 token
+     */
+    public String generateTotpTempToken(Long userId, String username) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId", userId);
+        claims.put("username", username);
+        claims.put("type", "totp-temp");
+
+        return Jwts.builder()
+                .claims(claims)
+                .subject(username)
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + totpTempTokenExpiration * 1000))
+                .signWith(getSigningKey())
+                .compact();
+    }
+
+    /**
+     * P4.2: 判断 token 是否为 2FA 临时 token(type=totp-temp)。
+     */
+    public boolean isTotpTempToken(String token) {
+        try {
+            Claims claims = validateToken(token);
+            return "totp-temp".equals(claims.get("type", String.class));
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     public Claims validateToken(String token) {

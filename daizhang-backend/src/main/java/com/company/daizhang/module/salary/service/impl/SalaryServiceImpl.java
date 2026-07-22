@@ -7,6 +7,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.company.daizhang.common.exception.BusinessException;
 import com.company.daizhang.common.exception.ErrorCode;
+import com.company.daizhang.common.crypto.enums.MaskType;
+import com.company.daizhang.common.crypto.util.AesGcmEncryptor;
 import com.company.daizhang.common.result.PageResult;
 import com.company.daizhang.module.accountset.service.AccountSetAccessService;
 import com.company.daizhang.module.salary.dto.*;
@@ -72,6 +74,7 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
     private final VoucherWordMapper voucherWordMapper;
     private final SalaryExportUtil salaryExportUtil;
     private final SalaryFormulaService salaryFormulaService;
+    private final AesGcmEncryptor encryptor;
 
     // ==================== 员工管理 ====================
 
@@ -1078,6 +1081,11 @@ public class SalaryServiceImpl extends ServiceImpl<SalarySheetMapper, SalaryShee
     private EmployeeVO convertEmployeeToVO(Employee employee) {
         EmployeeVO vo = new EmployeeVO();
         BeanUtil.copyProperties(employee, vo);
+
+        // P4.1: 敏感字段脱敏,对外 API 不返回明文(数据库存储密文,读库已解密为明文,此处脱敏后返回前端)
+        vo.setIdCard(encryptor.mask(employee.getIdCard(), MaskType.ID_CARD));
+        vo.setPhone(encryptor.mask(employee.getPhone(), MaskType.PHONE));
+        vo.setBankAccount(encryptor.mask(employee.getBankAccount(), MaskType.BANK_ACCOUNT));
 
         // 查询创建人名称
         if (employee.getCreateBy() != null) {

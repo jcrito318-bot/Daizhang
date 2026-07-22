@@ -93,6 +93,13 @@ public enum ErrorCode {
     USER_PHONE_INVALID(4005, "手机号格式不正确"),
     USER_EMAIL_INVALID(4006, "邮箱格式不正确"),
     USER_PASSWORD_TOO_SHORT(4007, "密码长度不能少于6位"),
+    // P4.2 / P4.3 安全策略相关 4040-4059
+    USER_ACCOUNT_LOCKED(4040, "账户已被锁定,请稍后再试"),
+    PASSWORD_EXPIRED(4041, "密码已过期,请修改密码"),
+    TWO_FACTOR_REQUIRED(4042, "需要双因素认证"),
+    TWO_FACTOR_CODE_INVALID(4043, "双因素验证码错误"),
+    TWO_FACTOR_TEMP_TOKEN_INVALID(4044, "双因素临时令牌无效或已过期"),
+    OLD_PASSWORD_INCORRECT(4045, "原密码不正确"),
     ROLE_NOT_FOUND(4010, "角色不存在"),
     ROLE_CODE_DUPLICATE(4011, "角色编码已存在"),
     ROLE_HAS_USERS(4012, "该角色已被分配给用户，无法删除"),

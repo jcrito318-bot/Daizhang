@@ -9,7 +9,13 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * 代账系统应用入口
  */
 @SpringBootApplication
-@MapperScan("com.company.daizhang.module.*.mapper")
+// 扫描 mapper 接口:
+//   module.*.mapper        匹配一级子包(如 module.voucher.mapper)
+//   module.*.*.mapper      匹配二级子包(如 module.system.totp.mapper / module.system.security.mapper / module.system.backup.mapper)
+@MapperScan({
+        "com.company.daizhang.module.*.mapper",
+        "com.company.daizhang.module.*.*.mapper"
+})
 @EnableScheduling
 public class DaizhangApplication {
 

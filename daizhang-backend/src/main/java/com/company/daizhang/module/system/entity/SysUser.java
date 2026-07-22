@@ -3,7 +3,9 @@ package com.company.daizhang.module.system.entity;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.company.daizhang.common.BaseEntity;
+import com.company.daizhang.common.annotation.FieldEncrypt;
 import com.company.daizhang.common.crypto.annotation.EncryptedField;
+import com.company.daizhang.common.crypto.enums.MaskType;
 import com.company.daizhang.common.crypto.mybatis.EncryptedStringTypeHandler;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -28,10 +30,11 @@ public class SysUser extends BaseEntity {
     private String realName;
 
     /**
-     * 手机号 (P4.1: AES-GCM 加密存储,读库自动解密)
+     * 手机号 (P4.1: AES-GCM 加密存储,读库自动解密;对外展示脱敏)
      */
     @TableField(typeHandler = EncryptedStringTypeHandler.class)
     @EncryptedField("用户手机号")
+    @FieldEncrypt(maskType = MaskType.PHONE)
     private String phone;
 
     private String email;
