@@ -135,7 +135,7 @@
         <!-- 空状态 -->
         <el-empty
           v-if="!executing && visibleSteps.length === 0"
-          description="选择账套与期间后,点击"开始执行"启动结账向导"
+          description="选择账套与期间后,点击「开始执行」启动结账向导"
           :image-size="80"
         />
       </div>
