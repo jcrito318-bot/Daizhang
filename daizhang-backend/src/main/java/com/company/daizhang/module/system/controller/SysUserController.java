@@ -64,9 +64,9 @@ public class SysUserController {
     @Operation(summary = "创建用户")
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
-    public Result<Void> create(@Valid @RequestBody UserCreateRequest request) {
-        userService.createUser(request);
-        return Result.success();
+    public Result<Long> create(@Valid @RequestBody UserCreateRequest request) {
+        Long id = userService.createUser(request);
+        return Result.success(id);
     }
 
     @Operation(summary = "更新用户")

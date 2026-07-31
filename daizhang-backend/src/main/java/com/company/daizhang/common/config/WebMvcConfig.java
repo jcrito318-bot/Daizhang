@@ -16,7 +16,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
      * 生产环境应通过环境变量 CORS_ALLOWED_ORIGINS 显式指定受信前端域名。
      * 默认仅放开本地开发常用端口,避免"任意源+携带凭证"的CSRF/凭证泄露风险。
      */
-    @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:3000,http://localhost:8080}")
+    @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:3000,http://localhost:4173,http://localhost:8080}")
     private String allowedOrigins;
 
     @Override

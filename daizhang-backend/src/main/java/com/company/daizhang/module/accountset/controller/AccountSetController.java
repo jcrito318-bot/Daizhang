@@ -57,9 +57,9 @@ public class AccountSetController {
     
     @Operation(summary = "创建账套")
     @PostMapping
-    public Result<Void> create(@Valid @RequestBody AccountSetCreateRequest request) {
-        accountSetService.createAccountSet(request);
-        return Result.success();
+    public Result<Long> create(@Valid @RequestBody AccountSetCreateRequest request) {
+        Long id = accountSetService.createAccountSet(request);
+        return Result.success(id);
     }
     
     @Operation(summary = "更新账套")

@@ -36,7 +36,7 @@ public class SecurityConfig {
      * 此处仅做启动期安全校验,实际跨域生效在 WebMvcConfig#addCorsMappings。
      * 默认仅放开本地开发常用端口;生产环境应通过环境变量 CORS_ALLOWED_ORIGINS 显式指定受信域名。
      */
-    @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:3000,http://localhost:8080}")
+    @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:3000,http://localhost:4173,http://localhost:8080}")
     private String allowedOrigins;
 
     @PostConstruct

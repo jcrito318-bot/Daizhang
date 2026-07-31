@@ -26,7 +26,7 @@ public interface SysUserService extends IService<SysUser> {
     /**
      * 创建用户
      */
-    void createUser(UserCreateRequest request);
+    Long createUser(UserCreateRequest request);
     
     /**
      * 更新用户

@@ -114,7 +114,7 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void createUser(UserCreateRequest request) {
+    public Long createUser(UserCreateRequest request) {
         // 业务校验：用户名不能为空
         if (StrUtil.isBlank(request.getUsername())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "用户名不能为空");
@@ -195,6 +195,8 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
         }
         
         log.info("创建用户成功，用户名: {}", user.getUsername());
+
+        return user.getId();
     }
     
     @Override

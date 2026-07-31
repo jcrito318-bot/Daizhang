@@ -33,7 +33,7 @@ public interface AccountSetService extends IService<AccountSet> {
     /**
      * 创建账套
      */
-    void createAccountSet(AccountSetCreateRequest request);
+    Long createAccountSet(AccountSetCreateRequest request);
     
     /**
      * 更新账套

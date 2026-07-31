@@ -123,7 +123,7 @@ public class AccountSetServiceImpl extends ServiceImpl<AccountSetMapper, Account
     
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public void createAccountSet(AccountSetCreateRequest request) {
+    public Long createAccountSet(AccountSetCreateRequest request) {
         // 业务校验：账套编码不能为空
         if (StrUtil.isBlank(request.getCode())) {
             throw new BusinessException(ErrorCode.PARAM_ERROR, "账套编码不能为空");
@@ -168,6 +168,8 @@ public class AccountSetServiceImpl extends ServiceImpl<AccountSetMapper, Account
 
         // 自动初始化账套
         initAccountSet(accountSet.getId());
+
+        return accountSet.getId();
     }
     
     @Override
