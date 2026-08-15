@@ -5,34 +5,43 @@
         <div class="card-header">
           <span>{{ isEdit ? '编辑凭证' : '新增凭证' }}</span>
           <div>
+            <el-button @click="handlePrint">
+              <el-icon><Printer /></el-icon>打印
+            </el-button>
+            <el-button @click="handleExport">
+              <el-icon><Download /></el-icon>导出
+            </el-button>
             <el-button v-if="!isEdit" type="success" @click="handleOpenTemplateDialog">
               <el-icon><DocumentCopy /></el-icon>从模板创建
             </el-button>
             <el-button @click="handleBack">返回</el-button>
             <el-button type="primary" :loading="submitLoading" @click="handleSubmit">保存</el-button>
             <el-tooltip content="Ctrl+S 保存 | Ctrl+Enter 新增行 | Alt+T 模板 | Esc 返回" placement="bottom">
-              <el-icon class="shortcut-hint-icon"><QuestionFilled /></el-icon>
+              <el-icon class="shortcut-hint-icon no-print"><QuestionFilled /></el-icon>
             </el-tooltip>
           </div>
         </div>
       </template>
 
-      <el-form ref="formRef" :model="form" :rules="formRules" label-width="100px" class="voucher-header">
+      <!-- 凭证表头信息 -->
+      <el-form ref="formRef" :model="form" :rules="formRules" label-width="80px" class="voucher-header">
         <el-row :gutter="20">
           <el-col :span="6">
-            <el-form-item label="凭证日期" prop="voucherDate">
+            <el-form-item label="日期" prop="voucherDate">
               <el-date-picker
                 v-model="form.voucherDate"
                 type="date"
                 placeholder="请选择日期"
                 value-format="YYYY-MM-DD"
                 style="width: 100%"
+                class="screen-only"
               />
+              <span class="print-only">{{ form.voucherDate }}</span>
             </el-form-item>
           </el-col>
           <el-col :span="6">
             <el-form-item label="凭证字" prop="voucherWordId">
-              <el-select v-model="form.voucherWordId" placeholder="请选择凭证字" style="width: 100%">
+              <el-select v-model="form.voucherWordId" placeholder="请选择凭证字" style="width: 100%" class="screen-only">
                 <el-option
                   v-for="word in voucherWordList"
                   :key="word.id"
@@ -40,11 +49,13 @@
                   :value="word.id"
                 />
               </el-select>
+              <span class="print-only">{{ getVoucherWordName(form.voucherWordId) }}</span>
             </el-form-item>
           </el-col>
           <el-col :span="6">
             <el-form-item label="附件数">
-              <el-input-number v-model="form.attachmentCount" :min="0" style="width: 100%" />
+              <el-input-number v-model="form.attachmentCount" :min="0" style="width: 100%" class="screen-only" />
+              <span class="print-only">{{ form.attachmentCount || 0 }} 张</span>
             </el-form-item>
           </el-col>
           <el-col :span="6">
@@ -60,87 +71,149 @@
         </el-row>
       </el-form>
 
-      <el-table :data="form.details" border class="detail-table">
-        <el-table-column label="行号" width="60" align="center">
-          <template #default="{ $index }">{{ $index + 1 }}</template>
-        </el-table-column>
-        <el-table-column label="摘要" min-width="200">
-          <template #default="{ row }">
-            <el-autocomplete
-              v-model="row.summary"
-              :fetch-suggestions="fetchAbstractSuggestions"
-              placeholder="请输入摘要(支持常用摘要搜索)"
-              :class="{ 'field-error': detailTouched && !row.summary }"
-              clearable
-              style="width: 100%"
-              @blur="markDetailTouched"
-              @select="(item: AbstractSuggestionItem) => handleAbstractSelect(row, item)"
-            >
-              <template #default="{ item }">
-                <div class="abstract-suggestion">
-                  <span class="abstract-text">{{ item.value }}</span>
-                  <span v-if="item.useCount > 0" class="abstract-count">使用 {{ item.useCount }} 次</span>
-                </div>
-              </template>
-            </el-autocomplete>
-            <div v-if="detailTouched && !row.summary" class="inline-error">请输入摘要</div>
-          </template>
-        </el-table-column>
-        <el-table-column label="科目" min-width="250">
-          <template #default="{ row }">
-            <el-select
-              v-model="row.subjectId"
-              placeholder="请选择科目"
-              filterable
-              style="width: 100%"
-              :class="{ 'field-error': detailTouched && !row.subjectId }"
-              @blur="markDetailTouched"
-            >
-              <el-option
-                v-for="subject in flatSubjects"
-                :key="subject.id"
-                :label="`${subject.subjectCode} ${subject.subjectName}`"
-                :value="subject.id"
-              />
-            </el-select>
-            <div v-if="detailTouched && !row.subjectId" class="inline-error">请选择科目</div>
-          </template>
-        </el-table-column>
-        <el-table-column label="借方金额" width="150" align="right">
-          <template #default="{ row }">
-            <el-input-number
-              v-model="row.debit"
-              :min="0"
-              :precision="2"
-              :controls="false"
-              style="width: 100%"
-              @change="handleDebitChange(row)"
-            />
-          </template>
-        </el-table-column>
-        <el-table-column label="贷方金额" width="150" align="right">
-          <template #default="{ row }">
-            <el-input-number
-              v-model="row.credit"
-              :min="0"
-              :precision="2"
-              :controls="false"
-              style="width: 100%"
-              @change="handleCreditChange(row)"
-            />
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="80" align="center">
-          <template #default="{ $index }">
-            <el-button link type="danger" @click="handleRemoveRow($index)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+      <!-- 记账凭证表格 -->
+      <div class="voucher-table-wrapper">
+        <table class="voucher-table">
+          <thead>
+            <tr>
+              <th rowspan="2" class="col-summary">摘要</th>
+              <th rowspan="2" class="col-subject">总账科目</th>
+              <th rowspan="2" class="col-subject">明细科目</th>
+              <th :colspan="AMOUNT_LABELS.length" class="amount-header debit-header">借方金额</th>
+              <th :colspan="AMOUNT_LABELS.length" class="amount-header credit-header">贷方金额</th>
+              <th rowspan="2" class="col-action no-print">操作</th>
+            </tr>
+            <tr>
+              <th v-for="(label, i) in AMOUNT_LABELS" :key="'dh' + i" class="digit-th">{{ label }}</th>
+              <th v-for="(label, i) in AMOUNT_LABELS" :key="'ch' + i" class="digit-th">{{ label }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="(row, index) in form.details" :key="index">
+              <!-- 数据行 -->
+              <tr class="data-row">
+                <td class="summary-cell">
+                  <div class="screen-only">
+                    <el-autocomplete
+                      v-model="row.summary"
+                      :fetch-suggestions="fetchAbstractSuggestions"
+                      placeholder="请输入摘要"
+                      :class="{ 'field-error': detailTouched && !row.summary }"
+                      clearable
+                      style="width: 100%"
+                      @blur="markDetailTouched"
+                      @select="(item: AbstractSuggestionItem) => handleAbstractSelect(row, item)"
+                    >
+                      <template #default="{ item }">
+                        <div class="abstract-suggestion">
+                          <span class="abstract-text">{{ item.value }}</span>
+                          <span v-if="item.useCount > 0" class="abstract-count">使用 {{ item.useCount }} 次</span>
+                        </div>
+                      </template>
+                    </el-autocomplete>
+                  </div>
+                  <span class="print-only">{{ row.summary }}</span>
+                </td>
+                <td class="subject-cell">
+                  <div class="screen-only">
+                    <el-select
+                      v-model="row.generalSubjectId"
+                      placeholder="选择总账科目"
+                      filterable
+                      style="width: 100%"
+                      :class="{ 'field-error': detailTouched && !row.generalSubjectId }"
+                      @change="handleGeneralSubjectChange(row)"
+                      @blur="markDetailTouched"
+                    >
+                      <el-option
+                        v-for="subject in generalSubjects"
+                        :key="subject.id"
+                        :label="`${subject.subjectCode} ${subject.subjectName}`"
+                        :value="subject.id"
+                      />
+                    </el-select>
+                  </div>
+                  <span class="print-only">{{ getSubjectName(row.generalSubjectId) }}</span>
+                </td>
+                <td class="subject-cell">
+                  <div class="screen-only">
+                    <el-select
+                      v-model="row.detailSubjectId"
+                      placeholder="选择明细科目"
+                      filterable
+                      clearable
+                      style="width: 100%"
+                      @change="handleDetailSubjectChange(row)"
+                    >
+                      <el-option
+                        v-for="subject in getDetailSubjectOptions(row.generalSubjectId)"
+                        :key="subject.id"
+                        :label="`${subject.subjectCode} ${subject.subjectName}`"
+                        :value="subject.id"
+                      />
+                    </el-select>
+                  </div>
+                  <span class="print-only">{{ row.detailSubjectId ? getSubjectName(row.detailSubjectId) : '' }}</span>
+                </td>
+                <!-- 借方金额 11 位格 -->
+                <td v-for="(d, i) in getDebitDigits(row)" :key="'dd' + i" class="digit-cell">{{ d }}</td>
+                <!-- 贷方金额 11 位格 -->
+                <td v-for="(d, i) in getCreditDigits(row)" :key="'cd' + i" class="digit-cell">{{ d }}</td>
+                <td class="action-cell no-print">
+                  <el-button link type="danger" @click="handleRemoveRow(index)">删除</el-button>
+                </td>
+              </tr>
+              <!-- 金额输入行（打印时隐藏） -->
+              <tr class="amount-input-row no-print">
+                <td colspan="3" class="input-row-label">
+                  <el-icon><EditPen /></el-icon>
+                  第 {{ index + 1 }} 行 金额输入
+                </td>
+                <td :colspan="AMOUNT_LABELS.length" class="amount-input-cell">
+                  <el-input
+                    v-model="row.debitInput"
+                    placeholder="借方金额（如 5000 或 5000.56）"
+                    size="small"
+                    @input="handleDebitInput(row)"
+                  >
+                    <template #prepend>借</template>
+                  </el-input>
+                </td>
+                <td :colspan="AMOUNT_LABELS.length" class="amount-input-cell">
+                  <el-input
+                    v-model="row.creditInput"
+                    placeholder="贷方金额（如 5000 或 5000.56）"
+                    size="small"
+                    @input="handleCreditInput(row)"
+                  >
+                    <template #prepend>贷</template>
+                  </el-input>
+                </td>
+                <td></td>
+              </tr>
+            </template>
+            <!-- 合计行 -->
+            <tr class="total-row">
+              <td :colspan="3" class="total-label">合 计</td>
+              <td v-for="(d, i) in totalDebitDigits" :key="'td' + i" class="digit-cell total-digit">{{ d }}</td>
+              <td v-for="(d, i) in totalCreditDigits" :key="'tc' + i" class="digit-cell total-digit">{{ d }}</td>
+              <td class="no-print"></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
-      <div class="add-row-btn">
+      <div class="add-row-btn no-print">
         <el-button type="primary" link @click="handleAddRow">
           <el-icon><Plus /></el-icon>增加一行
         </el-button>
+      </div>
+
+      <!-- 内联错误提示 -->
+      <div v-if="detailTouched" class="inline-error no-print" style="text-align: center; padding: 4px 0;">
+        <span v-if="form.details.some(d => !d.summary && (d.generalSubjectId || d.debit > 0 || d.credit > 0))">
+          请填写所有有效分录的摘要
+        </span>
       </div>
     </el-card>
 
@@ -180,10 +253,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { DocumentCopy, Plus, QuestionFilled } from '@element-plus/icons-vue'
+import { DocumentCopy, Plus, QuestionFilled, Printer, Download, EditPen } from '@element-plus/icons-vue'
+import * as XLSX from 'xlsx'
 import { voucherApi, templateApi, abstractApi } from '@/api/voucher'
 import { subjectApi } from '@/api/subject'
 import { useAppStore } from '@/stores/app'
@@ -204,6 +278,37 @@ interface AbstractSuggestionItem extends AbstractLibraryVO {
   value: string
 }
 
+/**
+ * 凭证分录行:在 VoucherDetailRequest 基础上扩展总账/明细科目选择和金额输入文本
+ */
+interface VoucherDetailRow extends VoucherDetailRequest {
+  /** 总账科目 ID (一级科目) */
+  generalSubjectId: number
+  /** 明细科目 ID (子科目, 可为 0 表示无明细) */
+  detailSubjectId: number
+  /** 借方金额输入文本(保留原始输入以判断是否有小数点) */
+  debitInput: string
+  /** 贷方金额输入文本 */
+  creditInput: string
+}
+
+type VoucherForm = Omit<VoucherCreateRequest, 'details'> & {
+  details: VoucherDetailRow[]
+  attachmentCount?: number
+}
+
+/**
+ * 金额位格标签:亿、千万、百万、十万、万、千、百、十、元、角、分
+ * "元" 位于第 9 位(索引 8)
+ */
+const AMOUNT_LABELS = ['亿', '千', '百', '十', '万', '千', '百', '十', '元', '角', '分']
+/** "元" 在位数组中的索引 */
+const YUAN_INDEX = 8
+/** "角" 在位数组中的索引 */
+const JIAO_INDEX = 9
+/** "分" 在位数组中的索引 */
+const FEN_INDEX = 10
+
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
@@ -214,20 +319,16 @@ const isEdit = ref(false)
 const editId = ref<number>(0)
 const voucherWordList = ref<VoucherWordVO[]>([])
 const subjectTree = ref<SubjectVO[]>([])
-// 分录校验标记:用户尝试提交后置为true,显示字段级错误
 const detailTouched = ref(false)
-// 表单是否有未保存的改动(用于离开提示)
 const formDirty = ref(false)
+/** 打印模式标记:为 true 时隐藏交互控件,显示纯文本 */
+const printing = ref(false)
 
-// 凭证模板选择对话框状态
 const templateDialogVisible = ref(false)
 const templateList = ref<VoucherTemplateVO[]>([])
 const templateLoading = ref(false)
 const selectedTemplateId = ref<number>(0)
 
-// 常用摘要追踪:记录"摘要文本 -> 摘要库ID"的映射,
-// 用于凭证保存时调用 incrementUse 累计使用次数。
-// key 为摘要文本,value 为摘要库 ID。手动输入(非从下拉选择)的摘要不会出现在此映射中。
 const abstractIdMap = new Map<string, number>()
 
 const flatSubjects = computed(() => {
@@ -244,7 +345,10 @@ const flatSubjects = computed(() => {
   return result
 })
 
-const form = reactive<VoucherCreateRequest & { attachmentCount?: number }>({
+/** 总账科目:科目树顶层(一级科目) */
+const generalSubjects = computed(() => subjectTree.value)
+
+const form = reactive<VoucherForm>({
   accountSetId: appStore.currentAccountSetId || 0,
   voucherWordId: undefined,
   voucherDate: new Date().toISOString().slice(0, 10),
@@ -254,7 +358,6 @@ const form = reactive<VoucherCreateRequest & { attachmentCount?: number }>({
   details: [createEmptyDetail()]
 })
 
-// 表头字段校验规则:Element Plus 表单内联红色错误提示
 const formRules: FormRules = {
   voucherDate: [{ required: true, message: '请选择凭证日期', trigger: 'change' }],
   voucherWordId: [{ required: true, message: '请选择凭证字', trigger: 'change' }]
@@ -264,13 +367,116 @@ const totalDebit = computed(() => form.details.reduce((sum, d) => sum + (d.debit
 const totalCredit = computed(() => form.details.reduce((sum, d) => sum + (d.credit || 0), 0))
 const isBalanced = computed(() => Math.abs(totalDebit.value - totalCredit.value) < 0.01 && totalDebit.value > 0)
 
-function createEmptyDetail(): VoucherDetailRequest {
+// ==================== 金额位格解析 ====================
+
+/**
+ * 将金额输入文本解析为 11 位数字数组
+ *
+ * 规则:
+ * - 无小数点:整数部分从"元"(索引8)开始向前对应,"角""分"留空
+ *   例: "5000" → ['', '', '', '', '', '5', '0', '0', '0', '', '']
+ * - 有小数点:整数部分同上,小数部分对应"角"(索引9)、"分"(索引10)
+ *   例: "5000.56" → [..., '5', '0', '0', '0', '5', '6']
+ *   例: "5000.5"  → [..., '5', '0', '0', '0', '5', '']
+ */
+function parseAmountToDigits(input: string | undefined): string[] {
+  const digits = Array(11).fill('')
+  if (!input || input.trim() === '') return digits
+
+  const str = input.trim()
+  const hasDecimal = str.includes('.')
+
+  let intPart: string
+  let decPart: string = ''
+
+  if (hasDecimal) {
+    const dotIdx = str.indexOf('.')
+    intPart = str.substring(0, dotIdx)
+    decPart = str.substring(dotIdx + 1)
+  } else {
+    intPart = str
+  }
+
+  // 仅保留数字字符
+  intPart = intPart.replace(/[^0-9]/g, '')
+  decPart = decPart.replace(/[^0-9]/g, '')
+
+  // 整数部分:从"元"(索引8)开始向前填充
+  let idx = YUAN_INDEX
+  for (let i = intPart.length - 1; i >= 0 && idx >= 0; i--) {
+    digits[idx] = intPart[i]
+    idx--
+  }
+
+  // 小数部分:仅当存在小数点时才填充"角""分"
+  if (hasDecimal) {
+    if (decPart.length >= 1) digits[JIAO_INDEX] = decPart[0]
+    if (decPart.length >= 2) digits[FEN_INDEX] = decPart[1]
+  }
+
+  return digits
+}
+
+/**
+ * 将数字转换为输入文本(用于编辑模式加载已有凭证)
+ * - 整数:返回不带小数点的字符串,如 5000 → "5000"
+ * - 有小数:返回带小数点的字符串,如 5000.5 → "5000.5"
+ */
+function numberToInput(num: number): string {
+  if (!num || num === 0) return ''
+  const rounded = Math.round(num * 100) / 100
+  if (Number.isInteger(rounded)) {
+    return String(rounded)
+  }
+  return rounded.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
+}
+
+/**
+ * 将数字转换为 11 位数字数组(用于合计行)
+ */
+function numberToDigits(num: number): string[] {
+  if (!num || num === 0) return Array(11).fill('')
+  return parseAmountToDigits(numberToInput(num))
+}
+
+/** 获取行借方金额位格 */
+function getDebitDigits(row: VoucherDetailRow): string[] {
+  return parseAmountToDigits(row.debitInput)
+}
+
+/** 获取行贷方金额位格 */
+function getCreditDigits(row: VoucherDetailRow): string[] {
+  return parseAmountToDigits(row.creditInput)
+}
+
+/** 合计行借方位格 */
+const totalDebitDigits = computed(() => numberToDigits(totalDebit.value))
+/** 合计行贷方位格 */
+const totalCreditDigits = computed(() => numberToDigits(totalCredit.value))
+
+/**
+ * 清理金额输入:仅保留数字和一个小数点
+ */
+function sanitizeAmountInput(val: string): string {
+  let result = val.replace(/[^\d.]/g, '')
+  const firstDot = result.indexOf('.')
+  if (firstDot !== -1) {
+    result = result.substring(0, firstDot + 1) + result.substring(firstDot + 1).replace(/\./g, '')
+  }
+  return result
+}
+
+function createEmptyDetail(): VoucherDetailRow {
   return {
     lineNo: 0,
     summary: '',
     subjectId: 0,
+    generalSubjectId: 0,
+    detailSubjectId: 0,
     debit: 0,
-    credit: 0
+    credit: 0,
+    debitInput: '',
+    creditInput: ''
   }
 }
 
@@ -278,18 +484,100 @@ function formatAmount(val: number): string {
   return val.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-function handleDebitChange(row: VoucherDetailRequest) {
-  formDirty.value = true
-  if (row.debit && row.debit > 0) {
-    row.credit = 0
-  }
+function getSubjectName(id: number): string {
+  if (!id) return ''
+  const subject = flatSubjects.value.find(s => s.id === id)
+  return subject ? `${subject.subjectCode} ${subject.subjectName}` : ''
 }
 
-function handleCreditChange(row: VoucherDetailRequest) {
-  formDirty.value = true
-  if (row.credit && row.credit > 0) {
-    row.debit = 0
+function getVoucherWordName(id?: number): string {
+  if (!id) return ''
+  const word = voucherWordList.value.find(w => w.id === id)
+  return word ? word.name : ''
+}
+
+/**
+ * 获取总账科目下的所有后代科目(用于明细科目下拉)
+ */
+function getDetailSubjectOptions(generalSubjectId: number): SubjectVO[] {
+  if (!generalSubjectId) return []
+  const subject = flatSubjects.value.find(s => s.id === generalSubjectId)
+  if (!subject) return []
+  const result: SubjectVO[] = []
+  function collect(items?: SubjectVO[]) {
+    if (!items) return
+    for (const item of items) {
+      result.push(item)
+      if (item.children) collect(item.children)
+    }
   }
+  collect(subject.children)
+  return result
+}
+
+// ==================== 科目选择 ====================
+
+function handleGeneralSubjectChange(row: VoucherDetailRow) {
+  // 切换总账科目时清空明细科目
+  row.detailSubjectId = 0
+  row.subjectId = row.generalSubjectId || 0
+  formDirty.value = true
+}
+
+function handleDetailSubjectChange(row: VoucherDetailRow) {
+  row.subjectId = row.detailSubjectId || row.generalSubjectId || 0
+  formDirty.value = true
+}
+
+/**
+ * 根据已加载的 subjectId 反查总账/明细科目
+ */
+function setSubjectFromId(row: VoucherDetailRow, subjectId: number) {
+  const subject = flatSubjects.value.find(s => s.id === subjectId)
+  if (!subject) {
+    row.generalSubjectId = 0
+    row.detailSubjectId = 0
+    return
+  }
+  // 一级科目:直接作为总账科目
+  if (subject.level === 1 || subject.parentId === 0) {
+    row.generalSubjectId = subject.id
+    row.detailSubjectId = 0
+    return
+  }
+  // 子科目:向上查找一级祖先
+  let current = subject
+  while (current.parentId && current.parentId !== 0) {
+    const parent = flatSubjects.value.find(s => s.id === current.parentId)
+    if (!parent) break
+    current = parent
+  }
+  row.generalSubjectId = current.id
+  row.detailSubjectId = subject.id
+}
+
+// ==================== 金额输入 ====================
+
+function handleDebitInput(row: VoucherDetailRow) {
+  row.debitInput = sanitizeAmountInput(row.debitInput || '')
+  const num = parseFloat(row.debitInput) || 0
+  row.debit = num
+  if (num > 0) {
+    row.credit = 0
+    row.creditInput = ''
+  }
+  formDirty.value = true
+}
+
+function handleCreditInput(row: VoucherDetailRow) {
+  row.creditInput = sanitizeAmountInput(row.creditInput || '')
+  const num = parseFloat(row.creditInput) || 0
+  row.credit = num
+  if (num > 0) {
+    row.debit = 0
+    row.debitInput = ''
+  }
+  formDirty.value = true
 }
 
 function markDetailTouched() {
@@ -310,11 +598,57 @@ function handleRemoveRow(index: number) {
   form.details.splice(index, 1)
 }
 
+// ==================== 打印 / 导出 ====================
+
+function handleAfterPrint() {
+  printing.value = false
+}
+
+function handlePrint() {
+  printing.value = true
+  nextTick(() => {
+    window.print()
+    // 兜底:若 afterprint 事件未触发,延时重置
+    setTimeout(() => {
+      printing.value = false
+    }, 1000)
+  })
+}
+
+function handleExport() {
+  const validDetails = form.details.filter(d => d.subjectId && (d.debit > 0 || d.credit > 0))
+  if (validDetails.length === 0) {
+    ElMessage.warning('暂无可导出的分录数据')
+    return
+  }
+
+  const exportData: Array<Record<string, string | number>> = validDetails.map((d, i) => ({
+    '行号': i + 1,
+    '摘要': d.summary || '',
+    '总账科目': getSubjectName(d.generalSubjectId),
+    '明细科目': d.detailSubjectId ? getSubjectName(d.detailSubjectId) : '',
+    '借方金额': d.debit || 0,
+    '贷方金额': d.credit || 0
+  }))
+
+  exportData.push({
+    '行号': '',
+    '摘要': '合计',
+    '总账科目': '',
+    '明细科目': '',
+    '借方金额': totalDebit.value,
+    '贷方金额': totalCredit.value
+  })
+
+  const ws = XLSX.utils.json_to_sheet(exportData)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, '凭证')
+  const fileName = `凭证_${form.voucherDate || 'export'}.xlsx`
+  XLSX.writeFile(wb, fileName)
+}
+
 // ==================== 凭证模板 ====================
 
-/**
- * 打开"从模板创建"对话框,加载当前账套的模板列表
- */
 async function handleOpenTemplateDialog() {
   const accountSetId = appStore.currentAccountSetId || 0
   if (!accountSetId) {
@@ -337,17 +671,10 @@ async function handleOpenTemplateDialog() {
   }
 }
 
-/**
- * 模板列表行选中变化时记录选中ID
- */
 function handleTemplateCurrentChange(row: VoucherTemplateVO | null) {
   selectedTemplateId.value = row ? row.id : 0
 }
 
-/**
- * 应用选中的模板:调用 apply 接口获取模板明细,
- * 根据 subjectCode 在已加载的科目树中解析 subjectId,填充表单。
- */
 async function handleApplyTemplate() {
   if (!selectedTemplateId.value) {
     ElMessage.warning('请先选择一个模板')
@@ -361,26 +688,27 @@ async function handleApplyTemplate() {
       return
     }
 
-    // 根据 subjectCode 解析 subjectId(从已加载的科目树中查找)
     const unresolvedCodes: string[] = []
-    const newDetails: VoucherDetailRequest[] = template.details.map((d, idx) => {
+    const newDetails: VoucherDetailRow[] = template.details.map((d, idx) => {
       const subject = flatSubjects.value.find(s => s.subjectCode === d.subjectCode)
       if (!subject) {
         unresolvedCodes.push(d.subjectCode)
       }
-      // 同步追踪摘要(若模板摘要与摘要库中某条文本一致,后续保存时会自动累计使用次数;
-      // 这里不做强匹配,以用户在 autocomplete 中的选择为准)
-      return {
-        lineNo: idx + 1,
-        summary: d.summary || template.summary || '',
-        subjectId: subject ? subject.id : 0,
-        debit: d.debitAmount || 0,
-        credit: d.creditAmount || 0
+      const row = createEmptyDetail()
+      row.lineNo = idx + 1
+      row.summary = d.summary || template.summary || ''
+      row.debit = d.debitAmount || 0
+      row.credit = d.creditAmount || 0
+      row.debitInput = numberToInput(d.debitAmount || 0)
+      row.creditInput = numberToInput(d.creditAmount || 0)
+      if (subject) {
+        setSubjectFromId(row, subject.id)
+        row.subjectId = subject.id
       }
+      return row
     })
 
     form.details = newDetails
-    // 若模板有摘要,同时填充到分录摘要(已在上方 map 中处理)
     formDirty.value = true
     templateDialogVisible.value = false
 
@@ -394,9 +722,6 @@ async function handleApplyTemplate() {
   }
 }
 
-/**
- * 从 URL query 参数加载模板(由凭证模板页"应用"按钮跳转过来时携带 templateId)
- */
 async function loadTemplateFromQuery(templateId: number) {
   try {
     const res = await templateApi.apply(templateId)
@@ -406,19 +731,23 @@ async function loadTemplateFromQuery(templateId: number) {
       return
     }
     const unresolvedCodes: string[] = []
-    // 等待科目树加载后再解析 subjectId(由调用方保证 subjectTree 已加载)
-    const newDetails: VoucherDetailRequest[] = template.details.map((d, idx) => {
+    const newDetails: VoucherDetailRow[] = template.details.map((d, idx) => {
       const subject = flatSubjects.value.find(s => s.subjectCode === d.subjectCode)
       if (!subject) {
         unresolvedCodes.push(d.subjectCode)
       }
-      return {
-        lineNo: idx + 1,
-        summary: d.summary || template.summary || '',
-        subjectId: subject ? subject.id : 0,
-        debit: d.debitAmount || 0,
-        credit: d.creditAmount || 0
+      const row = createEmptyDetail()
+      row.lineNo = idx + 1
+      row.summary = d.summary || template.summary || ''
+      row.debit = d.debitAmount || 0
+      row.credit = d.creditAmount || 0
+      row.debitInput = numberToInput(d.debitAmount || 0)
+      row.creditInput = numberToInput(d.creditAmount || 0)
+      if (subject) {
+        setSubjectFromId(row, subject.id)
+        row.subjectId = subject.id
       }
+      return row
     })
     form.details = newDetails
     formDirty.value = true
@@ -434,9 +763,6 @@ async function loadTemplateFromQuery(templateId: number) {
 
 // ==================== 常用摘要库 ====================
 
-/**
- * el-autocomplete fetch-suggestions 回调:模糊搜索常用摘要,按使用次数 DESC 排序
- */
 async function fetchAbstractSuggestions(queryString: string, cb: (items: AbstractSuggestionItem[]) => void) {
   const accountSetId = appStore.currentAccountSetId || 0
   if (!accountSetId) {
@@ -456,11 +782,7 @@ async function fetchAbstractSuggestions(queryString: string, cb: (items: Abstrac
   }
 }
 
-/**
- * 用户从摘要下拉中选择一条时,记录摘要文本 -> 摘要库ID 的映射,
- * 用于凭证保存时调用 incrementUse 累计使用次数
- */
-function handleAbstractSelect(_row: VoucherDetailRequest, item: AbstractSuggestionItem) {
+function handleAbstractSelect(_row: VoucherDetailRow, item: AbstractSuggestionItem) {
   if (item.id) {
     abstractIdMap.set(item.abstractText, item.id)
   }
@@ -470,14 +792,12 @@ function handleBack() {
   router.push('/voucher')
 }
 
-// 标记有任意分录填写了内容(用于判断是否需要离开提示)
 function hasAnyDetailFilled(): boolean {
   return form.details.some(d => d.summary || d.subjectId || (d.debit && d.debit > 0) || (d.credit && d.credit > 0))
 }
 
 async function handleSubmit() {
   detailTouched.value = true
-  // 表头校验
   if (!formRef.value) return
   await formRef.value.validate(async (valid) => {
     if (!valid) {
@@ -491,7 +811,6 @@ async function handleSubmit() {
       return
     }
 
-    // 校验有效分录的摘要
     const missingSummary = validDetails.find(d => !d.summary)
     if (missingSummary) {
       ElMessage.warning('请填写所有分录的摘要')
@@ -506,16 +825,22 @@ async function handleSubmit() {
     const date = new Date(form.voucherDate)
     form.year = date.getFullYear()
     form.month = date.getMonth() + 1
-    // 仅新建模式下用当前账套覆盖;编辑模式保留 loadVoucherDetail 已设置的原始账套归属
     if (!isEdit.value) {
       form.accountSetId = appStore.currentAccountSetId || 0
     }
 
     submitLoading.value = true
     try {
+      // 提交时剥离前端扩展字段,仅保留后端需要的 VoucherDetailRequest
       const submitData = {
         ...form,
-        details: validDetails.map((d, i) => ({ ...d, lineNo: i + 1 }))
+        details: validDetails.map((d, i) => ({
+          lineNo: i + 1,
+          summary: d.summary,
+          subjectId: d.subjectId,
+          debit: d.debit,
+          credit: d.credit
+        }))
       }
       if (isEdit.value) {
         await voucherApi.update(editId.value, submitData)
@@ -525,9 +850,6 @@ async function handleSubmit() {
         ElMessage.success('创建成功')
       }
 
-      // 凭证保存成功后,对使用了摘要库的摘要累计使用次数(异步执行,不阻塞跳转)
-      // 仅对从下拉选择的摘要(存在于 abstractIdMap 中)调用 incrementUse,
-      // 同一摘要文本只计一次。
       const usedAbstractIds = new Set<number>()
       for (const detail of validDetails) {
         const abstractId = abstractIdMap.get(detail.summary)
@@ -537,7 +859,7 @@ async function handleSubmit() {
       }
       usedAbstractIds.forEach(id => {
         abstractApi.incrementUse(id).catch(() => {
-          // 使用次数累计失败不影响主流程,静默忽略
+          // 使用次数累计失败不影响主流程
         })
       })
 
@@ -563,25 +885,26 @@ async function loadVoucherDetail(id: number) {
     form.year = voucher.year
     form.month = voucher.month
     form.attachmentCount = voucher.attachmentCount
-    form.details = voucher.details.map(d => ({
-      lineNo: d.lineNo,
-      summary: d.summary,
-      subjectId: d.subjectId,
-      auxiliaryId: d.auxiliaryId || undefined,
-      debit: d.debit,
-      credit: d.credit,
-      quantity: d.quantity || undefined,
-      unitPrice: d.unitPrice || undefined
-    }))
-    // 编辑模式加载完数据后,dirty 重置(尚未改动)
+    form.details = voucher.details.map(d => {
+      const row = createEmptyDetail()
+      row.lineNo = d.lineNo
+      row.summary = d.summary
+      row.subjectId = d.subjectId
+      row.debit = d.debit
+      row.credit = d.credit
+      row.debitInput = numberToInput(d.debit)
+      row.creditInput = numberToInput(d.credit)
+      // 根据已加载的 subjectId 反查总账/明细科目
+      setSubjectFromId(row, d.subjectId)
+      return row
+    })
     formDirty.value = false
   } catch {
     // handled by interceptor
   }
 }
 
-// 凭证录入快捷键(P5.3.1):Ctrl+S 保存 / Ctrl+Enter 新增分录行 / Alt+T 打开模板 / Esc 返回
-// 仅绑定带修饰键的组合或 Escape,避免与 el-select/el-input-number 的 Enter/方向键行为冲突
+// 凭证录入快捷键
 useShortcut([
   { ctrl: true, key: 's', handler: () => handleSubmit() },
   { ctrl: true, key: 'enter', handler: () => handleAddRow() },
@@ -589,13 +912,12 @@ useShortcut([
   { key: 'escape', handler: () => handleBack() }
 ])
 
-// 离开页面提示:有未保存改动时弹窗确认
+// 离开页面提示
 onBeforeRouteLeave(async (_to, _from, next) => {
   if (!formDirty.value) {
     next()
     return
   }
-  // 仅在有实际填写内容时才提示,避免空表单也弹窗
   if (!hasAnyDetailFilled() && !isEdit.value) {
     next()
     return
@@ -613,11 +935,9 @@ onBeforeRouteLeave(async (_to, _from, next) => {
 })
 
 onMounted(async () => {
-  const id = route.params.id as string
-  if (id) {
-    await loadVoucherDetail(Number(id))
-  }
+  window.addEventListener('afterprint', handleAfterPrint)
 
+  // 先加载科目树和凭证字,再加载凭证详情(以便反查科目)
   const accountSetId = appStore.currentAccountSetId || form.accountSetId
   if (accountSetId) {
     try {
@@ -632,12 +952,19 @@ onMounted(async () => {
     }
   }
 
-  // 从 URL query 加载模板(由凭证模板页"应用"按钮跳转过来时携带 templateId)
-  // 必须在科目树加载完成后执行,以便根据 subjectCode 解析 subjectId
+  const id = route.params.id as string
+  if (id) {
+    await loadVoucherDetail(Number(id))
+  }
+
   const templateId = route.query.templateId as string
   if (templateId) {
     await loadTemplateFromQuery(Number(templateId))
   }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('afterprint', handleAfterPrint)
 })
 </script>
 
@@ -652,7 +979,6 @@ onMounted(async () => {
   align-items: center;
 }
 
-// 快捷键提示图标:与保存按钮垂直对齐
 .shortcut-hint-icon {
   margin-left: 8px;
   font-size: 16px;
@@ -686,8 +1012,132 @@ onMounted(async () => {
   }
 }
 
-.detail-table {
+// ==================== 凭证表格 ====================
+
+.voucher-table-wrapper {
+  overflow-x: auto;
   margin-bottom: 8px;
+}
+
+.voucher-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  background: #fff;
+
+  th,
+  td {
+    border: 1px solid #dcdfe6;
+    padding: 4px 6px;
+    text-align: center;
+    vertical-align: middle;
+  }
+
+  thead th {
+    background: #f5f7fa;
+    font-weight: 600;
+    color: #303133;
+    white-space: nowrap;
+  }
+
+  .col-summary {
+    min-width: 140px;
+    width: 140px;
+  }
+
+  .col-subject {
+    min-width: 160px;
+    width: 160px;
+  }
+
+  .col-action {
+    width: 60px;
+  }
+
+  // 金额列组表头
+  .amount-header {
+    background: #ecf5ff;
+    color: #409eff;
+
+    &.credit-header {
+      background: #f0f9eb;
+      color: #67c23a;
+    }
+  }
+
+  // 位格表头(亿千百十万千百十元角分)
+  .digit-th {
+    width: 28px;
+    min-width: 28px;
+    max-width: 28px;
+    padding: 4px 2px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  // 位格单元格
+  .digit-cell {
+    width: 28px;
+    min-width: 28px;
+    max-width: 28px;
+    padding: 6px 2px;
+    text-align: center;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .summary-cell {
+    text-align: left;
+    padding: 4px;
+  }
+
+  .subject-cell {
+    padding: 4px;
+  }
+
+  .action-cell {
+    text-align: center;
+  }
+}
+
+// 金额输入行
+.amount-input-row {
+  background: #fafafa;
+
+  .input-row-label {
+    text-align: right;
+    padding-right: 12px;
+    font-size: 12px;
+    color: #909399;
+    white-space: nowrap;
+
+    .el-icon {
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+  }
+
+  .amount-input-cell {
+    padding: 4px 6px;
+  }
+}
+
+// 合计行
+.total-row {
+  background: #f5f7fa;
+  font-weight: 600;
+
+  .total-label {
+    text-align: center;
+    font-size: 14px;
+    letter-spacing: 4px;
+  }
+
+  .total-digit {
+    background: #fdf6ec;
+    color: #e6a23c;
+  }
 }
 
 .add-row-btn {
@@ -695,7 +1145,6 @@ onMounted(async () => {
   padding: 8px 0;
 }
 
-// 字段内联错误提示
 .inline-error {
   color: #f56c6c;
   font-size: 12px;
@@ -703,7 +1152,6 @@ onMounted(async () => {
   padding-top: 4px;
 }
 
-// 字段错误时输入框红色边框
 :deep(.field-error) {
   .el-input__wrapper,
   .el-select__wrapper {
@@ -711,7 +1159,6 @@ onMounted(async () => {
   }
 }
 
-// 摘要下拉建议项样式
 .abstract-suggestion {
   display: flex;
   justify-content: space-between;
@@ -725,6 +1172,85 @@ onMounted(async () => {
     font-size: 12px;
     color: #909399;
     margin-left: 8px;
+  }
+}
+
+// ==================== 打印/屏幕切换 ====================
+
+.print-only {
+  display: none;
+}
+
+// ==================== 打印样式 ====================
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  .screen-only {
+    display: none !important;
+  }
+
+  .print-only {
+    display: inline !important;
+  }
+
+  .voucher-create-container {
+    padding: 0;
+  }
+
+  :deep(.el-card) {
+    border: none;
+    box-shadow: none;
+  }
+
+  :deep(.el-card__header) {
+    border-bottom: 1px solid #333;
+  }
+
+  .voucher-header {
+    margin-bottom: 8px;
+  }
+
+  .voucher-table-wrapper {
+    overflow: visible;
+  }
+
+  .voucher-table {
+    width: 100%;
+    font-size: 11px;
+
+    th,
+    td {
+      border: 1px solid #333 !important;
+      padding: 3px 2px;
+    }
+
+    thead th {
+      background: #f0f0f0 !important;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    .digit-th {
+      width: 24px;
+      min-width: 24px;
+      max-width: 24px;
+    }
+
+    .digit-cell {
+      width: 24px;
+      min-width: 24px;
+      max-width: 24px;
+      font-size: 12px;
+    }
+
+    .total-row .total-digit {
+      background: #f9f9f9 !important;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
   }
 }
 </style>
