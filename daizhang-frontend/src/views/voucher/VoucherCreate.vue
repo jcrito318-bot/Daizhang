@@ -253,7 +253,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { DocumentCopy, Plus, QuestionFilled, Printer, Download, EditPen } from '@element-plus/icons-vue'
@@ -262,6 +262,13 @@ import { voucherApi, templateApi, abstractApi } from '@/api/voucher'
 import { subjectApi } from '@/api/subject'
 import { useAppStore } from '@/stores/app'
 import { useShortcut } from '@/composables/useShortcut'
+import {
+  AMOUNT_LABELS,
+  parseAmountToDigits,
+  numberToInput,
+  numberToDigits,
+  sanitizeAmountInput
+} from '@/utils/amountDigits'
 import type {
   VoucherCreateRequest,
   VoucherDetailRequest,
@@ -297,18 +304,6 @@ type VoucherForm = Omit<VoucherCreateRequest, 'details'> & {
   attachmentCount?: number
 }
 
-/**
- * 金额位格标签:亿、千万、百万、十万、万、千、百、十、元、角、分
- * "元" 位于第 9 位(索引 8)
- */
-const AMOUNT_LABELS = ['亿', '千', '百', '十', '万', '千', '百', '十', '元', '角', '分']
-/** "元" 在位数组中的索引 */
-const YUAN_INDEX = 8
-/** "角" 在位数组中的索引 */
-const JIAO_INDEX = 9
-/** "分" 在位数组中的索引 */
-const FEN_INDEX = 10
-
 const route = useRoute()
 const router = useRouter()
 const appStore = useAppStore()
@@ -321,8 +316,6 @@ const voucherWordList = ref<VoucherWordVO[]>([])
 const subjectTree = ref<SubjectVO[]>([])
 const detailTouched = ref(false)
 const formDirty = ref(false)
-/** 打印模式标记:为 true 时隐藏交互控件,显示纯文本 */
-const printing = ref(false)
 
 const templateDialogVisible = ref(false)
 const templateList = ref<VoucherTemplateVO[]>([])
@@ -367,77 +360,7 @@ const totalDebit = computed(() => form.details.reduce((sum, d) => sum + (d.debit
 const totalCredit = computed(() => form.details.reduce((sum, d) => sum + (d.credit || 0), 0))
 const isBalanced = computed(() => Math.abs(totalDebit.value - totalCredit.value) < 0.01 && totalDebit.value > 0)
 
-// ==================== 金额位格解析 ====================
-
-/**
- * 将金额输入文本解析为 11 位数字数组
- *
- * 规则:
- * - 无小数点:整数部分从"元"(索引8)开始向前对应,"角""分"留空
- *   例: "5000" → ['', '', '', '', '', '5', '0', '0', '0', '', '']
- * - 有小数点:整数部分同上,小数部分对应"角"(索引9)、"分"(索引10)
- *   例: "5000.56" → [..., '5', '0', '0', '0', '5', '6']
- *   例: "5000.5"  → [..., '5', '0', '0', '0', '5', '']
- */
-function parseAmountToDigits(input: string | undefined): string[] {
-  const digits = Array(11).fill('')
-  if (!input || input.trim() === '') return digits
-
-  const str = input.trim()
-  const hasDecimal = str.includes('.')
-
-  let intPart: string
-  let decPart: string = ''
-
-  if (hasDecimal) {
-    const dotIdx = str.indexOf('.')
-    intPart = str.substring(0, dotIdx)
-    decPart = str.substring(dotIdx + 1)
-  } else {
-    intPart = str
-  }
-
-  // 仅保留数字字符
-  intPart = intPart.replace(/[^0-9]/g, '')
-  decPart = decPart.replace(/[^0-9]/g, '')
-
-  // 整数部分:从"元"(索引8)开始向前填充
-  let idx = YUAN_INDEX
-  for (let i = intPart.length - 1; i >= 0 && idx >= 0; i--) {
-    digits[idx] = intPart[i]
-    idx--
-  }
-
-  // 小数部分:仅当存在小数点时才填充"角""分"
-  if (hasDecimal) {
-    if (decPart.length >= 1) digits[JIAO_INDEX] = decPart[0]
-    if (decPart.length >= 2) digits[FEN_INDEX] = decPart[1]
-  }
-
-  return digits
-}
-
-/**
- * 将数字转换为输入文本(用于编辑模式加载已有凭证)
- * - 整数:返回不带小数点的字符串,如 5000 → "5000"
- * - 有小数:返回带小数点的字符串,如 5000.5 → "5000.5"
- */
-function numberToInput(num: number): string {
-  if (!num || num === 0) return ''
-  const rounded = Math.round(num * 100) / 100
-  if (Number.isInteger(rounded)) {
-    return String(rounded)
-  }
-  return rounded.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
-}
-
-/**
- * 将数字转换为 11 位数字数组(用于合计行)
- */
-function numberToDigits(num: number): string[] {
-  if (!num || num === 0) return Array(11).fill('')
-  return parseAmountToDigits(numberToInput(num))
-}
+// ==================== 金额位格(使用 @/utils/amountDigits) ====================
 
 /** 获取行借方金额位格 */
 function getDebitDigits(row: VoucherDetailRow): string[] {
@@ -453,18 +376,6 @@ function getCreditDigits(row: VoucherDetailRow): string[] {
 const totalDebitDigits = computed(() => numberToDigits(totalDebit.value))
 /** 合计行贷方位格 */
 const totalCreditDigits = computed(() => numberToDigits(totalCredit.value))
-
-/**
- * 清理金额输入:仅保留数字和一个小数点
- */
-function sanitizeAmountInput(val: string): string {
-  let result = val.replace(/[^\d.]/g, '')
-  const firstDot = result.indexOf('.')
-  if (firstDot !== -1) {
-    result = result.substring(0, firstDot + 1) + result.substring(firstDot + 1).replace(/\./g, '')
-  }
-  return result
-}
 
 function createEmptyDetail(): VoucherDetailRow {
   return {
@@ -600,19 +511,9 @@ function handleRemoveRow(index: number) {
 
 // ==================== 打印 / 导出 ====================
 
-function handleAfterPrint() {
-  printing.value = false
-}
-
 function handlePrint() {
-  printing.value = true
-  nextTick(() => {
-    window.print()
-    // 兜底:若 afterprint 事件未触发,延时重置
-    setTimeout(() => {
-      printing.value = false
-    }, 1000)
-  })
+  // CSS @media print 自动隐藏 .no-print / .screen-only 元素,显示 .print-only 元素
+  window.print()
 }
 
 function handleExport() {
@@ -935,9 +836,13 @@ onBeforeRouteLeave(async (_to, _from, next) => {
 })
 
 onMounted(async () => {
-  window.addEventListener('afterprint', handleAfterPrint)
+  // 编辑模式:先加载凭证详情获取正确的 accountSetId,再加载科目树和凭证字
+  // (避免编辑其他账套的凭证时科目树从当前账套加载,导致 setSubjectFromId 找不到科目)
+  const id = route.params.id as string
+  if (id) {
+    await loadVoucherDetail(Number(id))
+  }
 
-  // 先加载科目树和凭证字,再加载凭证详情(以便反查科目)
   const accountSetId = appStore.currentAccountSetId || form.accountSetId
   if (accountSetId) {
     try {
@@ -947,24 +852,23 @@ onMounted(async () => {
       ])
       voucherWordList.value = wordRes.data
       subjectTree.value = subjectRes.data
+      // 科目树加载完成后,对编辑模式下的分录重新解析总账/明细科目
+      if (isEdit.value) {
+        for (const row of form.details) {
+          if (row.subjectId) {
+            setSubjectFromId(row, row.subjectId)
+          }
+        }
+      }
     } catch {
       // handled by interceptor
     }
-  }
-
-  const id = route.params.id as string
-  if (id) {
-    await loadVoucherDetail(Number(id))
   }
 
   const templateId = route.query.templateId as string
   if (templateId) {
     await loadTemplateFromQuery(Number(templateId))
   }
-})
-
-onUnmounted(() => {
-  window.removeEventListener('afterprint', handleAfterPrint)
 })
 </script>
 
